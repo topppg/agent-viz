@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from agent_viz import focus
 from agent_viz.cli import main, token_for, write_private
 from agent_viz.server import Collector
 from agent_viz.store import Store
@@ -173,6 +174,80 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(response.readline().decode().strip(), "event: reset")
         response.close()
         connection.close()
+
+    def focus_post(self, headers=None, body=None):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        return self.request(
+            "POST",
+            "/api/runs/run/focus",
+            body,
+            {"Origin": origin, "X-Agent-Viz": "focus", **(headers or {})},
+        )
+
+    def test_focus_lookup_is_lazy_and_sdk_runs_are_unsupported(self):
+        self.assertEqual(self.post(json.dumps(self.event()))[0], 200)
+        status, _, data = self.request("GET", "/api/runs/run/focus")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(data), {"available": False, "kind": "unsupported", "label": ""})
+        self.assertEqual(
+            json.loads(self.request("GET", "/api/runs/missing/focus")[2])["kind"], "unsupported"
+        )
+        self.assertEqual(
+            self.request("GET", "/api/runs/run/focus", headers={"Host": "evil.invalid"})[0], 403
+        )
+        self.assertEqual(self.request("GET", "/api/runs/" + "x" * 300 + "/focus")[0], 400)
+        with patch("agent_viz.focus.resolve") as resolve:
+            self.request("GET", "/api/snapshot")
+        resolve.assert_not_called()
+
+    def test_focus_returns_public_target_only(self):
+        target = focus.Target(
+            "resume",
+            "resume",
+            command="claude --resume invented-0000",
+            steps=(focus.Step(("/secret/helper",)),),
+        )
+        with patch("agent_viz.focus.resolve", return_value=target):
+            data = json.loads(self.request("GET", "/api/runs/run/focus")[2])
+        self.assertEqual(
+            data,
+            {
+                "available": True,
+                "kind": "resume",
+                "label": "resume",
+                "command": "claude --resume invented-0000",
+            },
+        )
+
+    def test_focus_post_requires_origin_header_and_no_body(self):
+        target = focus.Target("focus", "cmux", steps=(focus.Step(("/invented/cmux",)),))
+        with (
+            patch("agent_viz.focus.resolve", return_value=target),
+            patch("agent_viz.focus.focus", return_value=True) as perform,
+        ):
+            self.assertEqual(self.focus_post({"X-Agent-Viz": "other"})[0], 403)
+            self.assertEqual(self.focus_post({"Origin": "https://evil.invalid"})[0], 403)
+            self.assertEqual(self.focus_post({"Sec-Fetch-Site": "cross-site"})[0], 403)
+            no_origin = self.request("POST", "/api/runs/run/focus", None, {"X-Agent-Viz": "focus"})
+            self.assertEqual(no_origin[0], 403)
+            self.assertEqual(self.focus_post(body="x")[0], 400)
+            perform.assert_not_called()
+            status, _, data = self.focus_post()
+            self.assertEqual((status, json.loads(data)), (200, {"ok": True}))
+            perform.assert_called_once_with(target)
+        with (
+            patch("agent_viz.focus.resolve", return_value=target),
+            patch("agent_viz.focus.focus", return_value=False),
+        ):
+            status, _, data = self.focus_post()
+            self.assertEqual((status, json.loads(data)), (502, {"error": "could not open the app"}))
+        resume = focus.Target("resume", "resume", command="codex resume x")
+        with (
+            patch("agent_viz.focus.resolve", return_value=resume),
+            patch("agent_viz.focus.focus") as perform,
+        ):
+            self.assertEqual(self.focus_post()[0], 409)
+            perform.assert_not_called()
 
 
 class LocalConfigTests(unittest.TestCase):

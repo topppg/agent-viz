@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import re
 import threading
 import time
 from datetime import datetime, timedelta
@@ -11,11 +12,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from . import focus
 from .model import MAX_EVENT_BYTES, parse_json
 
 STATIC = Path(__file__).parent / "static"
 USAGE_WINDOW_DAYS = 365
 USAGE_REFRESH_SECONDS = 30
+FOCUS_ROUTE = re.compile(r"/api/runs/([^/]{1,768})/focus")
 
 
 class Collector(ThreadingHTTPServer):
@@ -43,6 +46,7 @@ class Collector(ThreadingHTTPServer):
         self._activity: tuple[int, dict] | None = None
         self._usage: tuple[float, dict] | None = None
         self._usage_lock = threading.Lock()
+        self.focus_lock = threading.Lock()
         super().__init__((host, port), Handler)
 
     @property
@@ -131,6 +135,10 @@ class Collector(ThreadingHTTPServer):
             "limited": bool(native.get("limited")),
         }
 
+    def focus_target(self, run_id: str) -> focus.Target:
+        profiles = list(self.monitor.profiles) if self.monitor else []
+        return focus.resolve(self.store.run(run_id), profiles)
+
     def stop(self):
         self.stopping.set()
         self.shutdown()
@@ -184,6 +192,10 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             self._json(403, {"error": "untrusted host or origin"})
             return
+        route = FOCUS_ROUTE.fullmatch(urlsplit(self.path).path)
+        if route:
+            self._focus(unquote(route[1]))
+            return
         if self.path != "/api/events":
             self.close_connection = True
             self._json(404, {"error": "not found"})
@@ -217,13 +229,44 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(200, result)
 
+    def _focus(self, run_id: str):
+        # A custom header forces a CORS preflight, which this server never grants.
+        if not self.headers.get("Origin") or self.headers.get("X-Agent-Viz") != "focus":
+            self.close_connection = True
+            self._json(403, {"error": "same-origin dashboard request required"})
+            return
+        if self.headers.get("Transfer-Encoding") or self.headers.get("Content-Length", "0") != "0":
+            self.close_connection = True
+            self._json(400, {"error": "no request body expected"})
+            return
+        if len(run_id) > 256:
+            self._json(400, {"error": "invalid run"})
+            return
+        with self.server.focus_lock:
+            target = self.server.focus_target(run_id)
+            if target.kind != "focus":
+                self._json(409, {"error": "no running app to open"})
+                return
+            opened = focus.focus(target)
+        if opened:
+            self._json(200, {"ok": True})
+        else:
+            self._json(502, {"error": "could not open the app"})
+
     def do_GET(self):
         if not self._safe_origin():
             self._json(403, {"error": "untrusted host or origin"})
             return
         parsed = urlsplit(self.path)
         path = parsed.path
-        if path == "/api/health":
+        route = FOCUS_ROUTE.fullmatch(path)
+        if route:
+            run_id = unquote(route[1])
+            if len(run_id) > 256:
+                self._json(400, {"error": "invalid run"})
+                return
+            self._json(200, self.server.focus_target(run_id).public())
+        elif path == "/api/health":
             self._json(200, {"ok": True, "service": "agent-viz", "version": 1})
         elif path == "/api/snapshot":
             self._json(200, self.server.snapshot())
