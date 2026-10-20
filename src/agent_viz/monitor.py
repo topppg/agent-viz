@@ -1,12 +1,26 @@
 """Polling bridge from read-only native observations to the local store."""
+
 from __future__ import annotations
 
 import threading
-from .sources import DEFAULT_SCAN_LIMIT, MAX_SCAN_LIMIT, SourceProfile, discover_profiles, scan_profile
+
+from .sources import (
+    DEFAULT_SCAN_LIMIT,
+    MAX_SCAN_LIMIT,
+    SourceProfile,
+    discover_profiles,
+    scan_profile,
+)
 
 
 class Monitor:
-    def __init__(self, profiles: list[SourceProfile] | None = None, store=None, interval: float = 2, limit: int = DEFAULT_SCAN_LIMIT):
+    def __init__(
+        self,
+        profiles: list[SourceProfile] | None = None,
+        store=None,
+        interval: float = 2,
+        limit: int = DEFAULT_SCAN_LIMIT,
+    ):
         if store is None:
             raise ValueError("Monitor requires a store")
         self.automatic = profiles is None
@@ -17,7 +31,12 @@ class Monitor:
         self.errors: dict[str, str] = {}
         self.counts: dict[str, int] = {}
         self.source_stats: list[dict] = []
-        self._public = {"profiles": self.public_profiles(), "source_errors": {}, "source_stats": [], "automatic_discovery": self.automatic}
+        self._public = {
+            "profiles": self.public_profiles(),
+            "source_errors": {},
+            "source_stats": [],
+            "automatic_discovery": self.automatic,
+        }
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -52,15 +71,25 @@ class Monitor:
                 except Exception:
                     counts[profile.id] = 0
                     errors[profile.id] = "Source unavailable or unreadable"
-                    coverage.update(unavailable=True, observations=0, truncated=True,
-                                    discovery_limited=True, scan_limit=self.limit,
-                                    files_seen=0, selected_files=0)
+                    coverage.update(
+                        unavailable=True,
+                        observations=0,
+                        truncated=True,
+                        discovery_limited=True,
+                        scan_limit=self.limit,
+                        files_seen=0,
+                        selected_files=0,
+                    )
                 stats.append(coverage)
             # Publish a complete scan atomically for HTTP readers; no root paths.
             self.profiles = profiles
             self.counts, self.errors, self.source_stats = counts, errors, stats
-            self._public = {"profiles": self.public_profiles(), "source_errors": dict(errors),
-                            "source_stats": [dict(s) for s in stats], "automatic_discovery": self.automatic}
+            self._public = {
+                "profiles": self.public_profiles(),
+                "source_errors": dict(errors),
+                "source_stats": [dict(s) for s in stats],
+                "automatic_discovery": self.automatic,
+            }
         return {"counts": counts, "errors": errors, "source_stats": stats}
 
     def start(self) -> None:
@@ -81,13 +110,17 @@ class Monitor:
             self._thread.join(timeout=max(2, self.interval + 1))
 
     def public_profiles(self) -> list[dict]:
-        return [{"id": p.id, "kind": p.kind, "label": p.label,
-                 "include_text": p.include_text} for p in self.profiles]
+        return [
+            {"id": p.id, "kind": p.kind, "label": p.label, "include_text": p.include_text}
+            for p in self.profiles
+        ]
 
     def public_state(self) -> dict:
         """One complete published scan; no partial discovery lists or root paths."""
         state = self._public
-        return {"profiles": [dict(p) for p in state["profiles"]],
-                "source_errors": dict(state["source_errors"]),
-                "source_stats": [dict(s) for s in state["source_stats"]],
-                "automatic_discovery": state["automatic_discovery"]}
+        return {
+            "profiles": [dict(p) for p in state["profiles"]],
+            "source_errors": dict(state["source_errors"]),
+            "source_stats": [dict(s) for s in state["source_stats"]],
+            "automatic_discovery": state["automatic_discovery"],
+        }

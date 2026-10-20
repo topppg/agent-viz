@@ -1,15 +1,14 @@
 import http.client
 import json
-from pathlib import Path
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from agent_viz.cli import main, token_for, write_private
 from agent_viz.server import Collector
 from agent_viz.store import Store
-
 
 TOKEN = "x" * 40
 
@@ -35,13 +34,29 @@ class ServerTests(unittest.TestCase):
         return result
 
     def event(self):
-        return dict(schema_version=1, event_id="event", session_id="session", run_id="run",
-                    producer_id="producer", sequence=1, occurred_at="2026-10-20T10:00:00Z",
-                    type="run.started", payload={"name": "<script>not executable</script>"})
+        return dict(
+            schema_version=1,
+            event_id="event",
+            session_id="session",
+            run_id="run",
+            producer_id="producer",
+            sequence=1,
+            occurred_at="2026-10-20T10:00:00Z",
+            type="run.started",
+            payload={"name": "<script>not executable</script>"},
+        )
 
     def post(self, raw, token=TOKEN, headers=None):
-        return self.request("POST", "/api/events", raw, {
-            "Content-Type": "application/json", "Authorization": "Bearer " + token, **(headers or {})})
+        return self.request(
+            "POST",
+            "/api/events",
+            raw,
+            {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + token,
+                **(headers or {}),
+            },
+        )
 
     def test_health_assets_and_empty_snapshot(self):
         for path in ("/", "/app.js", "/style.css", "/api/health", "/api/snapshot"):
@@ -73,8 +88,12 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.post(json.dumps(changed))[0], 400)
 
     def test_host_origin_fetch_site_and_no_cors(self):
-        for headers in ({"Host": "evil.invalid"}, {"Origin": "https://evil.invalid"},
-                        {"Origin": "null"}, {"Sec-Fetch-Site": "cross-site"}):
+        for headers in (
+            {"Host": "evil.invalid"},
+            {"Origin": "https://evil.invalid"},
+            {"Origin": "null"},
+            {"Sec-Fetch-Site": "cross-site"},
+        ):
             self.assertEqual(self.request("GET", "/api/snapshot", headers=headers)[0], 403)
             self.assertEqual(self.post(json.dumps(self.event()), headers=headers)[0], 403)
         response = self.request("GET", "/api/health")
@@ -148,9 +167,15 @@ class LocalConfigTests(unittest.TestCase):
 
     def test_discover_label_selection_writes_only_selected_profiles(self):
         from agent_viz.sources import SourceProfile
-        profiles = [SourceProfile("personal", "codex", "Personal", "/example/personal"),
-                    SourceProfile("work", "codex", "Work", "/example/work")]
-        with tempfile.TemporaryDirectory() as folder, patch("agent_viz.cli.discover_profiles", return_value=profiles):
+
+        profiles = [
+            SourceProfile("personal", "codex", "Personal", "/example/personal"),
+            SourceProfile("work", "codex", "Work", "/example/work"),
+        ]
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch("agent_viz.cli.discover_profiles", return_value=profiles),
+        ):
             path = Path(folder) / "profiles.json"
             self.assertEqual(main(["discover", "--label", "Work", "--write-config", str(path)]), 0)
             entries = json.loads(path.read_text())["profiles"]

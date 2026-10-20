@@ -1,12 +1,18 @@
 import json
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from agent_viz.sources import SourceProfile, discover_profiles, load_profiles, scan_profile, scan_inventory
 from agent_viz.monitor import Monitor
+from agent_viz.sources import (
+    SourceProfile,
+    discover_profiles,
+    load_profiles,
+    scan_inventory,
+    scan_profile,
+)
 
 
 class SourcesTests(unittest.TestCase):
@@ -30,29 +36,66 @@ class SourcesTests(unittest.TestCase):
         return path
 
     def codex(self, native="same", parent=None):
-        meta = {"id": native, "timestamp": "2026-10-20T08:00:00Z", "cwd": "/private/deep/project", "base_instructions": "SECRET instructions", "creator_account_id": "SECRET account"}
+        meta = {
+            "id": native,
+            "timestamp": "2026-10-20T08:00:00Z",
+            "cwd": "/private/deep/project",
+            "base_instructions": "SECRET instructions",
+            "creator_account_id": "SECRET account",
+        }
         if parent:
-            meta["source"] = {"subagent": {"thread_spawn": {"parent_thread_id": parent, "agent_path": "PRIVATE"}}}
-        return [{"type": "session_meta", "payload": meta},
-                {"type": "event_msg", "timestamp": "2026-10-20T08:00:01Z", "payload": {"type": "user_message", "message": "SECRET prompt"}},
-                {"type": "response_item", "timestamp": "2026-10-20T08:00:02Z", "payload": {"type": "function_call", "arguments": "SECRET args"}}]
+            meta["source"] = {
+                "subagent": {"thread_spawn": {"parent_thread_id": parent, "agent_path": "PRIVATE"}}
+            }
+        return [
+            {"type": "session_meta", "payload": meta},
+            {
+                "type": "event_msg",
+                "timestamp": "2026-10-20T08:00:01Z",
+                "payload": {"type": "user_message", "message": "SECRET prompt"},
+            },
+            {
+                "type": "response_item",
+                "timestamp": "2026-10-20T08:00:02Z",
+                "payload": {"type": "function_call", "arguments": "SECRET args"},
+            },
+        ]
 
     def claude(self, agent=None):
-        row = {"type": "assistant", "sessionId": "same", "cwd": "/private/deep/project", "timestamp": "2026-10-20T08:00:00Z", "parentUuid": "message-not-agent", "message": {"content": [{"type": "tool_use", "name": "SECRET tool", "input": {"key": "SECRET key"}}], "stop_reason": "tool_use"}}
+        row = {
+            "type": "assistant",
+            "sessionId": "same",
+            "cwd": "/private/deep/project",
+            "timestamp": "2026-10-20T08:00:00Z",
+            "parentUuid": "message-not-agent",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "SECRET tool", "input": {"key": "SECRET key"}}
+                ],
+                "stop_reason": "tool_use",
+            },
+        }
         if agent:
             row.update(isSidechain=True, agentId=agent)
         return [row]
 
     def test_four_profiles_are_independent_and_default_private(self):
         observations = []
-        for kind, name in [("codex", "codex-one"), ("codex", "codex-two"), ("claude", "claude-one"), ("claude", "claude-two")]:
+        for kind, name in [
+            ("codex", "codex-one"),
+            ("codex", "codex-two"),
+            ("claude", "claude-one"),
+            ("claude", "claude-two"),
+        ]:
             profile = self.profile(kind, name)
             self.log(profile, "session.jsonl", self.codex() if kind == "codex" else self.claude())
             observations.extend(scan_profile(profile))
         self.assertEqual(len({row["run_id"] for row in observations}), 4)
         self.assertEqual(len({row["session_id"] for row in observations}), 4)
         self.assertTrue(all(row["state"] == "waiting_tool" for row in observations))
-        self.assertTrue(all(row["health"] == "observed" and row["inferred"] for row in observations))
+        self.assertTrue(
+            all(row["health"] == "observed" and row["inferred"] for row in observations)
+        )
         rendered = json.dumps(observations)
         self.assertNotIn("SECRET", rendered)
         self.assertNotIn("/private", rendered)
@@ -89,6 +132,7 @@ class SourcesTests(unittest.TestCase):
 
     def test_old_codex_collection_stable_when_ancestors_arrive_and_window_rotates(self):
         from agent_viz.store import Store
+
         profile = self.profile()
         grandchild = self.log(profile, "grandchild.jsonl", self.codex("grandchild", "child"))
         store = Store()
@@ -112,17 +156,31 @@ class SourcesTests(unittest.TestCase):
             self.assertFalse(monitor.scan_once()["errors"])
             rows = store.snapshot()["runs"]
             self.assertEqual({r["session_id"] for r in rows}, {"one:observed"})
-            self.assertEqual({r["run_id"] for r in rows}, {"one:root", "one:child", "one:grandchild"})
+            self.assertEqual(
+                {r["run_id"] for r in rows}, {"one:root", "one:child", "one:grandchild"}
+            )
         finally:
             store.close()
 
     def test_turn_end_is_idle_not_session_completion_then_resumes(self):
         profile = self.profile()
         rows = self.codex()
-        rows.append({"type": "event_msg", "timestamp": "2026-10-20T08:00:03Z", "payload": {"type": "task_complete"}})
+        rows.append(
+            {
+                "type": "event_msg",
+                "timestamp": "2026-10-20T08:00:03Z",
+                "payload": {"type": "task_complete"},
+            }
+        )
         self.log(profile, "run.jsonl", rows)
         self.assertEqual(scan_profile(profile)[0]["state"], "idle")
-        rows.append({"type": "event_msg", "timestamp": "2026-10-20T08:00:04Z", "payload": {"type": "task_started"}})
+        rows.append(
+            {
+                "type": "event_msg",
+                "timestamp": "2026-10-20T08:00:04Z",
+                "payload": {"type": "task_started"},
+            }
+        )
         self.log(profile, "run.jsonl", rows)
         self.assertEqual(scan_profile(profile)[0]["state"], "working")
 
@@ -139,7 +197,9 @@ class SourcesTests(unittest.TestCase):
         profile = self.profile()
         self.log(profile, "good.jsonl", self.codex(), b'{bad}\n{"type":"event_msg"')
         outside = self.root / "outside.jsonl"
-        outside.write_text(json.dumps({"type": "session_meta", "payload": {"id": "escaped"}}) + "\n")
+        outside.write_text(
+            json.dumps({"type": "session_meta", "payload": {"id": "escaped"}}) + "\n"
+        )
         folder = Path(profile.root) / "sessions"
         (folder / "link.jsonl").symlink_to(outside)
         (folder / "dirlink").symlink_to(self.root, target_is_directory=True)
@@ -155,24 +215,40 @@ class SourcesTests(unittest.TestCase):
         self.assertEqual({row["native_id"] for row in scan_profile(profile, limit=2)}, {"1", "2"})
         rows = self.codex("large")
         rows += [{"type": "ignored", "secret": "x" * 900_000}]
-        rows += [{"type": "event_msg", "timestamp": "2026-10-20T08:00:10Z", "payload": {"type": "task_complete"}}]
+        rows += [
+            {
+                "type": "event_msg",
+                "timestamp": "2026-10-20T08:00:10Z",
+                "payload": {"type": "task_complete"},
+            }
+        ]
         self.log(profile, "large.jsonl", rows)
         self.assertEqual(scan_profile(profile, limit=1)[0]["state"], "idle")
 
     def test_discovery_deduplicates_root_aliases(self):
         (self.root / ".codex-switch/profiles/personal/sessions").mkdir(parents=True)
         (self.root / ".codex-switch/profiles/work/sessions").mkdir(parents=True)
-        (self.root / ".codex").symlink_to(self.root / ".codex-switch/profiles/personal", target_is_directory=True)
+        (self.root / ".codex").symlink_to(
+            self.root / ".codex-switch/profiles/personal", target_is_directory=True
+        )
         (self.root / ".claude-personal/projects").mkdir(parents=True)
         (self.root / ".claude-work/projects").mkdir(parents=True)
-        (self.root / ".claude-alias").symlink_to(self.root / ".claude-personal", target_is_directory=True)
+        (self.root / ".claude-alias").symlink_to(
+            self.root / ".claude-personal", target_is_directory=True
+        )
         profiles = discover_profiles(self.root)
         self.assertEqual(len(profiles), 4)
         self.assertEqual([p.kind for p in profiles].count("codex"), 2)
 
     def test_named_portable_profiles_and_copies_are_not_account_deduplicated(self):
         from agent_viz.store import Store
-        for name, kind in [(".codex", "codex"), (".codex-client-red", "codex"), (".claude", "claude"), (".claude-client-blue", "claude")]:
+
+        for name, kind in [
+            (".codex", "codex"),
+            (".codex-client-red", "codex"),
+            (".claude", "claude"),
+            (".claude-client-blue", "claude"),
+        ]:
             root = self.root / name
             (root / ("sessions" if kind == "codex" else "projects")).mkdir(parents=True)
             profile = SourceProfile("temporary", kind, "temporary", str(root))
@@ -180,7 +256,9 @@ class SourcesTests(unittest.TestCase):
             (root / "auth.json").write_text("PRIVATE CREDENTIAL FIXTURE")
         (self.root / "unrelated/sessions").mkdir(parents=True)
         (self.root / ".codex-not-a-profile").mkdir()
-        with patch.object(Path, "read_text", side_effect=AssertionError("Discovery must not read credentials")):
+        with patch.object(
+            Path, "read_text", side_effect=AssertionError("Discovery must not read credentials")
+        ):
             profiles = discover_profiles(self.root)
         self.assertEqual(len(profiles), 4)
         self.assertEqual(len({p.root for p in profiles}), 4)
@@ -194,10 +272,14 @@ class SourcesTests(unittest.TestCase):
 
     def test_automatic_monitor_discovers_new_profiles_and_retains_missing_warning(self):
         from agent_viz.store import Store
+
         store = Store()
         monitor = Monitor(None, store)
         try:
-            with patch("agent_viz.monitor.discover_profiles", side_effect=lambda: discover_profiles(self.root)):
+            with patch(
+                "agent_viz.monitor.discover_profiles",
+                side_effect=lambda: discover_profiles(self.root),
+            ):
                 self.assertEqual(monitor.scan_once()["counts"], {})
                 self.assertTrue(monitor.public_state()["automatic_discovery"])
                 marker = self.root / ".codex-new/sessions"
@@ -221,9 +303,13 @@ class SourcesTests(unittest.TestCase):
 
     def test_explicit_monitor_does_not_discover_other_profiles(self):
         from agent_viz.store import Store
+
         store = Store()
         try:
-            with patch("agent_viz.monitor.discover_profiles", side_effect=AssertionError("Must remain manual")):
+            with patch(
+                "agent_viz.monitor.discover_profiles",
+                side_effect=AssertionError("Must remain manual"),
+            ):
                 monitor = Monitor([], store)
                 self.assertFalse(monitor.scan_once()["errors"])
                 self.assertFalse(monitor.public_state()["automatic_discovery"])
@@ -235,7 +321,10 @@ class SourcesTests(unittest.TestCase):
         claude = self.root / "custom-claude-location"
         (codex / "sessions").mkdir(parents=True)
         (claude / "projects").mkdir(parents=True)
-        with patch.object(Path, "home", return_value=self.root), patch.dict(os.environ, {"CODEX_HOME": str(codex), "CLAUDE_CONFIG_DIR": str(claude)}):
+        with (
+            patch.object(Path, "home", return_value=self.root),
+            patch.dict(os.environ, {"CODEX_HOME": str(codex), "CLAUDE_CONFIG_DIR": str(claude)}),
+        ):
             profiles = discover_profiles()
         self.assertEqual({p.kind for p in profiles}, {"codex", "claude"})
         self.assertEqual(len(profiles), 2)
@@ -290,9 +379,29 @@ class SourcesTests(unittest.TestCase):
 
     def test_config_validation(self):
         path = self.root / "sources.json"
-        path.write_text(json.dumps({"profiles": [{"id": "test", "kind": "codex", "root": "/tmp/fake", "label": "Personal"}]}))
+        path.write_text(
+            json.dumps(
+                {
+                    "profiles": [
+                        {"id": "test", "kind": "codex", "root": "/tmp/fake", "label": "Personal"}
+                    ]
+                }
+            )
+        )
         self.assertFalse(load_profiles(path)[0].include_text)
-        path.write_text(json.dumps([{"id": "test", "kind": "codex", "root": "/tmp/fake", "label": "Personal", "token": "SECRET"}]))
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "test",
+                        "kind": "codex",
+                        "root": "/tmp/fake",
+                        "label": "Personal",
+                        "token": "SECRET",
+                    }
+                ]
+            )
+        )
         with self.assertRaises(ValueError):
             load_profiles(path)
 
@@ -307,11 +416,14 @@ class SourcesTests(unittest.TestCase):
         good = self.profile()
         self.log(good, "run.jsonl", self.codex())
         missing = SourceProfile("missing", "claude", "Other", str(self.root / "SECRET"))
+
         class Store:
             def __init__(self):
                 self.rows = []
+
             def observe(self, value):
                 self.rows.append(value)
+
         store = Store()
         monitor = Monitor([good, missing], store)
         result = monitor.scan_once()

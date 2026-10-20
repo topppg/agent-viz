@@ -1,7 +1,7 @@
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import request
 
 from agent_viz.demo import run_demo
@@ -45,12 +45,21 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(nested["parent_run_id"], ids["first"])
         finishes = [event for event in events if event["type"] == "run.finished"]
         self.assertNotIn(ids["stale"], [event["run_id"] for event in finishes])
-        self.assertLess(next(i for i, event in enumerate(events) if event["type"] == "run.finished"
-                            and event["run_id"] == ids["root"]),
-                        next(i for i, event in enumerate(events) if event["type"] == "run.finished"
-                             and event["run_id"] == ids["first"]))
-        outcomes = [event["payload"]["outcome"] for event in events
-                    if event["type"] == "operation.finished"]
+        self.assertLess(
+            next(
+                i
+                for i, event in enumerate(events)
+                if event["type"] == "run.finished" and event["run_id"] == ids["root"]
+            ),
+            next(
+                i
+                for i, event in enumerate(events)
+                if event["type"] == "run.finished" and event["run_id"] == ids["first"]
+            ),
+        )
+        outcomes = [
+            event["payload"]["outcome"] for event in events if event["type"] == "operation.finished"
+        ]
         self.assertEqual(outcomes[:2], ["error", "success"])
         self.assertTrue(any(event["payload"].get("state") == "waiting_user" for event in events))
 

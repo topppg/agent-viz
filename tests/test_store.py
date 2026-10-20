@@ -1,7 +1,7 @@
 import copy
-from datetime import datetime, timedelta, timezone
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,20 +9,44 @@ from agent_viz.model import now
 from agent_viz.store import Store
 
 
-def event(sequence=1, kind="run.started", payload=None, run="run-a", session="session-a",
-          producer="producer-a", parent=None):
-    value = dict(schema_version=1, event_id=f"{producer}:{sequence}", session_id=session,
-                 run_id=run, producer_id=producer, sequence=sequence, occurred_at=now(), type=kind,
-                 payload={"name": "Same display name"} if payload is None else payload)
+def event(
+    sequence=1,
+    kind="run.started",
+    payload=None,
+    run="run-a",
+    session="session-a",
+    producer="producer-a",
+    parent=None,
+):
+    value = dict(
+        schema_version=1,
+        event_id=f"{producer}:{sequence}",
+        session_id=session,
+        run_id=run,
+        producer_id=producer,
+        sequence=sequence,
+        occurred_at=now(),
+        type=kind,
+        payload={"name": "Same display name"} if payload is None else payload,
+    )
     if parent:
         value["parent_run_id"] = parent
     return value
 
 
 def observation(run="observed-a", account="account-a", source="codex", **changes):
-    result = dict(run_id=run, session_id=run, name="Native session", source=source,
-                  account=account, state="working", last_seen=now(), activity="Tool activity observed",
-                  evidence="Read-only synthetic observation", native_id="private-native-id")
+    result = dict(
+        run_id=run,
+        session_id=run,
+        name="Native session",
+        source=source,
+        account=account,
+        state="working",
+        last_seen=now(),
+        activity="Tool activity observed",
+        evidence="Read-only synthetic observation",
+        native_id="private-native-id",
+    )
     result.update(changes)
     return result
 
@@ -102,9 +126,11 @@ class StoreTests(unittest.TestCase):
 
     def test_identity_cannot_change(self):
         self.store.ingest(event())
-        for changed in [event(2, "run.heartbeat", {}, session="other"),
-                        event(2, "run.heartbeat", {}, parent="new-parent"),
-                        event(2, "run.heartbeat", {}, producer="other")]:
+        for changed in [
+            event(2, "run.heartbeat", {}, session="other"),
+            event(2, "run.heartbeat", {}, parent="new-parent"),
+            event(2, "run.heartbeat", {}, producer="other"),
+        ]:
             with self.assertRaisesRegex(ValueError, "identity changed"):
                 self.store.ingest(changed)
 
@@ -122,7 +148,7 @@ class StoreTests(unittest.TestCase):
             independent.close()
 
     def test_prune_never_orphans_retained_descendants_or_deletes_active_sdk(self):
-        old = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        old = (datetime.now(UTC) - timedelta(days=10)).isoformat()
         with patch("agent_viz.store.now", return_value=old):
             self.store.ingest(event(run="old-done"))
             self.store.ingest(event(2, "run.finished", {"state": "completed"}, run="old-done"))
@@ -139,21 +165,40 @@ class StoreTests(unittest.TestCase):
 
     def test_parallel_operations_keep_independent_outcomes(self):
         self.store.ingest(event())
-        self.store.ingest(event(2, "operation.started", {"operation_id": "a", "kind": "tool", "label": "Read A"}))
-        self.store.ingest(event(3, "operation.started", {"operation_id": "b", "kind": "tool", "label": "Read B"}))
-        self.store.ingest(event(4, "operation.finished", {"operation_id": "a", "outcome": "error", "detail": "Invented error"}))
+        self.store.ingest(
+            event(2, "operation.started", {"operation_id": "a", "kind": "tool", "label": "Read A"})
+        )
+        self.store.ingest(
+            event(3, "operation.started", {"operation_id": "b", "kind": "tool", "label": "Read B"})
+        )
+        self.store.ingest(
+            event(
+                4,
+                "operation.finished",
+                {"operation_id": "a", "outcome": "error", "detail": "Invented error"},
+            )
+        )
         operations = self.store.snapshot()["runs"][0]["operations"]
         self.assertEqual(operations[0]["outcome"], "error")
         self.assertFalse(operations[0]["pending"])
         self.assertTrue(operations[1]["pending"])
         with self.assertRaisesRegex(ValueError, "no matching active operation"):
-            self.store.ingest(event(5, "operation.finished", {"operation_id": "missing", "outcome": "success"}))
-        self.store.ingest(event(5, "operation.finished", {"operation_id": "b", "outcome": "success"}))
+            self.store.ingest(
+                event(5, "operation.finished", {"operation_id": "missing", "outcome": "success"})
+            )
+        self.store.ingest(
+            event(5, "operation.finished", {"operation_id": "b", "outcome": "success"})
+        )
 
     def test_observations_preserve_four_profiles_and_strip_private_fields(self):
         for index, source in enumerate(["codex", "codex", "claude", "claude"]):
-            value = observation(run=f"profile-{index}:same-native-id", source=source,
-                                account=f"account-{index}", raw_prompt="Private", auth_token="Private")
+            value = observation(
+                run=f"profile-{index}:same-native-id",
+                source=source,
+                account=f"account-{index}",
+                raw_prompt="Private",
+                auth_token="Private",
+            )
             self.assertTrue(self.store.observe(value))
             self.assertFalse(self.store.observe(value))
         snapshot = self.store.snapshot()
@@ -198,7 +243,7 @@ class StoreTests(unittest.TestCase):
             store = Store(path, stale_after=15)
             store.ingest(event())
             self.assertEqual(store.snapshot()["runs"][0]["health"], "fresh")
-            old = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+            old = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
             store.observe(observation(last_seen=old))
             store.close()
             restarted = Store(path)

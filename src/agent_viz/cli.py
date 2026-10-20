@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
 import json
 import math
 import os
-from pathlib import Path
+import re
 import secrets
 import threading
-import re
+from dataclasses import asdict
+from pathlib import Path
 
 from .server import Collector
 from .sources import discover_profiles, load_profiles
@@ -67,25 +67,53 @@ def main(argv=None):
     serve = sub.add_parser("serve", help="start the loopback-only dashboard")
     serve.add_argument("--port", type=int, default=8766)
     serve.add_argument("--data-dir", type=Path, default=Path(".agent-viz/local"))
-    serve.add_argument("--watch", action="store_true", help="observe discovered native profile files read-only")
-    serve.add_argument("--no-discovery", action="store_true", help="SDK-only collector without native transcript discovery")
+    serve.add_argument(
+        "--watch", action="store_true", help="observe discovered native profile files read-only"
+    )
+    serve.add_argument(
+        "--no-discovery",
+        action="store_true",
+        help="SDK-only collector without native transcript discovery",
+    )
     serve.add_argument("--config", type=Path, help="explicit local source profile configuration")
-    serve.add_argument("--demo", action="store_true", help="emit a clearly labeled model-free synthetic scenario")
-    serve.add_argument("--demo-delay", type=float, default=.5)
+    serve.add_argument(
+        "--demo", action="store_true", help="emit a clearly labeled model-free synthetic scenario"
+    )
+    serve.add_argument("--demo-delay", type=float, default=0.5)
     serve.add_argument("--stale-after", type=float, default=15)
     serve.add_argument("--limit-per-profile", type=int, default=5000)
-    serve.add_argument("--summaries", action="store_true", help="opt in to sending bounded redacted activity context to OpenRouter DS4F")
-    serve.add_argument("--openrouter-key-file", type=Path, help="local key or dotenv file; key is never sent to the browser")
-    serve.add_argument("--summary-budget-usd", type=float, default=.05)
+    serve.add_argument(
+        "--summaries",
+        action="store_true",
+        help="opt in to sending bounded redacted activity context to OpenRouter DS4F",
+    )
+    serve.add_argument(
+        "--openrouter-key-file",
+        type=Path,
+        help="local key or dotenv file; key is never sent to the browser",
+    )
+    serve.add_argument("--summary-budget-usd", type=float, default=0.05)
     serve.add_argument("--summary-max-calls", type=int, default=10)
-    discover = sub.add_parser("discover", help="list storage profile labels without opening credential files")
-    discover.add_argument("--write-config", type=Path, help="create a private local profile config; refuses to overwrite")
-    discover.add_argument("--label", action="append", help="select an exact discovered profile label; repeat for several")
+    discover = sub.add_parser(
+        "discover", help="list storage profile labels without opening credential files"
+    )
+    discover.add_argument(
+        "--write-config",
+        type=Path,
+        help="create a private local profile config; refuses to overwrite",
+    )
+    discover.add_argument(
+        "--label",
+        action="append",
+        help="select an exact discovered profile label; repeat for several",
+    )
     demo = sub.add_parser("demo", help="send a synthetic scenario to an existing local collector")
     demo.add_argument("--url", default="http://127.0.0.1:8766")
     demo.add_argument("--data-dir", type=Path, default=Path(".agent-viz/local"))
-    demo.add_argument("--delay", type=float, default=.5)
-    prune = sub.add_parser("prune", help="delete old observer history only; never native transcripts")
+    demo.add_argument("--delay", type=float, default=0.5)
+    prune = sub.add_parser(
+        "prune", help="delete old observer history only; never native transcripts"
+    )
     prune.add_argument("--data-dir", type=Path, default=Path(".agent-viz/local"))
     prune.add_argument("--older-than-days", type=float, required=True)
     args = parser.parse_args(argv)
@@ -96,16 +124,33 @@ def main(argv=None):
                 profiles = [p for p in profiles if p.label in args.label]
                 if {p.label for p in profiles} != set(args.label):
                     raise ValueError("a selected label was not discovered")
-            print(json.dumps({"profiles": [{"id": p.id, "kind": p.kind, "label": p.label} for p in profiles],
-                              "note": "Storage labels are not verified signed-in account identities."}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "profiles": [
+                            {"id": p.id, "kind": p.kind, "label": p.label} for p in profiles
+                        ],
+                        "note": "Storage labels are not verified signed-in account identities.",
+                    },
+                    indent=2,
+                )
+            )
             if args.write_config:
-                write_private(args.write_config, json.dumps({"profiles": [asdict(p) for p in profiles]}, indent=2) + "\n")
+                write_private(
+                    args.write_config,
+                    json.dumps({"profiles": [asdict(p) for p in profiles]}, indent=2) + "\n",
+                )
                 print("Private source config created. Task text is disabled by default.")
             return 0
         if args.command == "demo":
             from .demo import run_demo
+
             result = run_demo(args.url, token_for(args.data_dir), args.delay)
-            print(json.dumps({"runs": result["runs"], "delivered": result["delivered"], "synthetic": True}))
+            print(
+                json.dumps(
+                    {"runs": result["runs"], "delivered": result["delivered"], "synthetic": True}
+                )
+            )
             return 0 if result["delivered"] else 1
         if args.command == "prune":
             if args.older_than_days <= 0:
@@ -116,14 +161,22 @@ def main(argv=None):
             finally:
                 store.close()
             return 0
-        if (not 0 <= args.port <= 65535 or not math.isfinite(args.stale_after) or args.stale_after <= 0
-                or not math.isfinite(args.demo_delay) or args.demo_delay < 0
-                or not 1 <= args.limit_per_profile <= 5000
-                or not math.isfinite(args.summary_budget_usd) or not 0 < args.summary_budget_usd <= 10
-                or not 1 <= args.summary_max_calls <= 100):
+        if (
+            not 0 <= args.port <= 65535
+            or not math.isfinite(args.stale_after)
+            or args.stale_after <= 0
+            or not math.isfinite(args.demo_delay)
+            or args.demo_delay < 0
+            or not 1 <= args.limit_per_profile <= 5000
+            or not math.isfinite(args.summary_budget_usd)
+            or not 0 < args.summary_budget_usd <= 10
+            or not 1 <= args.summary_max_calls <= 100
+        ):
             raise ValueError("invalid port, freshness threshold, or profile limit")
         if args.demo and (args.watch or args.config or args.summaries):
-            raise ValueError("synthetic demo must stay isolated from native sources and paid summaries")
+            raise ValueError(
+                "synthetic demo must stay isolated from native sources and paid summaries"
+            )
         if args.no_discovery and (args.config or args.watch):
             raise ValueError("conflicting discovery settings")
         api_key = summary_key(args.openrouter_key_file) if args.summaries else None
@@ -132,35 +185,57 @@ def main(argv=None):
         monitor = None
         if args.config or args.watch or (not args.no_discovery and not args.demo):
             from .monitor import Monitor
+
             profiles = load_profiles(args.config) if args.config else None
             monitor = Monitor(profiles, store, limit=args.limit_per_profile)
             monitor.scan_once()
         summarizer = None
         if args.summaries:
             from .summaries import Summarizer
-            summarizer = Summarizer(lambda: list(monitor.profiles) if monitor else [], store, api_key,
-                                    budget_usd=args.summary_budget_usd, max_calls=args.summary_max_calls,
-                                    state_path=args.data_dir / "summaries.sqlite3")
-        server = Collector(store, token_for(args.data_dir), port=args.port, monitor=monitor, summarizer=summarizer)
+
+            summarizer = Summarizer(
+                lambda: list(monitor.profiles) if monitor else [],
+                store,
+                api_key,
+                budget_usd=args.summary_budget_usd,
+                max_calls=args.summary_max_calls,
+                state_path=args.data_dir / "summaries.sqlite3",
+            )
+        server = Collector(
+            store, token_for(args.data_dir), port=args.port, monitor=monitor, summarizer=summarizer
+        )
         print(f"Agent Viz local dashboard: {server.url}", flush=True)
         print("Read-only native observation; no login verification or remote control.", flush=True)
         if monitor:
-            print(f"Observing {len(monitor.profiles)} storage profiles; private paths and content omitted from logs.", flush=True)
+            print(
+                f"Observing {len(monitor.profiles)} storage profiles; "
+                "private paths and content omitted from logs.",
+                flush=True,
+            )
             monitor.start()
         if summarizer:
-            print("DS4F summaries enabled: bounded context leaves this machine via OpenRouter; spend/request caps apply.", flush=True)
+            print(
+                "DS4F summaries enabled: bounded context leaves this machine via OpenRouter; "
+                "spend/request caps apply.",
+                flush=True,
+            )
             summarizer.start()
         if args.demo:
             from .demo import run_demo
+
             def emit_demo():
                 try:
                     result = run_demo(server.url, server.token, args.demo_delay)
-                    print(f"Synthetic demo: {result['runs']} runs; delivered={result['delivered']}", flush=True)
+                    print(
+                        f"Synthetic demo: {result['runs']} runs; delivered={result['delivered']}",
+                        flush=True,
+                    )
                 except Exception:
                     print("Synthetic demo failed; check local delivery diagnostics.", flush=True)
+
             threading.Thread(target=emit_demo, name="agent-viz-demo", daemon=True).start()
         try:
-            server.serve_forever(poll_interval=.2)
+            server.serve_forever(poll_interval=0.2)
         except KeyboardInterrupt:
             pass
         finally:
@@ -174,5 +249,7 @@ def main(argv=None):
         return 0
     except (ValueError, OSError, TypeError):
         # Error strings from source files can contain private paths/content.
-        print("Unable to start or configure Agent Viz. Check local paths, port, and argument values.")
+        print(
+            "Unable to start or configure Agent Viz. Check local paths, port, and argument values."
+        )
         return 1

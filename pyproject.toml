@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "agent-viz"
 version = "0.1.0"
 description = "Local, read-only visibility into agent runs and subagents"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
@@ -17,3 +17,24 @@ packages = ["src/agent_viz"]
 
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/tests", "/docs", "/README.md", "/pyproject.toml"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["references"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Embedded browser-script fixture; wrapping it would obscure the JavaScript under test.
+"tests/test_static.py" = ["E501"]
