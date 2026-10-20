@@ -759,3 +759,10 @@ def scan_usage(
     if diagnostics is not None:
         diagnostics.update(coverage)
     return totals
+
+
+def prune_usage_cache(profile_ids: set[str]) -> None:
+    """Forget cached usage for profiles that are no longer observed."""
+    for key in list(_USAGE_CACHE):
+        if key[0] not in profile_ids:
+            _USAGE_CACHE.pop(key, None)

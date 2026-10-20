@@ -144,7 +144,9 @@ profile are selected, and a file still being written loses only its incomplete
 last line. Only lines that can be user turns or session metadata are parsed as
 JSON; the rest are scanned for their timestamp. Per-file results are cached by
 size and modification time and hold only counts and namespaced session IDs, so
-repeat passes re-read only changed files (a changed file is re-read in full).
+repeat passes re-read only changed files. A changed file is re-read in full,
+so a large transcript that is still being written costs a full read each pass;
+there is no total byte budget per pass.
 Files older than the window are not opened; records older than 365 days are
 dropped. Credential, configuration and `.key` files are never opened.
 
@@ -161,11 +163,14 @@ caches the result for 30 seconds as `usage`:
 
 Only days with activity are listed. Native harnesses are `profile:<id>`. SDK
 runs come from this observer's own journal, keyed `<source>:<account>`, with one
-request per `run.started` event, so SDK history only covers what was sent to
-this data directory. `limited` is true when any profile's usage pass hit a file,
+request per `run.started` event, bucketed by the collector's receive time
+(not the producer's clock), so SDK history only covers what was sent to this
+data directory. `limited` is true when any profile's usage pass hit a file,
 record, traversal or selection bound, a read error, or was unavailable; the
-dashboard then marks the totals
-as partial. Days are bucketed in the collector's local time zone.
+dashboard then marks the totals as partial.
+Days are bucketed in the collector's local time zone; the browser lays out the
+grid in its own, so both must be on the same machine or zone. Not verified: if a
+resumed Claude session copies earlier turns into its new file, they count twice.
 
 These adapters follow locally observed formats, **not stable vendor APIs**.
 Unknown formats can produce missing or incomplete observations. There is no

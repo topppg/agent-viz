@@ -42,6 +42,7 @@ class Collector(ThreadingHTTPServer):
         self.stopping = threading.Event()
         self._activity: tuple[int, dict] | None = None
         self._usage: tuple[float, dict] | None = None
+        self._usage_lock = threading.Lock()
         super().__init__((host, port), Handler)
 
     @property
@@ -85,9 +86,10 @@ class Collector(ThreadingHTTPServer):
         if self._activity is None or self._activity[0] != now_second:
             self._activity = (now_second, self.store.activity())
         data["activity"] = self._activity[1]
-        if self._usage is None or time.monotonic() - self._usage[0] >= USAGE_REFRESH_SECONDS:
-            self._usage = (time.monotonic(), self.usage())
-        data["usage"] = self._usage[1]
+        with self._usage_lock:
+            if self._usage is None or time.monotonic() - self._usage[0] >= USAGE_REFRESH_SECONDS:
+                self._usage = (time.monotonic(), self.usage())
+            data["usage"] = self._usage[1]
         data["stale_after_seconds"] = self.store.stale_after
         data["mode"] = "local-observer"
         return data
@@ -98,7 +100,9 @@ class Collector(ThreadingHTTPServer):
         Native profiles are ``profile:<id>`` (transcript user turns); SDK runs are
         ``<source>:<account>``, where one started run counts as one request.
         """
-        first = (datetime.now().date() - timedelta(days=USAGE_WINDOW_DAYS - 1)).isoformat()
+        today = datetime.now().date()
+        first = (today - timedelta(days=USAGE_WINDOW_DAYS - 1)).isoformat()
+        last = today.isoformat()
         days: dict[str, dict] = {}
         sessions: dict[str, dict[str, set[str]]] = {}
 
@@ -112,10 +116,10 @@ class Collector(ThreadingHTTPServer):
         native = self.monitor.public_usage() if self.monitor else {"profiles": {}}
         for profile_id, per_day in native["profiles"].items():
             for day, (requests, ids) in per_day.items():
-                if day >= first:
+                if first <= day <= last:
                     add(day, f"profile:{profile_id}", requests, ids)
         for day, source, account, session, started in self.store.usage(USAGE_WINDOW_DAYS):
-            if day >= first:
+            if first <= day <= last:
                 add(day, f"{source}:{account}", started, {"sdk:" + session})
         for day, item in days.items():
             counts = {key: len(ids) for key, ids in sessions[day].items() if ids}

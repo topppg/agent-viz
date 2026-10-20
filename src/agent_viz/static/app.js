@@ -329,8 +329,8 @@
       : `no requests recorded in the last ${usage.window_days || 365} days${scope}`;
     $("usage-summary").textContent = summary + (usage.limited ? " · partial: some transcripts were too large or unreadable" : "");
     host.setAttribute("aria-label", `Daily requests heatmap, one cell per day: ${summary}`);
-    // On narrow screens the newest weeks matter most.
-    if (host.parentElement) host.parentElement.scrollLeft = host.parentElement.scrollWidth;
+    // On narrow screens the newest weeks matter most; scroll there once, not on every update.
+    if (host.parentElement && !state.usageScrolled) { host.parentElement.scrollLeft = host.parentElement.scrollWidth; state.usageScrolled = true; }
   }
 
   function workRank(run) {

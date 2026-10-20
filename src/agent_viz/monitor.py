@@ -10,6 +10,7 @@ from .sources import (
     SourceProfile,
     UsageDays,
     discover_profiles,
+    prune_usage_cache,
     scan_profile,
     scan_usage,
 )
@@ -119,6 +120,7 @@ class Monitor:
                 or coverage.get("clipped_files")
                 or coverage.get("oversized_records")
             )
+        prune_usage_cache({p.id for p in self.profiles})
         self._usage = {"profiles": profiles, "limited": limited}
         return self._usage
 

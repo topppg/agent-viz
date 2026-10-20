@@ -209,3 +209,47 @@ class UsageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StoreUsageTests(unittest.TestCase):
+    def test_sdk_usage_uses_receive_time_and_skips_observations(self):
+        from agent_viz.store import Store
+
+        store = Store()
+        event = dict(
+            schema_version=1,
+            event_id="e1",
+            session_id="s1",
+            run_id="r1",
+            producer_id="p1",
+            sequence=1,
+            occurred_at="2020-01-01T00:00:00+0000",
+            type="run.started",
+            payload={"name": "Worker", "source": "sdk", "account": "team"},
+        )
+        store.ingest(event)
+        store.ingest(
+            {**event, "event_id": "e2", "sequence": 2, "type": "run.heartbeat", "payload": {}}
+        )
+        store.observe(
+            {
+                "run_id": "obs",
+                "session_id": "x:observed",
+                "name": "Observed",
+                "source": "claude",
+                "account": "work",
+                "state": "working",
+                "last_seen": stamp(0),
+            }
+        )
+        today = datetime.now().astimezone().date().isoformat()
+        self.assertEqual(store.usage(), [(today, "sdk", "team", "s1", 1)])
+        store.close()
+
+
+class UsageCacheTests(unittest.TestCase):
+    def test_cache_for_removed_profiles_is_pruned(self):
+        sources._USAGE_CACHE.update({("gone", "a"): ((1, 1), {}), ("kept", "b"): ((1, 1), {})})
+        sources.prune_usage_cache({"kept"})
+        self.assertEqual(list(sources._USAGE_CACHE), [("kept", "b")])
+        sources._USAGE_CACHE.clear()
