@@ -225,6 +225,25 @@ class SourcesTests(unittest.TestCase):
         self.log(profile, "large.jsonl", rows)
         self.assertEqual(scan_profile(profile, limit=1)[0]["state"], "idle")
 
+    def test_max_age_skips_old_transcripts_without_reading_them(self):
+        import time
+
+        profile = self.profile()
+        old = self.log(profile, "old.jsonl", self.codex("old"))
+        os.utime(old, (time.time() - 10 * 86400,) * 2)
+        self.log(profile, "new.jsonl", self.codex("new"))
+        coverage = {}
+        with patch(
+            "agent_viz.sources._records",
+            wraps=__import__("agent_viz.sources", fromlist=["_records"])._records,
+        ) as records:
+            rows = scan_profile(profile, max_age_days=7, diagnostics=coverage)
+        self.assertEqual({row["native_id"] for row in rows}, {"new"})
+        self.assertEqual(records.call_count, 1)
+        self.assertEqual(coverage["aged_out"], 1)
+        self.assertFalse(coverage["truncated"])
+        self.assertEqual({row["native_id"] for row in scan_profile(profile)}, {"old", "new"})
+
     def test_discovery_deduplicates_root_aliases(self):
         (self.root / ".codex-switch/profiles/personal/sessions").mkdir(parents=True)
         (self.root / ".codex-switch/profiles/work/sessions").mkdir(parents=True)

@@ -83,6 +83,12 @@ def main(argv=None):
     serve.add_argument("--stale-after", type=float, default=15)
     serve.add_argument("--limit-per-profile", type=int, default=5000)
     serve.add_argument(
+        "--max-age-days",
+        type=float,
+        default=7,
+        help="skip native transcripts not modified within N days; 0 reads all",
+    )
+    serve.add_argument(
         "--summaries",
         action="store_true",
         help="opt in to sending bounded redacted activity context to OpenRouter DS4F",
@@ -92,8 +98,6 @@ def main(argv=None):
         type=Path,
         help="local key or dotenv file; key is never sent to the browser",
     )
-    serve.add_argument("--summary-budget-usd", type=float, default=0.05)
-    serve.add_argument("--summary-max-calls", type=int, default=10)
     discover = sub.add_parser(
         "discover", help="list storage profile labels without opening credential files"
     )
@@ -168,9 +172,8 @@ def main(argv=None):
             or not math.isfinite(args.demo_delay)
             or args.demo_delay < 0
             or not 1 <= args.limit_per_profile <= 5000
-            or not math.isfinite(args.summary_budget_usd)
-            or not 0 < args.summary_budget_usd <= 10
-            or not 1 <= args.summary_max_calls <= 100
+            or not math.isfinite(args.max_age_days)
+            or args.max_age_days < 0
         ):
             raise ValueError("invalid port, freshness threshold, or profile limit")
         if args.demo and (args.watch or args.config or args.summaries):
@@ -187,7 +190,12 @@ def main(argv=None):
             from .monitor import Monitor
 
             profiles = load_profiles(args.config) if args.config else None
-            monitor = Monitor(profiles, store, limit=args.limit_per_profile)
+            monitor = Monitor(
+                profiles,
+                store,
+                limit=args.limit_per_profile,
+                max_age_days=args.max_age_days or None,
+            )
             monitor.scan_once()
         summarizer = None
         if args.summaries:
@@ -197,8 +205,6 @@ def main(argv=None):
                 lambda: list(monitor.profiles) if monitor else [],
                 store,
                 api_key,
-                budget_usd=args.summary_budget_usd,
-                max_calls=args.summary_max_calls,
                 state_path=args.data_dir / "summaries.sqlite3",
             )
         server = Collector(
@@ -216,7 +222,7 @@ def main(argv=None):
         if summarizer:
             print(
                 "DS4F summaries enabled: bounded context leaves this machine via OpenRouter; "
-                "spend/request caps apply.",
+                "Claude recaps are used locally.",
                 flush=True,
             )
             summarizer.start()

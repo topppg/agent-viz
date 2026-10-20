@@ -1,73 +1,62 @@
-# Optional task summaries
+# Optional goal summaries
 
-Agent Viz can send a small amount of recent task text to OpenRouter and use
-`deepseek/deepseek-v4-flash` to produce one-line activity summaries. This feature
-is opt-in. The local collector and dashboard do not need an API key when it is
-off. Summaries do not establish whether an agent is alive or whether its work
-succeeded; the dashboard must retain the original status evidence.
+With `--summaries`, Agent Viz shows one line per active session describing the
+**overall problem or goal** it is working on, not its latest step. Summaries do
+not establish whether an agent is alive or whether its work succeeded; the
+dashboard keeps the original status evidence next to them.
+
+## Sources, in order
+
+1. **Claude recaps.** Claude Code writes `away_summary` records into its
+   transcripts. When the latest recap is newer than the latest user request, it
+   is shown as-is. No provider request is made.
+2. **Session titles.** Claude `ai-title` / `custom-title` records and Codex
+   `thread_name` entries from the profile's `session_index.jsonl` replace the
+   generic agent name and are included as context.
+3. **OpenRouter.** Everything else is summarized by `deepseek/deepseek-v4-flash`
+   from goal context: the title, any recap (including Codex compaction
+   summaries), the user's first and latest three requests, and the agent's latest
+   reply as a hint.
+
+## When summaries refresh
+
+- Only active sessions seen in the last 15 minutes are eligible: top-level
+  sessions plus any run (including a subagent) waiting for user input.
+- A summary refreshes only when its goal context changes: a new user request,
+  title or recap. Assistant progress, tool calls and heartbeats never trigger one.
+- A session's summary refreshes at most once every 10 minutes, and the service
+  makes at most one request every 120 seconds, covering up to six sessions.
+- While a refresh is due, the row keeps its previous summary, marked as stale.
 
 ## Data sent
 
-Only active root runs observed in the last 15 minutes are eligible. Working runs
-are considered first, followed by runs waiting for a tool, child or user. Each
-request covers at most six runs, with at most 1,000 characters per run.
-
-For SDK runs, the input is the supplied task and activity text. For native Codex
-and Claude sessions, the observer reads bounded transcript headers/tails and
-selects the latest user request and recent assistant prose. It excludes tool
-arguments, tool results, reasoning/thinking, system messages, known environment
-wrappers and instruction blocks. Native session IDs, profile names and profile
-paths are not sent: the request uses opaque IDs such as `r1`.
+Each entry is at most 2,000 characters. Tool arguments, tool results,
+reasoning/thinking, system messages, known environment wrappers and instruction
+blocks are excluded. Native session IDs, profile names and profile paths are not
+sent: the request uses opaque IDs such as `r1`.
 
 Common API keys, bearer tokens, credential assignments, email addresses and
-absolute paths are redacted before sending. Provider output is sanitized again.
-This is a best-effort filter, not a guarantee that arbitrary private information
-can be recognized. User/assistant prose may itself contain confidential material.
-Enable summaries only for work you are allowed to send to this external provider.
-Enabling summaries authorizes transcript excerpts independently of the dashboard's
-local `include_text` display preference; default local text hiding is not an
-external-sharing control once summaries are explicitly enabled.
+absolute paths are redacted before sending, and provider output is sanitized
+again. This is a best-effort filter. User/assistant prose may itself contain
+confidential material, so enable summaries only for work you may send to this
+provider. Enabling summaries authorizes excerpts independently of the local
+`include_text` display preference.
 
-The provider sees instructions to treat all excerpts as untrusted data, not as
-commands. Replies must be JSON with the exact requested IDs and string summaries.
-Only plain text, capped at 140 characters, is retained. Agent Viz never executes
-provider output or changes the original run task/status.
+The provider is told to treat all excerpts as untrusted data. Replies must be
+JSON with exactly the requested IDs; only plain text up to 160 characters is kept.
+Agent Viz never executes provider output or changes the original task or status.
 
-## Cost and refresh controls
+## Cost reporting
 
-- At most one request every 120 seconds, even when polling is faster.
-- Identical sanitized task content and state reuse the cached summary; timestamps
-  and heartbeats alone do not cause new calls.
-- A changed SDK task/activity marks its cached summary stale immediately. For
-  native observations, activity more than 30 seconds newer than the last checked
-  context is marked possibly stale until a bounded context scan verifies it.
-  This is a conservative warning, not proof of a changed task. Summaries older
-  than 15 minutes are also marked stale. Displaying summary state never scans
-  native transcripts or makes a provider call.
-- Defaults: ten requests total and a $0.05 local allowance, with a conservative
-  $0.01 reserve before the next request. A request is not made unless that reserve
-  fits within the remaining allowance.
-- The reserve is an estimate, not a provider-enforced financial cap. Actual
-  charges come exclusively from OpenRouter's returned `usage.cost` field. Model
-  prices/provider billing can change; this code does not invent an estimated
-  charge or represent a missing charge as zero.
-- A timeout, failed HTTP request or missing/invalid cost makes the total unknown
-  and pauses future requests. A malformed summary still counts as a request and
-  its actual charge is recorded when present.
-- No automatic retries or secondary model calls. Requests disable reasoning,
-  request JSON output and cap output at 600 tokens.
+There is no spend or call cap. Each request's actual charge is read from
+OpenRouter's `usage.cost` field and recorded; a timeout or missing cost is counted
+as unknown rather than zero. The header shows total known spend and the number
+of calls. A request costs a fraction of a cent, and the refresh rules above keep
+the request rate low.
 
-With a `state_path`, an independent SQLite journal persists request counts, known
-charges, unknown-charge blocks, summary text and content hashes across restarts.
-It never stores the key or raw input text. A pending request left by a crash is
-treated as unknown billing. Restarting does not reset the allowance. Keep this
-file inside the ignored local data directory. Clearing it discards accounting
-history and is not a safe way to resolve a charge; first reconcile billing with
-OpenRouter. There is intentionally no automatic "assume free" escape hatch.
-
-The browser receives total known cost separately when the complete total is
-unknown. A per-summary `actual_cost_usd` is the charge of its shared batch, not an
-additional charge attributable to that run. Do not sum per-summary costs.
+With a `state_path`, a SQLite journal persists calls, known charges, summary
+text and content hashes across restarts. It never stores the key or raw input
+text. Keep it inside the ignored local data directory.
 
 ## Python integration
 
@@ -81,16 +70,9 @@ summaries = Summarizer(
     state_path=".agent-viz/summaries.sqlite3",
 )
 summaries.start()
-# Merge summaries.public_state()["summaries"] into a COPY of the run snapshot.
-# Do not replace the original stored task or inferred status.
 summaries.stop()
 ```
 
 `tick()` attempts at most one batch and is useful for explicit refreshes or tests.
-It still enforces the interval, budget, cache and unknown-cost rules. Native
-collection is bounded to the 250 newest transcript files per eligible profile
-and stops as soon as the eligible roots are found; it is not a complete
-historical scan. The background worker checks every 15 seconds and always
-enforces the 120-second minimum between provider requests.
-
-All module tests use mocked provider responses. They do not make paid calls.
+Native collection is bounded to the 250 newest transcript files per eligible
+profile. All module tests use mocked provider responses.

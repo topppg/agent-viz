@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from agent_viz.sources import SourceProfile
-from agent_viz.summaries import MODEL, Summarizer, _clean, _recent_text, _request
+from agent_viz.summaries import MODEL, Summarizer, _clean, _goal, _goal_text, _request
 
 
 class SummariesTests(unittest.TestCase):
@@ -93,12 +93,27 @@ class SummariesTests(unittest.TestCase):
         instance = self.summarizer()
         with patch("agent_viz.summaries._request", return_value=self.response()) as request:
             instance.tick()
-            self.store.snapshot.return_value["runs"][0]["activity"] = "Writing a regression test"
+            self.store.snapshot.return_value["runs"][0]["task"] = "Write a regression test"
             instance.tick()
             self.assertEqual(request.call_count, 1)
             self.age_calls(instance)
             instance.tick()
+            # A changed goal still waits for the per-run refresh interval.
+            self.assertEqual(request.call_count, 1)
+            self.assertTrue(instance.public_state()["summaries"][0]["stale"])
+            instance.db.execute("UPDATE summaries SET generated_at='2020-01-01T00:00:00+00:00'")
+            instance.tick()
             self.assertEqual(request.call_count, 2)
+
+    def test_progress_alone_never_regenerates(self):
+        instance = self.summarizer()
+        with patch("agent_viz.summaries._request", return_value=self.response()) as request:
+            instance.tick()
+            self.age_calls(instance)
+            instance.db.execute("UPDATE summaries SET generated_at='2020-01-01T00:00:00+00:00'")
+            self.store.snapshot.return_value["runs"][0]["activity"] = "Writing a regression test"
+            instance.tick()
+        self.assertEqual(request.call_count, 1)
 
     def test_only_recent_active_roots(self):
         instance = self.summarizer()
@@ -113,6 +128,16 @@ class SummariesTests(unittest.TestCase):
         with patch("agent_viz.summaries._request") as request:
             instance.tick()
         request.assert_not_called()
+
+    def test_children_waiting_on_user_are_summarized(self):
+        instance = self.summarizer()
+        self.store.snapshot.return_value = {
+            "runs": [
+                self.make_run(run_id="needs-you", parent_run_id="parent", state="waiting_user"),
+                self.make_run(run_id="busy-child", parent_run_id="parent"),
+            ]
+        }
+        self.assertEqual([row["run_id"] for row in instance._candidates()], ["needs-you"])
 
     def test_working_roots_prioritized_and_batch_bounded(self):
         instance = self.summarizer()
@@ -145,7 +170,7 @@ class SummariesTests(unittest.TestCase):
             self.assertNotIn("token123", value)
         self.assertLessEqual(len(instance.public_state()["summaries"][0]["text"]), 140)
 
-    def test_timeout_unknown_billing_blocks_future_calls(self):
+    def test_timeout_records_unknown_cost_without_blocking(self):
         instance = self.summarizer()
         with patch(
             "agent_viz.summaries._request", side_effect=TimeoutError("SECRET provider body")
@@ -153,11 +178,15 @@ class SummariesTests(unittest.TestCase):
             instance.tick()
             self.age_calls(instance)
             instance.tick()
+            self.assertEqual(request.call_count, 1)
+            self.assertEqual(instance.public_state()["status"], "error")
+            # A failed run is retried only after the per-run refresh interval.
+            instance._failed = {key: 0 for key in instance._failed}
+            instance.tick()
         state = instance.public_state()
-        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_count, 2)
         self.assertIsNone(state["actual_cost_usd"])
-        self.assertEqual(state["unknown_cost_calls"], 1)
-        self.assertEqual(state["status"], "paused_unknown_cost")
+        self.assertEqual(state["unknown_cost_calls"], 2)
         self.assertNotIn("SECRET", json.dumps(state))
 
     def test_missing_cost_not_zero_and_paused(self):
@@ -166,7 +195,7 @@ class SummariesTests(unittest.TestCase):
             instance.tick()
         state = instance.public_state()
         self.assertIsNone(state["actual_cost_usd"])
-        self.assertEqual(state["status"], "paused_unknown_cost")
+        self.assertEqual(state["status"], "ready")
         self.assertEqual(len(state["summaries"]), 1)
 
     def test_invalid_cost_variants_unknown(self):
@@ -201,28 +230,6 @@ class SummariesTests(unittest.TestCase):
                 self.assertEqual(instance.public_state()["summaries"], [])
                 self.assertAlmostEqual(instance.public_state()["actual_cost_usd"], 0.00012)
 
-    def test_call_limit(self):
-        instance = self.summarizer(max_calls=1)
-        with patch("agent_viz.summaries._request", return_value=self.response()) as request:
-            instance.tick()
-            self.age_calls(instance)
-            self.store.snapshot.return_value["runs"][0]["task"] = "Another task"
-            instance.tick()
-        self.assertEqual(request.call_count, 1)
-        self.assertEqual(instance.public_state()["status"], "call_limit")
-
-    def test_budget_reserves_next_request(self):
-        instance = self.summarizer(budget_usd=0.015)
-        with patch(
-            "agent_viz.summaries._request", return_value=self.response(cost=0.006)
-        ) as request:
-            instance.tick()
-            self.age_calls(instance)
-            self.store.snapshot.return_value["runs"][0]["task"] = "Another task"
-            instance.tick()
-        self.assertEqual(request.call_count, 1)
-        self.assertEqual(instance.public_state()["status"], "budget_limit")
-
     def test_persistent_ledger_and_cache_without_raw_text(self):
         path = self.root / "summaries.sqlite3"
         instance = self.summarizer(state_path=path)
@@ -239,12 +246,13 @@ class SummariesTests(unittest.TestCase):
         self.assertNotIn(b"Fix the retry test", contents)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
-    def test_pending_after_crash_blocks_across_restart(self):
+    def test_pending_after_crash_is_reported_as_unknown_cost(self):
         path = self.root / "summaries.sqlite3"
         first = self.summarizer(state_path=path)
         first.db.execute("INSERT INTO calls(started,outcome) VALUES(?,'pending')", (time.time(),))
         second = self.summarizer(state_path=path)
-        self.assertEqual(second.public_state()["status"], "paused_unknown_cost")
+        self.assertEqual(second.public_state()["unknown_cost_calls"], 1)
+        self.assertIsNone(second.public_state()["actual_cost_usd"])
         with patch("agent_viz.summaries._request") as request:
             second.tick()
         request.assert_not_called()
@@ -288,7 +296,7 @@ class SummariesTests(unittest.TestCase):
                 },
             },
         ]
-        result = _recent_text(rows, "codex")
+        result = _goal_text(_goal(rows, "codex"))
         self.assertIn("Fix the retry test", result)
         self.assertIn("Checking expectations", result)
         self.assertNotIn("SECRET", result)
@@ -317,10 +325,40 @@ class SummariesTests(unittest.TestCase):
             },
             {"type": "system", "message": {"content": "SECRET system"}},
         ]
-        result = _recent_text(rows, "claude")
+        result = _goal_text(_goal(rows, "claude"))
         self.assertIn("Fix the retry test", result)
         self.assertIn("Checking expectations", result)
         self.assertNotIn("SECRET", result)
+
+    def test_claude_meta_compaction_and_shell_echo_rows_never_sent(self):
+        rows = [
+            {
+                "type": "user",
+                "isCompactSummary": True,
+                "message": {"content": "SECRET continuation of tool output"},
+            },
+            {
+                "type": "user",
+                "isMeta": True,
+                "message": {"content": "SECRET skill body: follow these steps"},
+            },
+            {"type": "user", "message": {"content": "<bash-input>cat .env</bash-input>"}},
+            {"type": "user", "message": {"content": "<bash-stdout>DB_HOST=SECRET</bash-stdout>"}},
+            {
+                "type": "user",
+                "message": {"content": "<local-command-stdout>SECRET</local-command-stdout>"},
+            },
+            {"type": "user", "message": {"content": "<command-name>/rename</command-name>"}},
+            {"type": "user", "timestamp": 42, "message": {"content": "Fix the retry test"}},
+            {"type": "ai-title", "aiTitle": "Generated title"},
+            {"type": "custom-title", "customTitle": "My name"},
+            {"type": "ai-title", "aiTitle": "Later generated title"},
+        ]
+        goal = _goal(rows, "claude")
+        self.assertEqual(goal["users"], ["Fix the retry test"])
+        self.assertEqual(goal["title"], "My name")
+        self.assertEqual(goal["last_user_at"], "")
+        self.assertNotIn("SECRET", _goal_text(goal))
 
     def test_native_reads_only_matching_active_transcript(self):
         profile = SourceProfile("codex-one", "codex", "Test Codex", str(self.root))
@@ -376,15 +414,7 @@ class SummariesTests(unittest.TestCase):
         connection.close.assert_called_once()
 
     def test_input_validation(self):
-        for kwargs in (
-            {"budget_usd": -1},
-            {"budget_usd": float("nan")},
-            {"max_calls": True},
-            {"max_calls": 0},
-            {"interval": 1},
-            {"timeout": 0},
-            {"timeout": 61},
-        ):
+        for kwargs in ({"interval": 1}, {"timeout": 0}, {"timeout": 61}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 self.summarizer(**kwargs)
         with self.assertRaises(ValueError):
@@ -412,7 +442,6 @@ class SummariesTests(unittest.TestCase):
         self.assertIsNotNone(first._reserve())
         self.assertIsNone(second._reserve())
         self.assertEqual(second.public_state()["calls"], 1)
-        self.assertEqual(second.public_state()["status"], "paused_unknown_cost")
         self.assertEqual(first.public_state()["status"], "running")
 
     def test_explicit_provider_zero_is_known_not_missing(self):
@@ -434,23 +463,117 @@ class SummariesTests(unittest.TestCase):
         self.store.snapshot.return_value["runs"][0]["task"] = "A completely new task"
         self.assertTrue(instance.public_state()["summaries"][0]["stale"])
 
-    def test_native_newer_activity_marks_cached_summary_possibly_stale(self):
+    def claude_profile(self, rows):
+        profile = SourceProfile("claude-one", "claude", "Test Claude", str(self.root))
+        folder = self.root / "projects" / "project"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "session.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+        self.store.snapshot.return_value = {
+            "runs": [
+                self.make_run(
+                    run_id="claude-one:session", source="claude", mode="observation", task=""
+                )
+            ]
+        }
+        return profile
+
+    def test_claude_recap_used_without_provider_call(self):
+        rows = [
+            {
+                "type": "user",
+                "sessionId": "session",
+                "timestamp": "2026-10-20T08:00:00Z",
+                "message": {"content": "Fix the retry test"},
+            },
+            {"type": "ai-title", "aiTitle": "Retry test repair", "sessionId": "session"},
+            {
+                "type": "system",
+                "subtype": "away_summary",
+                "sessionId": "session",
+                "timestamp": "2026-10-20T08:05:00Z",
+                "content": (
+                    "We're repairing the flaky retry test. Next, rerun the suite. "
+                    "(disable recaps in /config)"
+                ),
+            },
+        ]
+        profile = self.claude_profile(rows)
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", return_value=self.response()):
+        instance.profiles_provider = lambda: [profile]
+        with patch("agent_viz.summaries._request") as request:
             instance.tick()
-        run = self.store.snapshot.return_value["runs"][0]
-        run["mode"] = "observation"
-        instance._verified_until[run["run_id"]] = time.time() - 60
-        self.assertTrue(instance.public_state()["summaries"][0]["stale"])
-        # A same-content native scan can verify newer activity without a call.
-        instance._verified_until[run["run_id"]] = time.time()
-        with (
-            patch("agent_viz.summaries._recent_files") as files,
-            patch("agent_viz.summaries._request") as request,
-        ):
-            self.assertFalse(instance.public_state()["summaries"][0]["stale"])
-        files.assert_not_called()
         request.assert_not_called()
+        entry = instance.public_state()["summaries"][0]
+        self.assertEqual(entry["origin"], "claude-recap")
+        self.assertEqual(entry["title"], "Retry test repair")
+        self.assertEqual(
+            entry["text"], "We're repairing the flaky retry test. Next, rerun the suite."
+        )
+        self.assertEqual(instance.public_state()["calls"], 0)
+
+    def test_request_after_recap_uses_provider_with_goal_context(self):
+        rows = [
+            {
+                "type": "user",
+                "sessionId": "session",
+                "timestamp": "2026-10-20T08:00:00Z",
+                "message": {"content": "Fix the retry test"},
+            },
+            {
+                "type": "system",
+                "subtype": "away_summary",
+                "sessionId": "session",
+                "timestamp": "2026-10-20T08:05:00Z",
+                "content": "Repairing the retry test.",
+            },
+            {
+                "type": "user",
+                "sessionId": "session",
+                "timestamp": "2026-10-20T08:06:00Z",
+                "message": {"content": "Now also add docs"},
+            },
+        ]
+        profile = self.claude_profile(rows)
+        instance = self.summarizer()
+        instance.profiles_provider = lambda: [profile]
+        with patch("agent_viz.summaries._request", return_value=self.response()) as request:
+            instance.tick()
+        sent = json.loads(request.call_args.args[1]["messages"][1]["content"])["r1"]
+        for part in (
+            "recap: Repairing the retry test.",
+            "user: Fix the retry test",
+            "user: Now also add docs",
+        ):
+            self.assertIn(part, sent)
+        self.assertIn(
+            "overall problem or goal", request.call_args.args[1]["messages"][0]["content"]
+        )
+        self.assertEqual(instance.public_state()["summaries"][0]["origin"], "model")
+
+    def test_codex_thread_name_from_session_index(self):
+        profile = SourceProfile("codex-one", "codex", "Test Codex", str(self.root))
+        (self.root / "sessions").mkdir()
+        rows = [
+            {
+                "type": "session_meta",
+                "payload": {"id": "native", "timestamp": "2026-10-20T08:00:00Z"},
+            },
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Fix retries"}},
+        ]
+        (self.root / "sessions" / "run.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows)
+        )
+        (self.root / "session_index.jsonl").write_text(
+            json.dumps({"id": "native", "thread_name": "Retry repair"}) + "\n"
+        )
+        self.store.snapshot.return_value = {
+            "runs": [self.make_run(run_id="codex-one:native", source="codex", mode="observation")]
+        }
+        instance = self.summarizer()
+        instance.profiles_provider = lambda: [profile]
+        candidate = instance._candidates()[0]
+        self.assertEqual(candidate["title"], "Retry repair")
+        self.assertIn("title: Retry repair", candidate["text"])
 
     def test_control_characters_stripped(self):
         self.assertEqual(_clean("Checking\x00\x1b[31m tests\n"), "Checking [31m tests")

@@ -34,15 +34,20 @@ class StaticTests(unittest.TestCase):
             {
                 "runs",
                 "detail",
-                "profiles",
-                "recency-filter",
-                "source-filter",
-                "account-filter",
-                "state-filter",
+                "harnesses",
+                "flux",
+                "counts",
+                "ai-status",
+                "views",
+                "harness-filter",
+                "search",
                 "connection",
                 "demo-banner",
                 "refresh",
                 "source-errors",
+                "error",
+                "hidden-note",
+                "overview",
             }
             <= parser.ids
         )
@@ -57,92 +62,121 @@ class StaticTests(unittest.TestCase):
             self.assertNotIn(forbidden, script)
 
     @unittest.skipUnless(shutil.which("node"), "Node is optional; browser syntax/DOM check skipped")
-    def test_browser_renders_tree_filters_and_private_text_safely(self):
+    def test_browser_renders_table_harnesses_and_private_text_safely(self):
         script = r"""
 const fs = require('fs'), vm = require('vm'), assert = require('assert');
 let document;
 class Element {
-  constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.value = ''; this.hidden = false; this._text = ''; this.options = []; }
+  constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.value = ''; this.hidden = false; this._text = ''; this.options = []; this.style = {}; this.attrs = {};
+    this.classList = { toggle: (c) => { this.className = (this.className || '').includes(c) ? '' : c; } }; }
   set textContent(value) { this._text = String(value); this.children = []; }
-  get textContent() { return this._text + this.children.map(c => c.textContent).join(''); }
+  get textContent() { return this._text + this.children.map(c => typeof c === 'string' ? c : c.textContent).join(''); }
   append(...items) { this.children.push(...items); }
   replaceChildren(...items) { this.children = items; this._text = ''; if (this.tagName === 'select') this.options = [...items]; }
-  setAttribute(key, value) { this[key] = value; }
+  setAttribute(key, value) { this.attrs[key] = value; }
   addEventListener(key, fn) { this.listeners[key] = fn; }
-  add(option) { this.options.push(option); this.children.push(option); }
   focus() { document.activeElement = this; }
+  blur() {}
   querySelectorAll() { return flatten(this).filter(x => x.dataset.focusKey); }
 }
-function flatten(el) { return el.children.flatMap(c => [c, ...flatten(c)]); }
-const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','overview','profiles','ai-brief','recency-filter','source-filter','account-filter','state-filter','search','expand-all','freshness','run-count','runs','detail'].map(id => [id, new Element(id.includes('filter') ? 'select' : 'div')]));
-document = { getElementById: id => ids[id], createElement: tag => new Element(tag), activeElement: null };
+function flatten(el) { return el.children.filter(c => typeof c !== 'string').flatMap(c => [c, ...flatten(c)]); }
+const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs','detail'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
+ids['window-filter'].value = '604800000';
+['active','waiting','all'].forEach(v => { const b = new Element('button'); b.dataset.view = v; ids.views.children.push(b); });
+const docListeners = {};
+document = { getElementById: id => ids[id], createElement: tag => new Element(tag), activeElement: null, addEventListener: (k, fn) => { docListeners[k] = fn; } };
 const now = new Date().toISOString();
-const run = (id, parent, name, source, account) => ({run_id:id,parent_run_id:parent,name,session_id:'s',source,account,state:'working',health:'observed',inferred:true,task:'Original task',activity:'<img src=x onerror=alert(1)>',last_seen:now,started_at:now,demo:true,operations:[]});
-const snapshot = { stream_id:'journal-a',cursor:1, runs:[run('child','root','Child','codex','work'), run('root',null,'Root','codex','work'), run('grandchild','child','Nested','claude','personal'),run('orphan','missing','Orphan','claude','work')],profiles:[{id:'codex-work',kind:'codex',label:'work'},{id:'claude-personal',kind:'claude',label:'personal'},{id:'claude-work',kind:'claude',label:'work'},{id:'codex-empty',kind:'codex',label:'Empty profile'}],source_errors:{unavailable:'Source unavailable'},server_time:now };
+const old = '2020-01-01T00:00:00Z';
+const run = (id, parent, name, extra = {}) => ({run_id:id,parent_run_id:parent,name,session_id:'codex-work:observed',source:'codex',account:'work',state:'working',health:'observed',inferred:true,task:'Original task',activity:'<img src=x onerror=alert(1)>',last_seen:now,started_at:now,demo:true,operations:[],...extra});
+const runs = [run('child','root','Child'), run('root',null,'Root'), run('ask','root','Asker',{state:'waiting_user',ai_summary:{text:'Tuning retry limits',title:'Retry tuning',origin:'claude-recap',stale:false}}),
+  run('orphan','missing','Orphan',{session_id:'claude-personal:observed',source:'claude',account:'personal'}),
+  run('done',null,'Finished',{state:'completed',summary:'All good',health:'unknown'}), run('ancient',null,'Ancient',{last_seen:old,health:'stale'}),
+  {...run('sdk-run',null,'SDK worker'),session_id:'s1',source:'sdk',account:'demo',inferred:false,health:'fresh'}];
+const snapshot = { stream_id:'journal-a', cursor:1, runs, server_time:now, stale_after_seconds:15,
+  profiles:[{id:'codex-work',kind:'codex',label:'work'},{id:'claude-personal',kind:'claude',label:'personal'},{id:'codex-empty',kind:'codex',label:'Empty profile'}],
+  source_errors:{unavailable:'Source unavailable'}, ai:{enabled:true,status:'ready',calls:2,actual_cost_usd:.0021,known_cost_usd:.0021,unknown_cost_calls:0,summaries:[]},
+  activity:{bucket_seconds:10,buckets:60,end:now,runs:{root:[...new Array(59).fill(0),40],'sdk-run':[...new Array(54).fill(0),1,1,1,1,1,2]}} };
 let stream;
 class EventSource { constructor() { this.listeners = {}; stream = this; } addEventListener(name, fn) { this.listeners[name] = fn; } }
 class Option extends Element { constructor(text,value) { super('option'); this.textContent = text; this.value = value; } }
 const requests = [];
-const context = {document,Option,EventSource,Date,Map,Set,Boolean,Number,String,Array,JSON,console,encodeURIComponent,setInterval:() => {},fetch:async url => { requests.push(url); return {ok:true,json:async()=>url.startsWith('/api/runs/') ? {events:[{type:'run.activity',payload:{text:'<script>not executable</script>'},received_at:now}],next_cursor:1,has_more:false} : snapshot}; }};
+const context = {document,Option,EventSource,setInterval:() => {},console,fetch:async url => { requests.push(url); return {ok:true,json:async()=>url.startsWith('/api/runs/') ? {events:[{type:'run.activity',payload:{text:'<script>not executable</script>'},received_at:now}],next_cursor:1,has_more:false} : snapshot}; }};
 vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),context);
 const tick = () => new Promise(resolve => setImmediate(resolve));
+const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.dataset.runId);
 (async()=>{
  await tick();
  assert.equal(ids['demo-banner'].hidden,false);
+ // Active view: finished and long-quiet runs are hidden; needs-you sorts first.
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask','child','orphan','sdk-run']);
+ assert.ok(ids['hidden-note'].textContent.includes('1 finished · 1 older hidden'));
  assert.ok(ids.runs.textContent.includes('<img src=x onerror=alert(1)>'));
  assert.ok(!flatten(ids.runs).some(x => x.tagName === 'img'));
- assert.ok(ids.runs.textContent.includes('Parent not yet available'));
- assert.equal(flatten(ids.runs).filter(x => x.tagName === 'article').length,4);
- assert.equal(flatten(ids.profiles).filter(x => x.tagName === 'button').length,4);
- assert.ok(ids.profiles.textContent.includes('Empty profile'));
- assert.ok(ids.profiles.textContent.includes('Configured · no observations yet'));
- const originalOption = ids['source-filter'].options[1];
- const originalRoot = ids.runs.children[0];
+ assert.ok(ids.runs.textContent.includes('parent not yet available'));
+ assert.ok(ids.runs.textContent.includes('├─ '));
+ const asker = rows().find(r => r.dataset.runId === 'ask');
+ assert.ok(asker.textContent.includes('needs you~'));
+ assert.ok(asker.textContent.includes('Retry tuning'));
+ assert.ok(asker.textContent.includes('✦ Tuning retry limits'));
+ assert.ok(flatten(asker).some(x => (x.className || '').includes('doing needs')));
+ assert.ok(rows().find(r => r.dataset.runId === 'root').textContent.includes('40'));
+ // Harnesses: every profile listed, the dominant one flagged noisy.
+ const harnessButtons = ids.harnesses.children.filter(x => x.tagName === 'button');
+ assert.equal(harnessButtons.length, 4);
+ assert.ok(ids.harnesses.textContent.includes('Empty profile'));
+ assert.ok(ids.harnesses.textContent.includes('no observations yet'));
+ assert.ok(harnessButtons.find(b => b.textContent.includes('codex · work')).textContent.includes('▲ noisy'));
+ assert.ok(ids.flux.children.some(x => x.className === 'col'));
+ assert.ok(ids.flux.attrs['aria-label'].includes('codex · work'));
+ assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 calls'));
+ assert.ok(ids.counts.textContent.includes('1 needs you'));
+ // Harness filter.
+ harnessButtons.find(b => b.textContent.includes('claude · personal')).listeners.click();
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan']);
+ ids['harness-filter'].value = ''; ids['harness-filter'].listeners.change();
+ // Views.
+ ids.views.children[1].listeners.click();
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask']);
+ assert.ok(rows()[0].className.includes('context'));
+ ids.views.children[2].listeners.click();
+ assert.equal(ids['window-label'].hidden, false);
+ assert.equal(rows().length, 6);
+ ids['window-filter'].value = ''; ids['window-filter'].listeners.change();
+ assert.equal(rows().length, 7);
+ ids['window-filter'].value = '604800000';
+ ids.views.children[0].listeners.click();
+ // Search keeps ancestors as context.
+ ids.search.value = 'child'; ids.search.listeners.input();
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['root','child']);
+ ids.search.value = ''; ids.search.listeners.input();
+ // Re-render keeps focus on the same row.
+ rows()[1].focus();
  stream.listeners.snapshot({data:JSON.stringify(snapshot)});
- assert.equal(ids['source-filter'].options[1],originalOption);
- assert.equal(ids.runs.children[0],originalRoot);
- const active = run('live-root',null,'Live branch','codex','work');
- active.health='fresh'; active.ai_summary={text:'Checking an invented patch',stale:false};
- stream.listeners.snapshot({data:JSON.stringify({...snapshot,runs:[...snapshot.runs.map(r=>({...r,state:'idle',health:'stale'})),active],ai:{enabled:true,status:'ready',calls:1,max_calls:10,actual_cost_usd:.0001,budget_usd:.05,summaries:[{run_id:'live-root',text:'Checking an invented patch',generated_at:now}]}})});
- assert.ok(flatten(ids.runs).find(x => x.tagName==='article').textContent.includes('Live branch'));
- assert.ok(ids.runs.textContent.includes('Checking an invented patch'));
- assert.ok(ids['ai-brief'].textContent.includes('$0.000100 reported'));
- assert.ok(ids['ai-brief'].textContent.includes('bounded redacted context'));
- stream.listeners.snapshot({data:JSON.stringify({...snapshot,runs:[{...active,state:'completed'}],ai:{enabled:true,status:'ready',summaries:[{run_id:'live-root',text:'No longer running',generated_at:now}]}})});
- assert.ok(!ids['ai-brief'].textContent.includes('No longer running'));
- const firstProfile={...run('profile-a',null,'First profile','codex','same'),session_id:'a:observed'};
- const secondProfile={...run('profile-b',null,'Second profile','codex','same'),session_id:'b:observed'};
- stream.listeners.snapshot({data:JSON.stringify({...snapshot,runs:[firstProfile,secondProfile],profiles:[{id:'a',kind:'codex',label:'same'},{id:'b',kind:'codex',label:'same'}]})});
- ids['account-filter'].value='profile:b'; ids['account-filter'].listeners.change();
- assert.ok(ids.runs.textContent.includes('Second profile'));
- assert.ok(!ids.runs.textContent.includes('First profile'));
- ids['account-filter'].value=''; ids['account-filter'].listeners.change();
- stream.listeners.snapshot({data:JSON.stringify(snapshot)});
- const old = {...snapshot,runs:snapshot.runs.map(r=>({...r,last_seen:'2020-01-01T00:00:00Z'}))};
- stream.listeners.snapshot({data:JSON.stringify(old)});
- ids['recency-filter'].value='5m'; ids['recency-filter'].listeners.change();
- assert.ok(ids.runs.textContent.includes('No runs match'));
- ids['recency-filter'].value=''; ids['recency-filter'].listeners.change();
- stream.listeners.snapshot({data:JSON.stringify(snapshot)});
- ids['source-filter'].value='claude'; ids['source-filter'].listeners.change();
- assert.ok(ids.runs.textContent.includes('parent context'));
- const rootButton = flatten(ids.runs).find(x => x.dataset.focusKey === 'select:grandchild');
- rootButton.listeners.click(); await tick();
+ assert.equal(document.activeElement.dataset.runId, rows()[1].dataset.runId);
+ // Selection, detail and safe event history.
+ rows().find(r => r.dataset.runId === 'orphan').listeners.click(); await tick();
+ assert.equal(ids.detail.hidden, false);
  assert.ok(ids.detail.textContent.includes('Original task'));
  assert.ok(ids.detail.textContent.includes('<script>not executable</script>'));
  assert.ok(ids.detail.textContent.includes('claude · personal'));
- assert.ok(flatten(ids.detail).some(x => x.id === 'detail-heading'));
  assert.ok(!flatten(ids.detail).some(x => x.tagName === 'script'));
+ assert.ok(requests.includes('/api/runs/orphan/events?after=0&limit=100'));
+ // Keyboard navigation and close.
+ docListeners.keydown({key:'k', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.ok(ids.detail.textContent.includes('Child'));
+ docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
+ assert.equal(ids.detail.hidden, true);
+ // Connection status and history reset.
+ rows()[0].listeners.click(); await tick();
  stream.onerror(); assert.ok(ids.connection.textContent.includes('disconnected'));
- stream.listeners.snapshot({data:JSON.stringify(snapshot)}); assert.equal(ids.connection.textContent,'Live connection');
- assert.ok(requests.some(x => x === '/api/runs/grandchild/events?after=0&limit=100'));
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)}); assert.equal(ids.connection.textContent,'live');
  stream.listeners.reset({data:JSON.stringify({...snapshot,cursor:0})}); await tick();
- assert.equal(requests.filter(x => x === '/api/runs/grandchild/events?after=0&limit=100').length,2);
  assert.ok(ids.connection.textContent.includes('history reset'));
- assert.equal(flatten(ids.detail).filter(x => x.tagName === 'li').length,1);
- stream.listeners.snapshot({data:JSON.stringify({...snapshot,stream_id:'journal-b',cursor:100})}); await tick();
- assert.equal(requests.filter(x => x === '/api/runs/grandchild/events?after=0&limit=100').length,3);
- assert.equal(flatten(ids.detail).filter(x => x.tagName === 'li').length,1);
+ assert.equal(requests.filter(x => x === '/api/runs/root/events?after=0&limit=100').length,2);
+ // Summaries off and empty chart.
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:false},activity:{bucket_seconds:10,buckets:60,end:now,runs:{}}})});
+ assert.ok(ids['ai-status'].textContent.includes('summaries off'));
+ assert.ok(ids.flux.textContent.includes('No events in the last 10 minutes'));
 })().catch(error => { console.error(error);process.exitCode=1; });
 """
         result = subprocess.run(

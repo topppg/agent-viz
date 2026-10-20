@@ -269,3 +269,18 @@ class StoreTests(unittest.TestCase):
         self.store.ingest(event())
         with self.assertRaisesRegex(ValueError, "already started"):
             self.store.ingest(event(2))
+
+    def test_activity_buckets_recent_events_per_run(self):
+        self.store.ingest(event())
+        self.store.ingest(event(2, "run.activity", {"text": "Working"}))
+        self.store.ingest(event(1, run="run-b", producer="producer-b"))
+        old = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+        self.store.observe(observation(run="old-native", last_seen=old))
+        self.store.observe(observation(run="new-native"))
+        activity = self.store.activity(window=600, bucket=10)
+        self.assertEqual(activity["buckets"], 60)
+        self.assertEqual(sum(activity["runs"]["run-a"]), 2)
+        self.assertEqual(activity["runs"]["run-a"][-1], 2)
+        self.assertEqual(sum(activity["runs"]["run-b"]), 1)
+        self.assertEqual(sum(activity["runs"]["new-native"]), 1)
+        self.assertNotIn("old-native", activity["runs"])

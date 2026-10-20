@@ -20,6 +20,7 @@ class Monitor:
         store=None,
         interval: float = 2,
         limit: int = DEFAULT_SCAN_LIMIT,
+        max_age_days: float | None = None,
     ):
         if store is None:
             raise ValueError("Monitor requires a store")
@@ -28,6 +29,7 @@ class Monitor:
         self.store = store
         self.interval = max(0.2, float(interval))
         self.limit = max(1, min(int(limit), MAX_SCAN_LIMIT))
+        self.max_age_days = max_age_days
         self.errors: dict[str, str] = {}
         self.counts: dict[str, int] = {}
         self.source_stats: list[dict] = []
@@ -58,7 +60,9 @@ class Monitor:
             for profile in profiles:
                 coverage = {"id": profile.id, "label": profile.label, "kind": profile.kind}
                 try:
-                    observations = scan_profile(profile, self.limit, diagnostics=coverage)
+                    observations = scan_profile(
+                        profile, self.limit, diagnostics=coverage, max_age_days=self.max_age_days
+                    )
                     accepted = 0
                     for observation in observations:
                         try:

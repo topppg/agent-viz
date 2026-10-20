@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -36,6 +37,7 @@ class Collector(ThreadingHTTPServer):
         self.monitor = monitor
         self.summarizer = summarizer
         self.stopping = threading.Event()
+        self._activity: tuple[int, dict] | None = None
         super().__init__((host, port), Handler)
 
     @property
@@ -74,6 +76,11 @@ class Collector(ThreadingHTTPServer):
         for run in data["runs"]:
             if run["run_id"] in summaries:
                 run["ai_summary"] = summaries[run["run_id"]]
+        # Every SSE client asks once a second; one aggregate per second is enough.
+        now_second = int(time.time())
+        if self._activity is None or self._activity[0] != now_second:
+            self._activity = (now_second, self.store.activity())
+        data["activity"] = self._activity[1]
         data["stale_after_seconds"] = self.store.stale_after
         data["mode"] = "local-observer"
         return data

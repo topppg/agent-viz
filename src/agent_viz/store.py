@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .model import STATES, TERMINAL, canonical, now, text, timestamp, validate_event
@@ -27,6 +28,7 @@ class Store:
                 data TEXT NOT NULL, received_at TEXT NOT NULL, applied INTEGER NOT NULL,
                 UNIQUE(producer_id, sequence));
             CREATE INDEX IF NOT EXISTS by_run ON events(run_id, cursor);
+            CREATE INDEX IF NOT EXISTS by_received ON events(received_at);
             CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
         self.db.execute(
@@ -333,6 +335,28 @@ class Store:
                 "total_runs": len(rows),
                 "server_time": now(),
             }
+
+    def activity(self, window: int = 600, bucket: int = 10) -> dict:
+        """Per-run event counts in fixed buckets, oldest first, ending now."""
+        count = window // bucket
+        end = time.time()
+        end_iso = datetime.fromtimestamp(end, UTC).isoformat()
+        start_iso = datetime.fromtimestamp(end - window, UTC).isoformat()
+        # Native observations are journaled when a scan sees a change; bucket them
+        # by transcript time so a startup scan of old files is not a fake burst.
+        query = """
+            SELECT run_id, CAST((julianday(?) - julianday(
+                CASE WHEN producer_id LIKE 'observation:%' THEN json_extract(data, '$.occurred_at')
+                     ELSE received_at END)) * 86400 / ? AS INTEGER) AS age, COUNT(*)
+            FROM events WHERE received_at >= ? GROUP BY run_id, age"""
+        runs: dict[str, list[int]] = {}
+        with self.lock:
+            rows = self.db.execute(query, (end_iso, bucket, start_iso)).fetchall()
+        for run_id, age, total in rows:
+            if age is None or not 0 <= age < count:
+                continue
+            runs.setdefault(run_id, [0] * count)[count - 1 - age] += total
+        return {"bucket_seconds": bucket, "buckets": count, "end": end_iso, "runs": runs}
 
     def events(self, run_id: str, after: int = 0, limit: int = 100) -> dict:
         limit = min(max(limit, 1), 200)

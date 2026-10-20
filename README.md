@@ -64,7 +64,9 @@ uv run agent-viz discover --write-config .agent-viz/profiles.json
 uv run agent-viz serve --config .agent-viz/profiles.json --data-dir .agent-viz/live --port 8767
 ```
 
-Open [the local source dashboard](http://127.0.0.1:8767). The configuration
+Open [the local source dashboard](http://127.0.0.1:8767). Transcripts not modified in the last 7 days
+are skipped without being read; change this with `--max-age-days N` (`0` reads
+everything). The configuration
 writer refuses to overwrite an existing file. You can select a subset on initial
 discovery with repeated `--label 'exact discovered label'` arguments, or edit
 your private configuration. Use `--no-discovery` for an SDK-only collector.
@@ -87,8 +89,10 @@ Do not record or share a live-source dashboard without reviewing its contents.
 
 ## What works now
 
-- Browser overview, source/account/state/search filters, expandable agent tree,
-  original task versus current activity, run detail, and paginated event history.
+- `agtop` browser view: htop-style agent table (status, tree, harness, current
+  activity or AI summary, events/min, last seen), per-harness event rates with a
+  10-minute stacked chart, active/needs-you/all views, harness filter, search,
+  keyboard navigation, run detail, and paginated event history.
 - Explicit SDK lifecycle and independent tool/model operation outcomes, with
   separate work state and telemetry freshness.
 - Codex and Claude multi-profile discovery, namespaced identities, and available
@@ -104,23 +108,23 @@ Do not record or share a live-source dashboard without reviewing its contents.
 - Loopback-only serving, ingestion token, Host/Origin checks, local assets, safe
   text rendering, and no remote telemetry or raw-payload capture by default.
 
-## Optional activity briefs
+## Optional goal summaries
 
 ```sh
 uv run agent-viz serve --port 8767 \
   --data-dir .agent-viz/live --summaries \
-  --openrouter-key-file /absolute/path/to/private.env \
-  --summary-budget-usd .05 --summary-max-calls 10
+  --openrouter-key-file /absolute/path/to/private.env
 ```
 
 Alternatively supply `OPENROUTER_API_KEY` in the environment. Never put a key in
 source control or a command argument. The key is not served to the browser.
-Summaries are limited to recent root runs and may lag behind current work; they
-never establish process liveness. Enabling them permits external task excerpts
-even when native text display is off. Redaction cannot recognize every secret.
-The local allowance uses a conservative reserve, not a provider-enforced hard
-spend cap. Missing billing information pauses further calls. See the summary
-guide before enabling this on confidential work.
+Each active session gets one line describing its overall goal. Claude recaps
+are used directly; other sessions are summarized from titles, recaps and the
+user's requests, refreshed only when those change. Summaries never establish
+process liveness. Enabling them permits external excerpts even when native text
+display is off, and redaction cannot recognize every secret. There is no spend
+cap; known spend is shown in the header. See the [summary guide](docs/SUMMARIES.md)
+before enabling this on confidential work.
 
 ## Small SDK example
 
