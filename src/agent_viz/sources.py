@@ -11,6 +11,7 @@ import json
 import os
 import re
 import stat
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -130,8 +131,11 @@ def load_profiles(config_path: str | Path) -> list[SourceProfile]:
     return result
 
 
-def _file_inventory(root: Path | list[Path], limit: int) -> tuple[list[Path], dict]:
+def _file_inventory(
+    root: Path | list[Path], limit: int, max_age_days: float | None = None
+) -> tuple[list[Path], dict]:
     limit = max(1, min(int(limit), MAX_SCAN_LIMIT))
+    cutoff_ns = time.time_ns() - int(max_age_days * 86400e9) if max_age_days else None
     roots = root if isinstance(root, list) else [root]
     diagnostics = {
         "files_seen": 0,
@@ -145,6 +149,8 @@ def _file_inventory(root: Path | list[Path], limit: int) -> tuple[list[Path], di
         "symlinks_skipped": 0,
         "transcript_trees": [p.name for p in roots],
         "tree_count": len(roots),
+        "max_age_days": max_age_days,
+        "aged_out": 0,
     }
     pending = []
     for path in roots:
@@ -173,9 +179,11 @@ def _file_inventory(root: Path | list[Path], limit: int) -> tuple[list[Path], di
                             diagnostics["depth_budget_hit"] = True
                     elif entry.name.endswith(".jsonl") and entry.is_file(follow_symlinks=False):
                         try:
-                            files.append(
-                                (entry.stat(follow_symlinks=False).st_mtime_ns, Path(entry.path))
-                            )
+                            mtime = entry.stat(follow_symlinks=False).st_mtime_ns
+                            if cutoff_ns is not None and mtime < cutoff_ns:
+                                diagnostics["aged_out"] += 1
+                                continue
+                            files.append((mtime, Path(entry.path)))
                         except OSError:
                             pass
         except OSError:
@@ -478,14 +486,18 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
 
 
 def scan_profile(
-    profile: SourceProfile, limit: int = DEFAULT_SCAN_LIMIT, *, diagnostics: dict | None = None
+    profile: SourceProfile,
+    limit: int = DEFAULT_SCAN_LIMIT,
+    *,
+    diagnostics: dict | None = None,
+    max_age_days: float | None = None,
 ) -> list[dict]:
     """Observe at most ``limit`` recent files; no credentials, hooks, or APIs.
 
     Raises OSError for a missing/unreadable root so the monitor can surface a
     sanitized source error. Individual disappearing/corrupt files are skipped.
     """
-    selected, coverage = _file_inventory(_source_trees(profile), limit)
+    selected, coverage = _file_inventory(_source_trees(profile), limit, max_age_days)
     coverage.update(
         id=profile.id,
         label=profile.label,
