@@ -298,9 +298,9 @@ def _time(value: Any) -> str | None:
         return None
 
 
-def _text(message: Any) -> str:
+def _text(message: Any, limit: int = 160) -> str:
     if isinstance(message, str):
-        return _safe(message)
+        return _safe(message, limit)
     if isinstance(message, list):
         return _safe(
             " ".join(
@@ -309,15 +309,20 @@ def _text(message: Any) -> str:
                 if isinstance(x, dict)
                 and x.get("type") in {"text", "input_text", "output_text"}
                 and isinstance(x.get("text"), str)
-            )
+            ),
+            limit,
         )
     return ""
 
 
-def _request_text(message: object) -> str:
+def _request_text(message: object, limit: int = 160) -> str:
     """The user's latest request; wrapped tool, shell or instruction echoes are skipped."""
-    text = _text(message)
-    return "" if text.lstrip().startswith(("<", "# AGENTS.md")) else text
+    text = _text(message, 20_000)
+    # Forked Claude subagents get shared boilerplate first; their directive follows it.
+    _, fork, directive = text.partition("</fork-boilerplate>")
+    if fork:
+        text = re.sub(r"^\s*Your directive:\s*", "", directive)
+    return "" if text.lstrip().startswith(("<", "# AGENTS.md")) else _safe(text, limit)
 
 
 def _base(profile: SourceProfile, native: str, project: str, started: str | None) -> dict:
@@ -434,6 +439,7 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
         out["parent_run_id"] = _ns(profile, session)
         out["name"] = f"Claude subagent {agent[:8]}"
     last_state_time = None
+    prompt_seen = False
     for row in records:
         stamp = _time(row.get("timestamp"))
         if stamp and (out["last_seen"] is None or stamp > out["last_seen"]):
@@ -453,12 +459,13 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
             # Skill bodies, compaction summaries and command echoes are not requests.
             if (
                 profile.include_text
-                and not result
+                and (not result or (agent and "</fork-boilerplate>" in _text(content, 20_000)))
                 and not (row.get("isMeta") or row.get("isCompactSummary"))
             ):
-                text = _request_text(content)
-                if text:
-                    out["task"] = text
+                # A subagent's goal is the prompt its parent gave it, so the first one wins.
+                text = _request_text(content, 400 if agent else 160)
+                if text and not (agent and prompt_seen):
+                    out["task"], prompt_seen = text, True
         elif kind == "assistant" and isinstance(message, dict):
             stop = message.get("stop_reason")
             content = message.get("content", [])
@@ -492,6 +499,21 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
             last_state_time = stamp or last_state_time
     out["last_seen"] = out["last_seen"] or datetime.fromtimestamp(mtime, UTC).isoformat()
     return out
+
+
+def _subagent_description(path: Path) -> str:
+    """The short description the parent gave a Claude subagent, from agent-<id>.meta.json."""
+    meta = path.with_name(path.stem + ".meta.json")
+    try:
+        fd = os.open(meta, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as stream:
+            data = stream.read(65_537)
+        if len(data) > 65_536:
+            return ""
+        value = json.loads(data)
+    except (OSError, ValueError):
+        return ""
+    return _safe(value.get("description"), 120) if isinstance(value, dict) else ""
 
 
 def scan_profile(
@@ -532,6 +554,8 @@ def scan_profile(
                 value = (_codex if profile.kind == "codex" else _claude)(
                     profile, rows, info.st_mtime
                 )
+                if value and value.get("parent_run_id") and profile.include_text:
+                    value["name"] = _subagent_description(path) or value["name"]
                 _CACHE[key] = (signature, value)
             if value:
                 result.append(dict(value))

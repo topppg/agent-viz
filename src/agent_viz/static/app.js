@@ -391,11 +391,13 @@
       needs.append(node("span", ` · answer it in “${parent ? nameOf(parent) : nameOf(run)}”`, "needs-where"));
       host.append(needs);
     }
-    if (run.ai_summary?.text) host.append(node("p", run.ai_summary.text, "goal"));
+    // A subagent's goal is the task its parent gave it, unless a summary exists.
+    const goal = run.ai_summary?.text || (run.parent_run_id ? run.task : "");
+    if (goal) host.append(node("p", goal, "goal"));
     const fields = node("dl", null, "fields");
     const field = (title, content) => { if (content) fields.append(node("dt", title), node("dd", content)); };
     field("now", terminal.has(run.state) ? run.summary || label(run.state) : run.activity || "no activity reported");
-    field(run.parent_run_id ? "task" : "you asked", run.task || (run.inferred ? "text hidden · set include_text for this profile" : ""));
+    if (!run.parent_run_id) field("you asked", run.task || (run.inferred ? "text hidden · set include_text for this profile" : ""));
     if (run.parent_run_id) {
       const dd = node("dd");
       if (parent) {
