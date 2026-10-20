@@ -1,0 +1,18 @@
+# Local upstream research checkouts: never vendor or publish them accidentally.
+/references/
+
+# Local runtime data and private configuration.
+/.agent-viz/
+/recordings/private/
+.env
+.env.*
+!.env.example
+
+# Future implementation artifacts.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+dist/
+.DS_Store

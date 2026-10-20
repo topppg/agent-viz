@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-viz"
+version = "0.1.0"
+description = "Local, read-only visibility into agent runs and subagents"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+agent-viz = "agent_viz.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_viz"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/docs", "/README.md", "/pyproject.toml"]
