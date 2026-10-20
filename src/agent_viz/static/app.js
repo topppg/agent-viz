@@ -502,7 +502,7 @@
       items.push(open);
     } else if (target.kind === "resume" && target.command) {
       const copy = node("button", "⧉ copy resume command", "link app-link"); copy.type = "button"; copy.dataset.focusKey = "copy-resume"; copy.title = target.command;
-      copy.addEventListener("click", () => copyCommand(target.command));
+      copy.addEventListener("click", () => copyCommand(run.run_id));
       items.push(copy);
       if (state.targetFallback) {
         const field = node("input", null, "resume-command"); field.readOnly = true; field.value = target.command; field.dataset.focusKey = "resume-command";
@@ -512,12 +512,15 @@
     if (state.targetNote) items.push(node("span", state.targetNote, "muted"));
     return items;
   }
-  async function loadTarget(id) {
-    let target = null;
+  async function fetchTarget(id) {
     try {
       const response = await fetch(`/api/runs/${encodeURIComponent(id)}/focus`, { cache: "no-store" });
-      if (response.ok) { const data = await response.json(); if (data?.available) target = { ...data, runId: id }; }
-    } catch (_) { target = null; }
+      if (response.ok) { const data = await response.json(); if (data?.available) return { ...data, runId: id }; }
+    } catch (_) { return null; }
+    return null;
+  }
+  async function loadTarget(id) {
+    const target = await fetchTarget(id);
     if (id !== state.selected) return;
     state.target = target; renderDetail();
   }
@@ -527,7 +530,13 @@
     if (id !== state.selected) return;
     state.targetNote = ok ? "opened" : "could not open"; renderDetail();
   }
-  async function copyCommand(command) {
+  async function copyCommand(id) {
+    // Re-check first: a session that came back to life must not be resumed (forked).
+    const target = await fetchTarget(id);
+    if (id !== state.selected) return;
+    if (target?.kind !== "resume") { state.target = target; state.targetNote = target ? "session is live" : ""; state.targetFallback = false; renderDetail(); return; }
+    state.target = target;
+    const command = target.command;
     try {
       await globalThis.navigator.clipboard.writeText(command);
       state.targetNote = "copied"; state.targetFallback = false; renderDetail();

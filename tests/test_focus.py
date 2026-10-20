@@ -19,16 +19,22 @@ START = "Tue Oct 20 10:00:00 2026"
 class FakeSystem:
     """Answers ps/lsof argv lists from invented processes; records every call."""
 
-    def __init__(self, processes=None, lsof=None, env_output=""):
+    def __init__(self, processes=None, lsof=None, env_output="", args_output="", ps_ok=True):
         self.processes = processes or {}
         self.lsof = lsof
         self.env_output = env_output
+        self.args_output = args_output
+        self.ps_ok = ps_ok
         self.calls = []
 
     def __call__(self, argv, env=None):
         self.calls.append((list(argv), env))
         if argv[:2] == ["ps", "eww"]:
             return 0, self.env_output
+        if argv[:2] == ["ps", "-ww"]:
+            return 0, self.args_output
+        if argv[0] == "ps" and not self.ps_ok:
+            return None
         if argv[0] == "ps":
             process = self.processes.get(int(argv[-1]))
             if not process:
@@ -83,6 +89,15 @@ class ClaudeResolutionTests(unittest.TestCase):
             self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (True, None))
             self.assertEqual(focus.claude_pid(self.root / "absent", CLAUDE_ID), (False, None))
 
+    def test_missing_proc_start_and_ps_failure_are_not_trusted(self):
+        write_session(self.root, 111, CLAUDE_ID, proc_start=None)
+        with patch.object(focus, "_run", FakeSystem({111: proc(111)})):
+            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (True, None))
+        write_session(self.root, 111, CLAUDE_ID)
+        with patch.object(focus, "_run", FakeSystem({111: proc(111)}, ps_ok=False)):
+            with self.assertRaises(OSError):
+                focus.claude_pid(self.root, CLAUDE_ID)
+
     def test_key_files_are_never_opened(self):
         write_session(self.root, 111, CLAUDE_ID)
         key = self.root / "sessions" / "111.abcdef.key"
@@ -130,6 +145,7 @@ class CodexResolutionTests(unittest.TestCase):
             patch.object(focus.shutil, "which", return_value="/usr/sbin/lsof"),
         ):
             self.assertEqual(focus._rollout(self.root, CODEX_ID), self.rollout)
+            self.assertIsNone(focus._rollout(self.root, CODEX_ID[:-4]))
             self.assertEqual(focus.codex_pid(self.root, self.rollout), (True, 4242))
         self.assertIn(
             ["/usr/sbin/lsof", "-t", "--", str(self.rollout)], [c[0] for c in system.calls]
@@ -141,6 +157,12 @@ class CodexResolutionTests(unittest.TestCase):
                 self.assertEqual(focus.codex_pid(self.root, self.rollout), (True, None))
             with patch.object(focus, "_run", FakeSystem(lsof=None)):
                 self.assertEqual(focus.codex_pid(self.root, self.rollout), (False, None))
+            editor = FakeSystem({7: proc(7, command="/usr/bin/vim")}, lsof=(0, "7\n"))
+            with patch.object(focus, "_run", editor):
+                self.assertEqual(focus.codex_pid(self.root, self.rollout), (False, None))
+            with patch.object(focus, "_run", FakeSystem(lsof=(1, ""))):
+                gone = self.rollout.with_name("gone.jsonl")
+                self.assertEqual(focus.codex_pid(self.root, gone), (False, None))
         with patch.object(focus.shutil, "which", return_value=None):
             self.assertEqual(focus.codex_pid(self.root, self.rollout), (False, None))
         archived = self.root / "archived_sessions" / self.rollout.name
@@ -151,16 +173,17 @@ class CodexResolutionTests(unittest.TestCase):
 
 class EnvironmentTests(unittest.TestCase):
     def test_only_selected_valid_keys_and_last_occurrence(self):
+        args = "/usr/bin/claude --flag TMUX_PANE=%9 __CFBundleIdentifier=com.invented.app"
         output = (
-            "/usr/bin/claude --flag TMUX_PANE=%9 OPENROUTER_API_KEY=sk-or-invented "
+            f"{args} OPENROUTER_API_KEY=sk-or-invented "
             "CMUX_WORKSPACE_ID=--evil CMUX_PANEL_ID=ABCD-1234 TMUX_PANE=%3 "
             "ITERM_SESSION_ID=w0t1p0:not-a-guid TERM_PROGRAM=iTerm.app HOME=/invented\n"
         )
-        with (
-            patch.object(focus, "_run", FakeSystem(env_output=output)),
-            patch.object(focus.sys, "platform", "darwin"),
-        ):
-            env = focus._environment(1)
+        with patch.object(focus.sys, "platform", "darwin"):
+            with patch.object(focus, "_run", FakeSystem(env_output=output, args_output=args)):
+                env = focus._environment(1)
+            with patch.object(focus, "_run", FakeSystem(env_output=output, args_output="/x")):
+                self.assertEqual(focus._environment(1), {})
         self.assertEqual(
             env, {"CMUX_PANEL_ID": "ABCD-1234", "TMUX_PANE": "%3", "TERM_PROGRAM": "iTerm.app"}
         )

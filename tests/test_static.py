@@ -252,6 +252,12 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  control('copy-resume').listeners.click(); await tick();
  assert.equal(control('resume-command').value, 'claude --resume invented-0000');
  assert.equal(document.activeElement, control('resume-command'));
+ // The target is re-checked before copying; a session that went live is never resumed.
+ targets.ask = {available:true,kind:'focus',label:'iTerm'};
+ control('copy-resume').listeners.click(); await tick();
+ assert.equal(copied.length, 1);
+ assert.equal(control('open-app').textContent, '↗ open in iTerm');
+ assert.ok(detail().textContent.includes('session is live'));
  assert.equal(posts.length, 1);
  flatten(detail()).find(x => x.dataset.focusKey === 'parent:root').listeners.click(); await tick();
  assert.equal(expanded(), 'root');

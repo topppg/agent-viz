@@ -158,15 +158,18 @@ def _run(argv: list[str], env: dict[str, str] | None = None) -> tuple[int, str] 
 
 
 def _process(pid: int) -> Process | None:
-    # UTC matches the procStart format Claude Code records for its own process.
+    """None when no such process; OSError when ps itself could not answer."""
+    # UTC and the C locale match the procStart format Claude Code records.
     argv = ["ps", "-o", "ppid=", "-o", "tty=", "-o", "lstart=", "-o", "comm=", "-p", str(pid)]
-    result = _run(argv, {**os.environ, "TZ": "UTC"})
-    if not result or result[0] != 0:
-        return None
+    result = _run(argv, {**os.environ, "TZ": "UTC", "LC_ALL": "C"})
+    if result is None:
+        raise OSError("process lookup failed")
     lines = [line for line in result[1].splitlines() if line.strip()]
-    match = PS_LINE.fullmatch(lines[0]) if lines else None
-    if not match:
+    if result[0] != 0 and not lines:
         return None
+    match = PS_LINE.fullmatch(lines[0]) if lines else None
+    if result[0] != 0 or not match:
+        raise OSError("process lookup failed")
     start = " ".join(match[3].split())
     return Process(pid, int(match[1]), match[2], start, match[4].strip())
 
@@ -185,15 +188,21 @@ def _environment(pid: int) -> dict[str, str]:
             if key in ENV_KEYS
         ]
     else:
-        result = _run(["ps", "eww", "-o", "command=", "-p", str(pid)])
-        if not result or result[0] != 0:
+        args = _run(["ps", "-ww", "-o", "command=", "-p", str(pid)])
+        full = _run(["ps", "eww", "-o", "command=", "-p", str(pid)])
+        if not args or not full or args[0] != 0 or full[0] != 0:
+            return {}
+        command, output = args[1].strip(), full[1].strip()
+        # ps eww prints the arguments, then the environment; never parse the arguments.
+        if not command or not output.startswith(command):
             return {}
         pairs = [
             (key, value)
-            for key, value in re.findall(r"(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=(\S*)", result[1])
+            for key, value in re.findall(
+                r"(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=(\S*)", output[len(command) :]
+            )
             if key in ENV_KEYS
         ]
-    # The environment follows the arguments, so the last occurrence wins.
     last = dict(pairs)
     return {key: value for key, value in last.items() if ENV_KEYS[key].fullmatch(value)}
 
@@ -203,7 +212,10 @@ def _lineage(pid: int) -> list[Process]:
     current, seen = pid, set()
     while current > 1 and current not in seen and len(chain) < MAX_PARENTS:
         seen.add(current)
-        process = _process(current)
+        try:
+            process = _process(current)
+        except OSError:
+            break
         if process is None:
             break
         chain.append(process)
@@ -270,13 +282,14 @@ def claude_pid(root: Path, session_id: str) -> tuple[bool, int | None]:
         if process is None:
             continue
         recorded = data.get("procStart")
-        if isinstance(recorded, str) and " ".join(recorded.split()) != process.start:
+        if not isinstance(recorded, str) or " ".join(recorded.split()) != process.start:
             continue
         return True, pid
     return True, None
 
 
 def _rollout(root: Path, native: str) -> Path | None:
+    pattern = re.compile(rf"[-_]{re.escape(native)}(?:_[0-9A-Za-z-]+)?\.jsonl$")
     for tree in ("sessions", "archived_sessions"):
         pending, visited = [(root / tree, 0)], 0
         while pending and visited < MAX_WALK:
@@ -289,7 +302,7 @@ def _rollout(root: Path, native: str) -> Path | None:
                             continue
                         if entry.is_dir(follow_symlinks=False) and depth < 5:
                             pending.append((Path(entry.path), depth + 1))
-                        elif entry.name.endswith(".jsonl") and native in entry.name:
+                        elif pattern.search(entry.name):
                             return Path(entry.path)
             except OSError:
                 continue
@@ -301,14 +314,18 @@ def codex_pid(root: Path, path: Path) -> tuple[bool, int | None]:
     if path.is_relative_to(root / "archived_sessions"):
         return True, None
     lsof = shutil.which("lsof")
-    result = _run([lsof, "-t", "--", str(path)]) if lsof else None
+    if not lsof or not path.is_file():
+        return False, None
+    result = _run([lsof, "-t", "--", str(path)])
     if result is None or result[0] not in {0, 1}:
         return False, None
     candidates = [int(x) for x in result[1].split() if x.isdigit() and int(x) != os.getpid()]
+    if result[0] == 1 and not candidates:
+        return True, None
     processes = [p for p in map(_process, candidates) if p]
     named = [p for p in processes if "codex" in p.command.lower()]
-    chosen = (named or processes)[:1]
-    return True, chosen[0].pid if chosen else None
+    # Another holder (an editor, tail) means liveness is unclear: neither focus nor resume.
+    return (True, named[0].pid) if named else (False, None)
 
 
 def _cwd(path: Path | None, codex: bool) -> str:

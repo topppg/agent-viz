@@ -191,10 +191,12 @@ look for the live process that owns it; SDK runs are never eligible.
   parent session's process.
 - **Codex:** the session's rollout transcript is located by native ID under the
   profile's `sessions/` and `archived_sessions/` trees, and `lsof -t` reports the
-  process holding it open. Archived transcripts are treated as stopped.
+  Codex process holding it open. Archived transcripts are treated as stopped; a
+  file held only by some other program leaves liveness unknown (no button).
 - **Process details:** `ps` supplies the parent chain, terminal device, start
   time and executable path (to find an enclosing `.app` bundle). The environment
-  is read with `ps eww` (or `/proc/<pid>/environ` on Linux), and only these
+  is read with `ps eww` after stripping the process arguments (or
+  `/proc/<pid>/environ` on Linux), and only these
   strictly validated keys are kept: `CMUX_WORKSPACE_ID`, `CMUX_PANEL_ID`,
   `CMUX_SOCKET_PATH`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM`, `__CFBundleIdentifier`,
   `ITERM_SESSION_ID` and `WINDOWID`. Every other value is discarded, and none is
@@ -210,4 +212,6 @@ AppleScript that selects a matching iTerm2 session or Terminal tab, `open -b` /
 `open -a`, or `wmctrl -i -a`. Errors are generic. Resume commands are built from
 the session ID, the transcript's recorded working directory and the profile root
 (omitted for the default `~/.claude` / `~/.codex`), offered only when no live
-process is found and liveness could be checked, and never for subagents.
+process is found and liveness could be checked, and never for subagents. The
+browser re-checks the target before copying, so a session that came back to life
+is opened rather than forked.
