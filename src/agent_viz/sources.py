@@ -387,6 +387,7 @@ def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | 
     if parent and parent != native:
         out["parent_run_id"] = _ns(profile, parent)
     last_state_time = None
+    last_reply = ""
     for row in records:
         stamp = _time(row.get("timestamp"))
         if stamp and (out["last_seen"] is None or stamp > out["last_seen"]):
@@ -401,7 +402,11 @@ def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | 
             if event in {"task_started", "turn_started", "user_message"}:
                 state, activity, evidence = "working", "Turn started", str(event)
             elif event in {"task_complete", "turn_complete", "turn_aborted"}:
-                state, activity, evidence = "idle", "Turn ended · session may resume", str(event)
+                # An idle session reads best as its last reply, when text is allowed.
+                reply = _text(p.get("last_agent_message")) if profile.include_text else ""
+                reply = reply or last_reply
+                state, evidence = "idle", str(event)
+                activity = reply or "Turn ended · session may resume"
             if profile.include_text and event == "user_message":
                 text = _request_text(p.get("message"))
                 if text:
@@ -419,7 +424,8 @@ def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | 
             elif event in {"message", "reasoning", "agent_message"} and p.get("role") != "user":
                 state, activity, evidence = "working", "Model activity recorded", str(event)
                 if profile.include_text and event in {"message", "agent_message"}:
-                    activity = _text(p.get("content")) or activity
+                    last_reply = _text(p.get("content")) or last_reply
+                    activity = last_reply or activity
         if state and (stamp is None or last_state_time is None or stamp >= last_state_time):
             out.update(
                 state=state,
@@ -449,6 +455,7 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
         out["name"] = f"Claude subagent {agent[:8]}"
     last_state_time = None
     prompt_seen = False
+    last_reply = ""
     for row in records:
         stamp = _time(row.get("timestamp"))
         if stamp and (out["last_seen"] is None or stamp > out["last_seen"]):
@@ -481,12 +488,11 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
             tool = isinstance(content, list) and any(
                 isinstance(x, dict) and x.get("type") == "tool_use" for x in content
             )
+            if profile.include_text:
+                last_reply = _text(content) or last_reply
             if stop in {"end_turn", "stop_sequence", "max_tokens"}:
-                state, activity, evidence = (
-                    "idle",
-                    "Turn ended · session may resume",
-                    "assistant stop_reason",
-                )
+                state, evidence = "idle", "assistant stop_reason"
+                activity = last_reply or "Turn ended · session may resume"
             elif tool or stop == "tool_use":
                 state, activity, evidence = (
                     "waiting_tool",
@@ -494,11 +500,11 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
                     "assistant tool_use",
                 )
             else:
-                state, activity, evidence = "working", "Model activity recorded", "assistant"
-                if profile.include_text:
-                    activity = _text(content) or activity
+                state, evidence = "working", "assistant"
+                activity = (profile.include_text and _text(content)) or "Model activity recorded"
         elif kind == "system" and row.get("subtype") == "turn_duration":
-            state, activity, evidence = "idle", "Turn ended · session may resume", "turn_duration"
+            state, evidence = "idle", "turn_duration"
+            activity = last_reply or "Turn ended · session may resume"
         if state and (stamp is None or last_state_time is None or stamp >= last_state_time):
             out.update(
                 state=state,

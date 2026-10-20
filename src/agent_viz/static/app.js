@@ -74,8 +74,9 @@
     if (terminal.has(run.state)) return { mark: "›", text: run.summary || run.activity || run.task || "finished", cls: "" };
     const summary = run.ai_summary;
     if (summary?.text) return { mark: "✦", ai: true, text: summary.text, cls: status.key === "needs" ? "needs" : summary.stale ? "stale-summary" : "" };
-    // After a finished turn the latest activity is just "turn ended"; the request says more.
-    const raw = status.turn ? run.task || run.activity : run.activity || run.task;
+    // The last reply says most about a finished turn; the request is the fallback.
+    const replied = run.activity && !run.activity.startsWith("Turn ended");
+    const raw = status.turn && !replied ? run.task || run.activity : run.activity || run.task;
     if (!raw) return { mark: "›", text: run.inferred ? "text hidden · enable include_text" : "no activity reported", cls: "dim" };
     if (status.key === "quiet") return { mark: "›", text: `last said: ${raw}`, cls: "dim" };
     return { mark: "›", text: raw, cls: status.key === "needs" ? "needs" : "" };
