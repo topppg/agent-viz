@@ -123,6 +123,50 @@ Unchanged file results are cached, so steady-state polling rechecks metadata
 rather than repeatedly parsing historical content. The monitor publishes each
 completed discovery/coverage scan atomically through `public_state()`.
 
+## Daily usage scan
+
+The usage heatmap has its own read-only pass, separate from the run scan. It
+walks the same transcript trees for `.jsonl` files modified in the last 365
+days, regardless of `--max-age-days`, and counts per local calendar day:
+
+- **requests**: real user turns, the same notion as the run's latest request.
+  Claude `user` records count unless they are tool results, `isMeta`,
+  `isCompactSummary` or `isSidechain` (a subagent prompt comes from its parent
+  agent), or their text starts with `<`. Codex counts `event_msg`
+  `user_message` events, except in subagent threads.
+- **sessions**: distinct Claude `sessionId` / Codex root thread IDs with any
+  timestamped record that day; a subagent's activity counts for its parent.
+
+Unlike the run scan, this streams whole files line by line, so the middle of a
+large transcript is counted. It is still bounded: at most the newest 128 MiB of
+a file is read, records over 4 MiB are skipped, at most 10,000 files per
+profile are selected, and a file still being written loses only its incomplete
+last line. Only lines that can be user turns or session metadata are parsed as
+JSON; the rest are scanned for their timestamp. Per-file results are cached by
+size and modification time and hold only counts and namespaced session IDs, so
+repeat passes re-read only changed files (a changed file is re-read in full).
+Files older than the window are not opened; records older than 365 days are
+dropped. Credential, configuration and `.key` files are never opened.
+
+The monitor runs this pass in its own thread every 60 seconds; the first pass
+starts with the dashboard and can take a while on a large history. The snapshot
+caches the result for 30 seconds as `usage`:
+
+```json
+{"days": [{"date": "2026-10-14", "requests": 23, "sessions": 4,
+           "by_harness": {"profile:codex-work": 20, "sdk:local": 3},
+           "sessions_by_harness": {"profile:codex-work": 3, "sdk:local": 1}}],
+ "window_days": 365, "limited": false}
+```
+
+Only days with activity are listed. Native harnesses are `profile:<id>`. SDK
+runs come from this observer's own journal, keyed `<source>:<account>`, with one
+request per `run.started` event, so SDK history only covers what was sent to
+this data directory. `limited` is true when any profile's usage pass hit a file,
+record, traversal or selection bound, a read error, or was unavailable; the
+dashboard then marks the totals
+as partial. Days are bucketed in the collector's local time zone.
+
 These adapters follow locally observed formats, **not stable vendor APIs**.
 Unknown formats can produce missing or incomplete observations. There is no
 automatic login, transcript modification, hook installation, paid model call,
