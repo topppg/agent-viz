@@ -6,7 +6,7 @@
   const PALETTE = ["#7aa2f7", "#5eead4", "#c3a6ff", "#f0a07a", "#e6c07b", "#94e2d5", "#f5a3c7", "#a3be8c"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   const MAX_ROWS = 300;
-  const state = { snapshot: null, selected: null, view: "active", order: [], colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", usageKey: "" };
+  const state = { snapshot: null, selected: null, view: "active", order: [], colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", usageKey: "", target: null, targetNote: "", targetFallback: false };
   const node = (tag, text, className) => {
     const el = document.createElement(tag);
     if (text !== undefined && text !== null) el.textContent = String(text);
@@ -340,7 +340,7 @@
   function tableKey() {
     return JSON.stringify([state.fingerprint, activity().end && Math.floor(time(activity().end) / 10000), state.view,
       $("harness-filter").value, $("window-filter").value, $("search").value, state.selected, state.historyOpen,
-      state.events.length, state.eventBusy, state.more, Math.floor(serverNow() / 60000)]);
+      state.events.length, state.eventBusy, state.more, state.target, state.targetNote, state.targetFallback, Math.floor(serverNow() / 60000)]);
   }
   function seenText(value) {
     const seen = time(value);
@@ -486,10 +486,65 @@
     const history = node("button", state.historyOpen ? "hide history" : "history ▸", "link"); history.type = "button"; history.dataset.focusKey = "history";
     history.addEventListener("click", () => { state.historyOpen = !state.historyOpen; if (state.historyOpen && !state.events.length) loadEvents(true); else renderTable(); });
     const close = node("button", "esc close", "link"); close.type = "button"; close.addEventListener("click", () => selectRun(null));
-    footer.append(history, close);
+    footer.append(...targetControls(run), history, close);
     host.append(footer);
     if (state.historyOpen) host.append(historyList(run));
     return host;
+  }
+  // The server only activates the owning window; a stopped session offers a command to copy.
+  function targetControls(run) {
+    const target = state.target;
+    if (!target || target.runId !== run.run_id) return [];
+    const items = [];
+    if (target.kind === "focus") {
+      const open = node("button", `↗ open in ${target.label}`, "link app-link"); open.type = "button"; open.dataset.focusKey = "open-app";
+      open.addEventListener("click", () => openApp(run.run_id));
+      items.push(open);
+    } else if (target.kind === "resume" && target.command) {
+      const copy = node("button", "⧉ copy resume command", "link app-link"); copy.type = "button"; copy.dataset.focusKey = "copy-resume"; copy.title = target.command;
+      copy.addEventListener("click", () => copyCommand(run.run_id));
+      items.push(copy);
+      if (state.targetFallback) {
+        const field = node("input", null, "resume-command"); field.readOnly = true; field.value = target.command; field.dataset.focusKey = "resume-command";
+        items.push(field);
+      }
+    } else return [];
+    if (state.targetNote) items.push(node("span", state.targetNote, "muted"));
+    return items;
+  }
+  async function fetchTarget(id) {
+    try {
+      const response = await fetch(`/api/runs/${encodeURIComponent(id)}/focus`, { cache: "no-store" });
+      if (response.ok) { const data = await response.json(); if (data?.available) return { ...data, runId: id }; }
+    } catch (_) { return null; }
+    return null;
+  }
+  async function loadTarget(id) {
+    const target = await fetchTarget(id);
+    if (id !== state.selected) return;
+    state.target = target; renderDetail();
+  }
+  async function openApp(id) {
+    let ok = false;
+    try { ok = (await fetch(`/api/runs/${encodeURIComponent(id)}/focus`, { method: "POST", cache: "no-store", headers: { "X-Agent-Viz": "focus" } })).ok; } catch (_) { ok = false; }
+    if (id !== state.selected) return;
+    state.targetNote = ok ? "opened" : "could not open"; renderDetail();
+  }
+  async function copyCommand(id) {
+    // Re-check first: a session that came back to life must not be resumed (forked).
+    const target = await fetchTarget(id);
+    if (id !== state.selected) return;
+    if (target?.kind !== "resume") { state.target = target; state.targetNote = target ? "session is live" : ""; state.targetFallback = false; renderDetail(); return; }
+    state.target = target;
+    const command = target.command;
+    try {
+      await globalThis.navigator.clipboard.writeText(command);
+      state.targetNote = "copied"; state.targetFallback = false; renderDetail();
+    } catch (_) {
+      state.targetNote = "select and copy"; state.targetFallback = true; renderDetail();
+      const field = [...$("runs").querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === "resume-command");
+      field?.focus(); field?.select?.();
+    }
   }
   function historyList(run) {
     const box = node("div", null, "history");
@@ -520,8 +575,9 @@
   function renderDetail() { if (state.snapshot) renderTable(); }
   async function selectRun(id) {
     state.selected = id; state.events = []; state.nextCursor = 0; state.more = false; state.historyOpen = false;
+    state.target = null; state.targetNote = ""; state.targetFallback = false;
     renderDetail();
-    if (id) await loadEvents(true);
+    if (id) { loadTarget(id); await loadEvents(true); }
   }
   async function loadEvents(reset) {
     if (!state.selected) return;

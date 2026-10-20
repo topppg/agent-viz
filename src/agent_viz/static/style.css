@@ -129,6 +129,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 20px 24px; display: flex; fle
 .link:hover { color: var(--text); }
 .expansion-footer { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--muted); }
 .expansion-footer .spacer { flex: 1; }
+.expansion-footer .app-link { color: var(--run); }
+.resume-command { min-height: 0; padding: 0 6px; width: 48ch; max-width: 100%; color: var(--muted); font-size: 12px; }
 .history { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
 .ops, .timeline { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .ops li, .timeline li { display: grid; grid-template-columns: 110px 200px minmax(0, 1fr); gap: 12px; }

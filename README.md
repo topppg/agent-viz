@@ -100,6 +100,9 @@ Do not record or share a live-source dashboard without reviewing its contents.
   the harness filter. History comes from transcript timestamps (see
   [the usage scan](docs/SOURCES.md#daily-usage-scan)), not from how long the
   observer has run; SDK runs count one request per started run.
+- Open in app: an opened native row offers **↗ open in cmux / tmux / iTerm /
+  Terminal / VS Code / ChatGPT …** to bring the session's window forward, or, when
+  no live process owns the session, **⧉ copy resume command**. See below.
 - Explicit SDK lifecycle and independent tool/model operation outcomes, with
   separate work state and telemetry freshness.
 - Codex and Claude multi-profile discovery, namespaced identities, and available
@@ -114,6 +117,23 @@ Do not record or share a live-source dashboard without reviewing its contents.
   methods and asynchronous flush/close helpers.
 - Loopback-only serving, ingestion token, Host/Origin checks, local assets, safe
   text rendering, and no remote telemetry or raw-payload capture by default.
+
+## Open a session in its app
+
+Opening a native Codex or Claude row looks up, only then, which local process owns
+the session and how to show it: a cmux panel, a tmux pane (and its terminal app),
+an iTerm2 session, an Apple Terminal tab, or the owning GUI app (VS Code, Ghostty,
+ChatGPT, Claude desktop …). On Linux, tmux panes and `wmctrl` windows are
+supported. Anything else shows no button.
+
+The button only **activates a window**. It never types into, signals, kills or
+otherwise controls an agent, and helper output is never shown in the browser. The
+first iTerm2/Terminal use can trigger a macOS automation permission prompt. When no
+live process is found, the dashboard offers a resume command (for example
+`claude --resume <id>` with the profile's `CLAUDE_CONFIG_DIR`) to copy and run
+yourself; the server never runs it. Resume is not offered while the session might
+still be running elsewhere, since resuming it would fork the conversation. What is
+inspected is listed in the [source guide](docs/SOURCES.md#opening-a-sessions-app).
 
 ## Optional goal summaries
 
@@ -229,6 +249,7 @@ must not expose private prompts, repository paths, credentials, or real tasks.
 ## Boundaries
 
 This is an observer, not an agent framework, task scheduler, or remote control
-panel. It will not kill, steer, or approve actions in the first version. A pretty
+panel. It will not kill, steer, or approve actions in the first version; opening a
+session's app only brings an existing window forward. A pretty
 dashboard must never hide lost events or pretend that an unresponsive agent has
 definitely failed.

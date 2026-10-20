@@ -111,8 +111,16 @@ const snapshot = { stream_id:'journal-a', cursor:1, runs, server_time:now, stale
 let stream;
 class EventSource { constructor() { this.listeners = {}; stream = this; } addEventListener(name, fn) { this.listeners[name] = fn; } }
 class Option extends Element { constructor(text,value) { super('option'); this.textContent = text; this.value = value; } }
-const requests = [];
-const context = {document,Option,EventSource,setInterval:() => {},console,fetch:async url => { requests.push(url); return {ok:true,json:async()=>url.startsWith('/api/runs/') ? {events:[{type:'run.activity',payload:{text:'<script>not executable</script>'},received_at:now}],next_cursor:1,has_more:false} : snapshot}; }};
+const requests = [], posts = [], copied = [];
+const targets = {orphan:{available:true,kind:'focus',label:'cmux'}, ask:{available:true,kind:'resume',label:'resume',command:'claude --resume invented-0000'}};
+const navigator = {clipboard:{writeText:async text => { copied.push(text); }}};
+const context = {document,Option,EventSource,navigator,setInterval:() => {},console,fetch:async (url, options = {}) => {
+  if (options.method === 'POST') { posts.push({url, headers:options.headers}); return {ok:true,json:async()=>({ok:true})}; }
+  requests.push(url);
+  if (url.endsWith('/focus')) {
+    return {ok:true,json:async()=>targets[decodeURIComponent(url.split('/')[3])] || {available:false,kind:'unsupported',label:''}};
+  }
+  return {ok:true,json:async()=>url.startsWith('/api/runs/') ? {events:[{type:'run.activity',payload:{text:'<script>not executable</script>'},received_at:now}],next_cursor:1,has_more:false} : snapshot}; }};
 vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),context);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.dataset.runId);
@@ -209,6 +217,14 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(detail().textContent.includes('claude · personal'));
  assert.ok(detail().textContent.includes('not yet available'));
  assert.ok(requests.includes('/api/runs/orphan/events?after=0&limit=100'));
+ // A live session offers to open its app; the POST carries the custom header.
+ const control = (key) => flatten(detail()).find(x => x.dataset.focusKey === key);
+ assert.equal(control('open-app').textContent, '↗ open in cmux');
+ control('open-app').listeners.click(); await tick();
+ assert.deepEqual(posts, [{url:'/api/runs/orphan/focus', headers:{'X-Agent-Viz':'focus'}}]);
+ assert.ok(detail().textContent.includes('opened'));
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
+ assert.equal(requests.filter(x => x === '/api/runs/orphan/focus').length, 1);
  // History is collapsed until asked for; it renders event text safely.
  assert.ok(!detail().textContent.includes('<script>not executable</script>'));
  flatten(detail()).find(x => x.dataset.focusKey === 'history').listeners.click(); await tick();
@@ -225,8 +241,28 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  rows().find(r => r.dataset.runId === 'ask').listeners.click(); await tick();
  assert.ok(detail().textContent.includes('waiting on you'));
  assert.ok(detail().textContent.includes('Tuning retry limits'));
+ // A stopped session offers a resume command to copy, never to run.
+ assert.equal(control('open-app'), undefined);
+ assert.equal(control('copy-resume').textContent, '⧉ copy resume command');
+ assert.equal(control('copy-resume').title, 'claude --resume invented-0000');
+ control('copy-resume').listeners.click(); await tick();
+ assert.deepEqual(copied, ['claude --resume invented-0000']);
+ assert.ok(detail().textContent.includes('copied'));
+ navigator.clipboard.writeText = async () => { throw new Error('denied'); };
+ control('copy-resume').listeners.click(); await tick();
+ assert.equal(control('resume-command').value, 'claude --resume invented-0000');
+ assert.equal(document.activeElement, control('resume-command'));
+ // The target is re-checked before copying; a session that went live is never resumed.
+ targets.ask = {available:true,kind:'focus',label:'iTerm'};
+ control('copy-resume').listeners.click(); await tick();
+ assert.equal(copied.length, 1);
+ assert.equal(control('open-app').textContent, '↗ open in iTerm');
+ assert.ok(detail().textContent.includes('session is live'));
+ assert.equal(posts.length, 1);
  flatten(detail()).find(x => x.dataset.focusKey === 'parent:root').listeners.click(); await tick();
  assert.equal(expanded(), 'root');
+ assert.equal(control('open-app'), undefined);
+ assert.equal(control('copy-resume'), undefined);
  // Clicking the open row again closes it; keyboard navigation and Escape.
  rows().find(r => r.dataset.runId === 'root').listeners.click(); await tick();
  assert.equal(detail(), undefined);

@@ -177,3 +177,41 @@ Unknown formats can produce missing or incomplete observations. There is no
 automatic login, transcript modification, hook installation, paid model call,
 or process control. Tests use invented four-profile fixtures; testing against
 existing local profiles does not start or steer the user's agents.
+
+## Opening a session's app
+
+Only when a native row is opened (`GET /api/runs/<id>/focus`) does the collector
+look for the live process that owns it; SDK runs are never eligible.
+
+- **Claude:** `<profile root>/sessions/<pid>.json` files are parsed, only names
+  of the form `<digits>.json`, bounded and without following links. The adjacent
+  `<pid>.<hash>.key` files are **never opened or read**. A match needs the same
+  `sessionId` and `pid`, a live process, and a `procStart` equal to that process's
+  start time, so a reused PID is not mistaken for the session. Subagents use their
+  parent session's process.
+- **Codex:** the session's rollout transcript is located by native ID under the
+  profile's `sessions/` and `archived_sessions/` trees, and `lsof -t` reports the
+  Codex process holding it open. Archived transcripts are treated as stopped; a
+  file held only by some other program leaves liveness unknown (no button).
+- **Process details:** `ps` supplies the parent chain, terminal device, start
+  time and executable path (to find an enclosing `.app` bundle). The environment
+  is read with `ps eww` after stripping the process arguments (or
+  `/proc/<pid>/environ` on Linux), and only these
+  strictly validated keys are kept: `CMUX_WORKSPACE_ID`, `CMUX_PANEL_ID`,
+  `CMUX_SOCKET_PATH`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM`, `__CFBundleIdentifier`,
+  `ITERM_SESSION_ID` and `WINDOWID`. Every other value is discarded, and none is
+  returned to the browser or logged.
+
+The browser receives only `available`, `kind` (`focus`, `resume` or
+`unsupported`), a display label and, for resume, the command text.
+`POST /api/runs/<id>/focus` requires a same-origin `Origin` and an
+`X-Agent-Viz: focus` header, takes no body, recomputes the target and runs only
+fixed argv lists (no shell) with short timeouts: `cmux select-workspace` /
+`focus-panel`, `tmux select-window` / `select-pane` / `switch-client`, an
+AppleScript that selects a matching iTerm2 session or Terminal tab, `open -b` /
+`open -a`, or `wmctrl -i -a`. Errors are generic. Resume commands are built from
+the session ID, the transcript's recorded working directory and the profile root
+(omitted for the default `~/.claude` / `~/.codex`), offered only when no live
+process is found and liveness could be checked, and never for subagents. The
+browser re-checks the target before copying, so a session that came back to life
+is opened rather than forked.
