@@ -20,8 +20,9 @@ dashboard keeps the original status evidence next to them.
 
 ## When summaries refresh
 
-- Only active sessions seen in the last 15 minutes are eligible: top-level
-  sessions plus any run (including a subagent) waiting for user input.
+- Only sessions seen in the last 15 minutes are eligible: working, waiting or
+  idle top-level sessions (idle means the turn ended and it awaits your next
+  direction), plus any run, including a subagent, waiting for user input.
 - A summary refreshes only when its goal context changes: a new user request,
   title or recap. Assistant progress, tool calls and heartbeats never trigger one.
 - A session's summary refreshes at most once every 10 minutes, and the service

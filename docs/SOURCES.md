@@ -81,10 +81,9 @@ not prompts, assistant text, tool names, arguments, results, instructions or
 account identifiers. Project labels contain only the last directory name.
 That name can still be private.
 
-Set `"include_text": true` on a specific profile to show bounded first-task and
-assistant excerpts. This is explicit local opt-in: excerpts can contain private
-information, are not guaranteed redacted, and become part of local dashboard
-storage. Tool arguments/results and hidden reasoning are never exported by
+Profiles show the bounded latest request and assistant excerpts by default. Set
+`"include_text": false` on a profile to hide them. Excerpts can contain private
+information, are not redacted, and become part of local dashboard storage. Tool arguments/results and hidden reasoning are never exported by
 these adapters. Turning text off prevents future capture; it does not erase
 existing local history.
 

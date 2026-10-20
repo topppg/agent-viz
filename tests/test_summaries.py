@@ -119,7 +119,7 @@ class SummariesTests(unittest.TestCase):
         instance = self.summarizer()
         self.store.snapshot.return_value = {
             "runs": [
-                self.make_run(state="idle"),
+                self.make_run(state="idle", parent_run_id="parent"),
                 self.make_run(state="completed"),
                 self.make_run(parent_run_id="parent"),
                 self.make_run(last_seen="2000-01-01T00:00:00Z"),

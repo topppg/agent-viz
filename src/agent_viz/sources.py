@@ -32,7 +32,7 @@ class SourceProfile:
     kind: str
     label: str
     root: str
-    include_text: bool = False
+    include_text: bool = True
 
     def __post_init__(self) -> None:
         if self.kind not in {"codex", "claude"}:
@@ -314,6 +314,12 @@ def _text(message: Any) -> str:
     return ""
 
 
+def _request_text(message: object) -> str:
+    """The user's latest request; wrapped tool, shell or instruction echoes are skipped."""
+    text = _text(message)
+    return "" if text.lstrip().startswith(("<", "# AGENTS.md")) else text
+
+
 def _base(profile: SourceProfile, native: str, project: str, started: str | None) -> dict:
     # An observer collection is NOT a vendor conversation/session. Its identity
     # stays fixed when ancestor transcripts enter or leave a bounded scan window.
@@ -382,10 +388,10 @@ def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | 
                 state, activity, evidence = "working", "Turn started", str(event)
             elif event in {"task_complete", "turn_complete", "turn_aborted"}:
                 state, activity, evidence = "idle", "Turn ended · session may resume", str(event)
-            if profile.include_text and event == "user_message" and not out.get("_task_set"):
-                text = _text(p.get("message"))
+            if profile.include_text and event == "user_message":
+                text = _request_text(p.get("message"))
                 if text:
-                    out["task"], out["_task_set"] = text, True
+                    out["task"] = text
         elif kind == "response_item":
             event = p.get("type")
             if event in {"function_call", "custom_tool_call", "local_shell_call"}:
@@ -407,7 +413,6 @@ def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | 
                 evidence=f"Codex transcript: {evidence}; inferred session state",
             )
             last_state_time = stamp or last_state_time
-    out.pop("_task_set", None)
     out["last_seen"] = out["last_seen"] or datetime.fromtimestamp(mtime, UTC).isoformat()
     return out
 
@@ -429,7 +434,6 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
         out["parent_run_id"] = _ns(profile, session)
         out["name"] = f"Claude subagent {agent[:8]}"
     last_state_time = None
-    task_set = False
     for row in records:
         stamp = _time(row.get("timestamp"))
         if stamp and (out["last_seen"] is None or stamp > out["last_seen"]):
@@ -446,10 +450,15 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
                 "Tool result recorded" if result else "User turn recorded",
                 "user/tool_result" if result else "user",
             )
-            if profile.include_text and not result and not task_set:
-                text = _text(content)
+            # Skill bodies, compaction summaries and command echoes are not requests.
+            if (
+                profile.include_text
+                and not result
+                and not (row.get("isMeta") or row.get("isCompactSummary"))
+            ):
+                text = _request_text(content)
                 if text:
-                    out["task"], task_set = text, True
+                    out["task"] = text
         elif kind == "assistant" and isinstance(message, dict):
             stop = message.get("stop_reason")
             content = message.get("content", [])

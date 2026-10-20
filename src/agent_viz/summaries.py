@@ -387,7 +387,7 @@ class Summarizer:
         runs = [
             run
             for run in self.store.snapshot(limit=10000)["runs"]
-            if run.get("state") in ACTIVE
+            if (run.get("state") in ACTIVE or run.get("state") == "idle")
             and (not run.get("parent_run_id") or run.get("state") == "waiting_user")
             and 0 <= current - _stamp(run.get("last_seen")) <= RECENT_SECONDS
         ]
