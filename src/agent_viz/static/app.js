@@ -6,7 +6,7 @@
   const PALETTE = ["#7aa2f7", "#5eead4", "#c3a6ff", "#f0a07a", "#e6c07b", "#94e2d5", "#f5a3c7", "#a3be8c"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   const MAX_ROWS = 300;
-  const state = { snapshot: null, selected: null, view: "active", order: [], colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "" };
+  const state = { snapshot: null, selected: null, view: "active", order: [], colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", usageKey: "" };
   const node = (tag, text, className) => {
     const el = document.createElement(tag);
     if (text !== undefined && text !== null) el.textContent = String(text);
@@ -146,7 +146,7 @@
   function render() {
     if (!state.snapshot) return;
     const list = harnesses();
-    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list); renderFlux(list);
+    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list); renderFlux(list); renderUsage(list);
     // Rebuild the table only when something visible changed, so clicks and focus survive live ticks.
     if (tableKey() !== state.tableKey) renderTable(); else updateSeen();
   }
@@ -258,6 +258,79 @@
     host.append(node("span", `${peak * scale}/min`, "ymax"));
     const busiest = byHarness.map((h) => [h.label, h.series.slice(-scale).reduce((a, b) => a + b, 0)]).sort((a, b) => b[1] - a[1])[0];
     host.setAttribute("aria-label", `Events per minute over the last 10 minutes, stacked by harness. Busiest now: ${busiest[0]} at ${busiest[1]} per minute.`);
+  }
+
+  const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const WEEKS = 53;
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const dayKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const dayName = (d) => `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  function renderUsageLegend() {
+    const host = $("usage-legend");
+    if (host.children.length) return;
+    host.append(node("span", "less"), ...[0, 1, 2, 3, 4].map((level) => node("span", null, `day l${level}`)), node("span", "more"),
+      node("span", null, "day l0 seen"), node("span", "activity, no requests"));
+  }
+  function renderUsage(list) {
+    const usage = state.snapshot.usage || { days: [], window_days: 365 };
+    const harness = $("harness-filter").value;
+    const today = new Date(serverNow()); today.setHours(0, 0, 0, 0);
+    const labels = new Map(list.map((h) => [h.key, h.label]));
+    // Rebuild only when the data, filter, day or harness names change, not on every tick.
+    const key = JSON.stringify([usage, harness, dayKey(today), [...labels]]);
+    if (key === state.usageKey) return;
+    state.usageKey = key;
+    renderUsageLegend();
+    const byDate = new Map((usage.days || []).map((d) => [d.date, d]));
+    const valueOf = (d) => {
+      if (!d) return null;
+      if (!harness) return { requests: d.requests || 0, sessions: d.sessions || 0, by: d.by_harness || {} };
+      const requests = d.by_harness?.[harness] || 0; const sessions = d.sessions_by_harness?.[harness] || 0;
+      return requests || sessions ? { requests, sessions, by: {} } : null;
+    };
+    const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (today.getDay() + 6) % 7 - (WEEKS - 1) * 7);
+    const windowStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((usage.window_days || 365) - 1));
+    const days = [];
+    for (let i = 0; i < WEEKS * 7; i++) {
+      const date = new Date(first.getFullYear(), first.getMonth(), first.getDate() + i);
+      days.push({ date, col: Math.floor(i / 7) + 2, row: (i % 7) + 2, inside: date >= windowStart && date <= today, value: valueOf(byDate.get(dayKey(date))) });
+    }
+    const counts = days.filter((d) => d.inside && d.value?.requests).map((d) => d.value.requests).sort((a, b) => a - b);
+    const quantile = (q) => counts[Math.floor(q * (counts.length - 1))];
+    const cuts = counts.length ? [quantile(.25), quantile(.5), quantile(.75)] : [];
+    const peak = counts[counts.length - 1] || 0;
+    const level = (n) => !n ? 0 : n === peak ? 4 : 1 + cuts.filter((c) => n > c).length;
+    const host = $("heatmap"); host.replaceChildren();
+    const place = (el, col, row) => { el.style.gridColumn = String(col); el.style.gridRow = String(row); return el; };
+    [["Mon", 2], ["Wed", 4], ["Fri", 6]].forEach(([text, row]) => host.append(place(node("span", text, "wd"), 1, row)));
+    let lastMonth = -10;
+    days.filter((d) => d.date.getDate() === 1).forEach((d) => {
+      // A label needs about three columns; drop one that would overlap its neighbour.
+      if (d.col - lastMonth < 3) return;
+      lastMonth = d.col; host.append(place(node("span", MONTHS[d.date.getMonth()], "mo"), d.col, 1));
+    });
+    let total = 0, active = 0, busiest = null;
+    days.forEach((d) => {
+      const cell = place(node("span", null, "day"), d.col, d.row);
+      if (!d.inside) { cell.className = "day out"; cell.setAttribute("aria-hidden", "true"); host.append(cell); return; }
+      const v = d.value;
+      const text = `${dayName(d.date)} · ${v ? `${plural(v.requests, "request")} · ${plural(v.sessions, "session")}` : "no activity"}`;
+      const breakdown = Object.entries(v?.by || {}).sort((a, b) => b[1] - a[1]).map(([k, n]) => `\n${labels.get(k) || k}: ${plural(n, "request")}`).join("");
+      cell.className = `day l${level(v?.requests)}${v && !v.requests ? " seen" : ""}`;
+      cell.dataset.date = dayKey(d.date);
+      cell.setAttribute("role", "img"); cell.setAttribute("aria-label", text); cell.title = text + breakdown;
+      if (v) { total += v.requests; if (v.requests) active += 1; if (v.requests && v.requests >= (busiest?.value.requests || 0)) busiest = d; }
+      host.append(cell);
+    });
+    const scope = harness ? ` · ${labels.get(harness) || harness}` : "";
+    const summary = total ? `${plural(total, "request")} · ${plural(active, "active day")} · busiest ${dayName(busiest.date)} (${busiest.value.requests})${scope}`
+      : `no requests recorded in the last ${usage.window_days || 365} days${scope}`;
+    $("usage-summary").textContent = summary + (usage.limited ? " · partial: some transcripts were too large or unreadable" : "");
+    host.setAttribute("aria-label", `Daily requests heatmap, one cell per day: ${summary}`);
+    // On narrow screens the newest weeks matter most; scroll there once, not on every update.
+    if (host.parentElement && !state.usageScrolled) { host.parentElement.scrollLeft = host.parentElement.scrollWidth; state.usageScrolled = true; }
   }
 
   function workRank(run) {
@@ -477,6 +550,7 @@
     } catch (error) { showError(error.message || "Cannot reach the local collector."); setConnection("disconnected · retrying", false); }
     finally { state.fetching = false; $("refresh").disabled = false; }
   }
+  function toggleCharts() { $("usage").hidden = $("overview").classList.toggle("collapsed"); }
   function setView(view) { state.view = view; renderViews(); if (state.snapshot) renderTable(); }
   function move(step) {
     if (!state.order.length) return;
@@ -496,7 +570,7 @@
     if (event.key === "Escape") { if (typing) event.target.blur(); else selectRun(null); return; }
     if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
     const actions = { "/": () => $("search").focus(), j: () => move(1), ArrowDown: () => move(1), k: () => move(-1), ArrowUp: () => move(-1),
-      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed") };
+      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: toggleCharts };
     if (actions[event.key]) { event.preventDefault(); actions[event.key](); }
   });
   renderViews();

@@ -13,6 +13,14 @@ from pathlib import Path
 from .model import STATES, TERMINAL, canonical, now, text, timestamp, validate_event
 
 
+def _label(value: object, field: str) -> str:
+    # Mirrors the browser's sourceOf/accountOf so harness keys match.
+    if isinstance(value, dict):
+        found = value.get(field) or value.get("label") or value.get("id")
+        return str(found) if found else "unknown"
+    return str(value) if value else "unknown"
+
+
 class Store:
     def __init__(self, path: str | Path = ":memory:", stale_after: float = 15):
         self.lock = threading.RLock()
@@ -357,6 +365,40 @@ class Store:
                 continue
             runs.setdefault(run_id, [0] * count)[count - 1 - age] += total
         return {"bucket_seconds": bucket, "buckets": count, "end": end_iso, "runs": runs}
+
+    def usage(self, window_days: int = 365) -> list[tuple[str, str, str, str, int]]:
+        """SDK runs per local day: (day, source, account, session_id, runs started).
+
+        Buckets by the store's own UTC receive time, not producer-supplied clocks.
+        """
+        since = datetime.fromtimestamp(time.time() - (window_days + 1) * 86400, UTC).isoformat()
+        query = """
+            SELECT run_id, substr(received_at, 1, 16),
+                   SUM(json_extract(data, '$.type') = 'run.started')
+            FROM events WHERE received_at >= ? AND producer_id NOT LIKE 'observation:%'
+            GROUP BY 1, 2"""
+        with self.lock:
+            rows = self.db.execute(query, (since,)).fetchall()
+            runs = {
+                run_id: json.loads(data)
+                for run_id, data in self.db.execute(
+                    "SELECT run_id, data FROM runs WHERE json_extract(data, '$.mode') = 'sdk'"
+                )
+            }
+        result: dict[tuple[str, str, str, str], int] = {}
+        for run_id, minute, started in rows:
+            run = runs.get(run_id)
+            if run is None:
+                continue
+            day = datetime.fromisoformat(minute).replace(tzinfo=UTC).astimezone().date()
+            key = (
+                day.isoformat(),
+                _label(run.get("source"), "kind"),
+                _label(run.get("account"), "id"),
+            )
+            key += (str(run.get("session_id")),)
+            result[key] = result.get(key, 0) + int(started or 0)
+        return [(*key, started) for key, started in result.items()]
 
     def events(self, run_id: str, after: int = 0, limit: int = 100) -> dict:
         limit = min(max(limit, 1), 200)

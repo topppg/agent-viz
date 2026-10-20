@@ -95,6 +95,11 @@ Do not record or share a live-source dashboard without reviewing its contents.
   navigation. Clicking a row opens it in place: goal, current activity, request
   or task, parent and subagent links, and a collapsed event history in which
   repeated events are grouped.
+- Daily usage heatmap: the last 12 months of user requests per local day, one
+  cell per day with request/session counts and a per-harness breakdown, following
+  the harness filter. History comes from transcript timestamps (see
+  [the usage scan](docs/SOURCES.md#daily-usage-scan)), not from how long the
+  observer has run; SDK runs count one request per started run.
 - Explicit SDK lifecycle and independent tool/model operation outcomes, with
   separate work state and telemetry freshness.
 - Codex and Claude multi-profile discovery, namespaced identities, and available

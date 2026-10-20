@@ -3,6 +3,7 @@ import json
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -68,6 +69,47 @@ class ServerTests(unittest.TestCase):
             self.assertTrue(data)
         snapshot = json.loads(self.request("GET", "/api/snapshot")[2])
         self.assertEqual(snapshot["runs"], [])
+
+    def test_snapshot_usage_merges_native_profiles_and_sdk_runs_by_day(self):
+        today = datetime.now().astimezone()
+        self.post(json.dumps({**self.event(), "occurred_at": today.isoformat()}))
+
+        class Monitor:
+            def public_state(self):
+                return {
+                    "profiles": [],
+                    "source_errors": {},
+                    "source_stats": [],
+                    "automatic_discovery": False,
+                }
+
+            def public_usage(self):
+                old = (today - timedelta(days=400)).date().isoformat()
+                return {
+                    "profiles": {
+                        "claude-work": {
+                            today.date().isoformat(): (3, frozenset({"claude-work:a", "x:b"})),
+                            old: (9, frozenset({"claude-work:c"})),
+                        }
+                    },
+                    "limited": False,
+                }
+
+        self.server.monitor = Monitor()
+        usage = json.loads(self.request("GET", "/api/snapshot")[2])["usage"]
+        self.assertEqual(usage["window_days"], 365)
+        self.assertEqual(
+            usage["days"],
+            [
+                {
+                    "date": today.date().isoformat(),
+                    "requests": 4,
+                    "by_harness": {"profile:claude-work": 3, "sdk:local": 1},
+                    "sessions": 3,
+                    "sessions_by_harness": {"profile:claude-work": 2, "sdk:local": 1},
+                }
+            ],
+        )
 
     def test_ingestion_auth_schema_dedup_and_history(self):
         raw = json.dumps(self.event())
