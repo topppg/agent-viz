@@ -279,6 +279,47 @@ class SourcesTests(unittest.TestCase):
         path.write_text(path.read_text() + "\n")
         self.assertTrue(scan_profile(profile)[0]["name"].startswith("Claude subagent"))
 
+    def test_idle_activity_is_the_last_reply(self):
+        claude = self.profile("claude", "claude-reply", text=True)
+        base = {"sessionId": "same", "timestamp": "2026-10-20T08:00:00Z"}
+        rows = [
+            {**base, "type": "user", "message": {"content": "Fix the test"}},
+            {
+                **base,
+                "type": "assistant",
+                "message": {
+                    "stop_reason": "end_turn",
+                    "content": [
+                        {"type": "thinking", "thinking": "SECRET thought"},
+                        {"type": "text", "text": "Fixed it; the suite passes."},
+                    ],
+                },
+            },
+            {**base, "type": "system", "subtype": "turn_duration"},
+        ]
+        self.log(claude, "p/session.jsonl", rows)
+        row = scan_profile(claude)[0]
+        self.assertEqual((row["state"], row["activity"]), ("idle", "Fixed it; the suite passes."))
+        self.assertNotIn("SECRET", json.dumps(row))
+        hidden = SourceProfile(
+            claude.id + "-h", "claude", "Hidden", claude.root, include_text=False
+        )
+        self.assertEqual(scan_profile(hidden)[0]["activity"], "Turn ended · session may resume")
+        codex = self.profile("codex", "codex-reply", text=True)
+        rows = self.codex()
+        rows.append(
+            {
+                "type": "event_msg",
+                "timestamp": "2026-10-20T08:00:09Z",
+                "payload": {
+                    "type": "task_complete",
+                    "last_agent_message": "Done: retries are capped at three.",
+                },
+            }
+        )
+        self.log(codex, "run.jsonl", rows)
+        self.assertEqual(scan_profile(codex)[0]["activity"], "Done: retries are capped at three.")
+
     def test_malformed_partial_tails_and_symlink_skipped(self):
         profile = self.profile()
         self.log(profile, "good.jsonl", self.codex(), b'{bad}\n{"type":"event_msg"')

@@ -283,10 +283,13 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.equal(rootLoads(), before + 1);
  // A top-level session that finished its turn counts as needing you.
  const turn = run('turn', null, 'Turn ended', {state:'idle', activity:'Turn ended · session may resume'});
- stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, turn]})}); await tick();
+ const replied = run('replied', null, 'Replied', {state:'idle', activity:'Fixed it; the suite passes.'});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, turn, replied]})}); await tick();
+ assert.ok(rows().find(r => r.dataset.runId === 'replied').textContent.includes('Fixed it; the suite passes.'));
  const turnRow = rows().find(r => r.dataset.runId === 'turn');
  assert.ok(turnRow.textContent.includes('↩ your turn~'));
- assert.ok(ids.counts.textContent.includes('2 needs you'));
+ assert.ok(turnRow.textContent.includes('Original task'));
+ assert.ok(ids.counts.textContent.includes('3 needs you'));
  turnRow.listeners.click(); await tick();
  assert.ok(detail().textContent.includes('waiting for your next direction'));
  // Summaries off and empty chart.
