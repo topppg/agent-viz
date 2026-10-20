@@ -60,8 +60,12 @@
     if (run.state === "cancelled") return { key: "done", glyph: "–", text: `cancelled${inferred}` };
     // An unanswered approval stops a transcript from changing; it still needs you.
     if (run.state === "waiting_user") return { key: "needs", glyph: "◐", text: `needs you${inferred}` };
+    // A top-level session that recently finished its turn is waiting for your next direction.
+    if (run.state === "idle" && !run.parent_run_id && serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW)
+      return { key: "needs", turn: true, glyph: "↩", text: `your turn${inferred}` };
     if (!["fresh", "observed"].includes(healthOf(run))) return { key: "quiet", glyph: "○", text: `quiet ${age(run.last_seen)}` };
-    if (String(run.state).startsWith("waiting")) return { key: "waiting", glyph: "◐", text: `${label(run.state).replace("waiting ", "wait ")}${inferred}` };
+    // Waiting on a tool or a child is ordinary work, not something for you.
+    if (String(run.state).startsWith("waiting")) return { key: "running", glyph: "●", text: `running${inferred}` };
     if (run.state === "idle") return { key: "idle", glyph: "◌", text: `idle${inferred}` };
     if (run.state === "unknown") return { key: "unknown", glyph: "?", text: "unknown" };
     return { key: "running", glyph: "●", text: `running${inferred}` };
@@ -70,7 +74,8 @@
     if (terminal.has(run.state)) return { mark: "›", text: run.summary || run.activity || run.task || "finished", cls: "" };
     const summary = run.ai_summary;
     if (summary?.text) return { mark: "✦", ai: true, text: summary.text, cls: status.key === "needs" ? "needs" : summary.stale ? "stale-summary" : "" };
-    const raw = run.activity || run.task;
+    // After a finished turn the latest activity is just "turn ended"; the request says more.
+    const raw = status.turn ? run.task || run.activity : run.activity || run.task;
     if (!raw) return { mark: "›", text: run.inferred ? "text hidden · enable include_text" : "no activity reported", cls: "dim" };
     if (status.key === "quiet") return { mark: "›", text: `last said: ${raw}`, cls: "dim" };
     return { mark: "›", text: raw, cls: status.key === "needs" ? "needs" : "" };
@@ -302,7 +307,7 @@
       visited.add(run.run_id);
       state.order.push(run.run_id);
       host.append(row(run, prefix, !direct.has(run.run_id), orphan, maxRate));
-      if (state.selected === run.run_id) host.append(expansion(run, byId, children));
+      if (state.selected === run.run_id) host.append(expansion(run, byId));
       const kids = (children.get(run.run_id) || []).filter((c) => visible.has(c.run_id)).sort(compare);
       kids.forEach((child, i) => {
         const last = i === kids.length - 1;
@@ -316,7 +321,10 @@
   }
   function row(run, prefix, context, orphan, maxRate) {
     const status = statusOf(run);
-    const button = node("button", null, `row run-row ${status.key}${state.selected === run.run_id ? " selected" : ""}${context ? " context" : ""}`);
+    const depth = Math.round(prefix.length / 3);
+    const button = node("button", null, `row run-row ${status.key}${depth ? " sub" : ""}${state.selected === run.run_id ? " selected" : ""}${context ? " context" : ""}`);
+    // Subagents shift right as a block, so they never read as top-level processes.
+    if (depth) button.style.setProperty("--depth", String(depth));
     button.type = "button"; button.dataset.focusKey = `select:${run.run_id}`; button.dataset.runId = run.run_id;
     button.setAttribute("aria-current", String(state.selected === run.run_id));
     button.setAttribute("aria-expanded", String(state.selected === run.run_id));
@@ -355,12 +363,6 @@
     $("window-label").hidden = state.view !== "all";
   }
 
-  function goalOrigin(run) {
-    const summary = run.ai_summary;
-    if (!summary?.text) return "no summary yet · raw activity shown";
-    const source = summary.origin === "claude-recap" ? "Claude recap" : `AI summary${summary.model ? ` · ${summary.model.split("/").pop()}` : ""}`;
-    return `✦ goal from ${source} · ${age(summary.generated_at)} ago${summary.stale ? " · refresh due" : ""}`;
-  }
   // Consecutive identical events collapse into one line, so tool bursts stay readable.
   function compressEvents(events) {
     const groups = [];
@@ -375,12 +377,16 @@
     });
     return groups;
   }
-  function expansion(run, byId, children) {
+  function expansion(run, byId) {
     const host = node("div", null, "expansion"); host.id = "detail";
     host.setAttribute("role", "region"); host.setAttribute("aria-label", `Details for ${nameOf(run)}`);
     const status = statusOf(run);
     const parent = byId.get(run.parent_run_id);
-    if (status.key === "needs") {
+    if (status.turn) {
+      const turn = node("p", `↩ finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
+      turn.append(node("span", ` · continue it in ${harnessOf(run).label}`, "needs-where"));
+      host.append(turn);
+    } else if (status.key === "needs") {
       const needs = node("p", `◐ waiting on you for ${age(run.last_seen)}${run.activity ? ` · ${run.activity}` : ""}`, "needs-line");
       needs.append(node("span", ` · answer it in “${parent ? nameOf(parent) : nameOf(run)}”`, "needs-where"));
       host.append(needs);
@@ -400,20 +406,8 @@
       fields.append(node("dt", "parent"), dd);
     }
     host.append(fields);
-    const kids = children.get(run.run_id) || [];
-    if (kids.length) {
-      const strip = node("div", null, "chips"); strip.append(node("span", "subagents", "chips-label"));
-      kids.forEach((kid) => {
-        const kidStatus = statusOf(kid);
-        const chip = node("button", null, `chip ${kidStatus.key}`); chip.type = "button"; chip.dataset.focusKey = `chip:${kid.run_id}`;
-        chip.append(node("span", kidStatus.glyph, `g-${kidStatus.key}`), ` ${nameOf(kid)} `, node("span", `· ${kidStatus.text}`, "muted"));
-        chip.addEventListener("click", () => selectRun(kid.run_id));
-        strip.append(chip);
-      });
-      host.append(strip);
-    }
     const footer = node("div", null, "expansion-footer");
-    footer.append(node("span", goalOrigin(run)), node("span", `${harnessOf(run).label}${run.project ? ` · ${run.project}` : ""} · ${age(run.started_at, time(run.ended_at) || serverNow())}`, "muted"), node("span", "", "spacer"));
+    footer.append(node("span", `${harnessOf(run).label}${run.project ? ` · ${run.project}` : ""} · ${age(run.started_at, time(run.ended_at) || serverNow())}`, "muted"), node("span", "", "spacer"));
     const history = node("button", state.historyOpen ? "hide history" : "history ▸", "link"); history.type = "button"; history.dataset.focusKey = "history";
     history.addEventListener("click", () => { state.historyOpen = !state.historyOpen; if (state.historyOpen && !state.events.length) loadEvents(true); else renderTable(); });
     const close = node("button", "esc close", "link"); close.type = "button"; close.addEventListener("click", () => selectRun(null));

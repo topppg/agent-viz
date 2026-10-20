@@ -32,7 +32,7 @@ class SourceProfile:
     kind: str
     label: str
     root: str
-    include_text: bool = False
+    include_text: bool = True
 
     def __post_init__(self) -> None:
         if self.kind not in {"codex", "claude"}:

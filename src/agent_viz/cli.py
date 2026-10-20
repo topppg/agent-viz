@@ -144,7 +144,7 @@ def main(argv=None):
                     args.write_config,
                     json.dumps({"profiles": [asdict(p) for p in profiles]}, indent=2) + "\n",
                 )
-                print("Private source config created. Task text is disabled by default.")
+                print("Private source config created; task text is shown by default.")
             return 0
         if args.command == "demo":
             from .demo import run_demo

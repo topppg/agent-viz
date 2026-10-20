@@ -66,7 +66,7 @@ class StaticTests(unittest.TestCase):
 const fs = require('fs'), vm = require('vm'), assert = require('assert');
 let document;
 class Element {
-  constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.value = ''; this.hidden = false; this._text = ''; this.options = []; this.style = {}; this.attrs = {};
+  constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.value = ''; this.hidden = false; this._text = ''; this.options = []; this.style = { setProperty(k, v) { this[k] = v; } }; this.attrs = {};
     this.classList = { toggle: (c) => { this.className = (this.className || '').includes(c) ? '' : c; } }; }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(c => typeof c === 'string' ? c : c.textContent).join(''); }
@@ -172,11 +172,11 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  flatten(detail()).find(x => x.dataset.focusKey === 'history').listeners.click(); await tick();
  assert.ok(detail().textContent.includes('<script>not executable</script>'));
  assert.ok(!flatten(detail()).some(x => x.tagName === 'script'));
- // Subagent chips and the parent link move the open row.
- rows().find(r => r.dataset.runId === 'root').listeners.click(); await tick();
- assert.ok(detail().textContent.includes('subagents'));
- flatten(detail()).find(x => x.dataset.focusKey === 'chip:ask').listeners.click(); await tick();
+ // A subagent opens from its own row; the parent link moves the open row back up.
+ rows().find(r => r.dataset.runId === 'ask').listeners.click(); await tick();
  assert.equal(expanded(), 'ask');
+ assert.ok(rows().find(r => r.dataset.runId === 'ask').className.includes(' sub'));
+ assert.ok(!detail().textContent.includes('goal from'));
  assert.ok(detail().textContent.includes('waiting on you'));
  assert.ok(detail().textContent.includes('Tuning retry limits'));
  flatten(detail()).find(x => x.dataset.focusKey === 'parent:root').listeners.click(); await tick();
@@ -199,6 +199,14 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  stream.listeners.reset({data:JSON.stringify({...snapshot,cursor:0})}); await tick();
  assert.ok(ids.connection.textContent.includes('history reset'));
  assert.equal(rootLoads(), before + 1);
+ // A top-level session that finished its turn counts as needing you.
+ const turn = run('turn', null, 'Turn ended', {state:'idle', activity:'Turn ended · session may resume'});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, turn]})}); await tick();
+ const turnRow = rows().find(r => r.dataset.runId === 'turn');
+ assert.ok(turnRow.textContent.includes('↩ your turn~'));
+ assert.ok(ids.counts.textContent.includes('2 needs you'));
+ turnRow.listeners.click(); await tick();
+ assert.ok(detail().textContent.includes('waiting for your next direction'));
  // Summaries off and empty chart.
  stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:false},activity:{bucket_seconds:10,buckets:60,end:now,runs:{}}})});
  assert.ok(ids['ai-status'].textContent.includes('summaries off'));

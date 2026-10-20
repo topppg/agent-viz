@@ -184,13 +184,15 @@ class SourcesTests(unittest.TestCase):
         self.log(profile, "run.jsonl", rows)
         self.assertEqual(scan_profile(profile)[0]["state"], "working")
 
-    def test_text_is_opt_in_but_tool_arguments_still_hidden(self):
+    def test_text_can_be_hidden_and_tool_arguments_never_shown(self):
         private = self.profile(text=True)
         self.log(private, "run.jsonl", self.codex())
         output = scan_profile(private)[0]
         self.assertEqual(output["task"], "SECRET prompt")
         self.assertNotIn("SECRET args", json.dumps(output))
-        safe = SourceProfile(private.id, private.kind, private.label, private.root)
+        safe = SourceProfile(
+            private.id, private.kind, private.label, private.root, include_text=False
+        )
         self.assertNotIn("SECRET", json.dumps(scan_profile(safe)))
 
     def test_malformed_partial_tails_and_symlink_skipped(self):
@@ -407,7 +409,7 @@ class SourcesTests(unittest.TestCase):
                 }
             )
         )
-        self.assertFalse(load_profiles(path)[0].include_text)
+        self.assertTrue(load_profiles(path)[0].include_text)
         path.write_text(
             json.dumps(
                 [
