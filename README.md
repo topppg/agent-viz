@@ -82,7 +82,7 @@ process inventory. State is visibly marked inferred, with last-evidence time.
 They can show recent and historical sessions; hundreds of observed runs do not mean hundreds of
 currently running processes. A stopped output stream is not a completion signal.
 
-Task/message text is shown by default: bounded first-task and activity excerpts.
+Task/message text is shown by default: the bounded latest request and activity excerpts.
 Set `"include_text": false` for a profile in the ignored config to hide it. Those
 excerpts can contain private information and remain in local history.
 Do not record or share a live-source dashboard without reviewing its contents.
