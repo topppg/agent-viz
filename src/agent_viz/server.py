@@ -6,6 +6,7 @@ import hmac
 import json
 import threading
 import time
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -13,6 +14,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from .model import MAX_EVENT_BYTES, parse_json
 
 STATIC = Path(__file__).parent / "static"
+USAGE_WINDOW_DAYS = 365
+USAGE_REFRESH_SECONDS = 30
 
 
 class Collector(ThreadingHTTPServer):
@@ -38,6 +41,7 @@ class Collector(ThreadingHTTPServer):
         self.summarizer = summarizer
         self.stopping = threading.Event()
         self._activity: tuple[int, dict] | None = None
+        self._usage: tuple[float, dict] | None = None
         super().__init__((host, port), Handler)
 
     @property
@@ -81,9 +85,47 @@ class Collector(ThreadingHTTPServer):
         if self._activity is None or self._activity[0] != now_second:
             self._activity = (now_second, self.store.activity())
         data["activity"] = self._activity[1]
+        if self._usage is None or time.monotonic() - self._usage[0] >= USAGE_REFRESH_SECONDS:
+            self._usage = (time.monotonic(), self.usage())
+        data["usage"] = self._usage[1]
         data["stale_after_seconds"] = self.store.stale_after
         data["mode"] = "local-observer"
         return data
+
+    def usage(self) -> dict:
+        """Daily requests/sessions keyed like the browser's harness groups.
+
+        Native profiles are ``profile:<id>`` (transcript user turns); SDK runs are
+        ``<source>:<account>``, where one started run counts as one request.
+        """
+        first = (datetime.now().date() - timedelta(days=USAGE_WINDOW_DAYS - 1)).isoformat()
+        days: dict[str, dict] = {}
+        sessions: dict[str, dict[str, set[str]]] = {}
+
+        def add(day: str, harness: str, requests: int, ids: set[str] | frozenset[str]) -> None:
+            item = days.setdefault(day, {"date": day, "requests": 0, "by_harness": {}})
+            item["requests"] += requests
+            if requests:
+                item["by_harness"][harness] = item["by_harness"].get(harness, 0) + requests
+            sessions.setdefault(day, {}).setdefault(harness, set()).update(ids)
+
+        native = self.monitor.public_usage() if self.monitor else {"profiles": {}}
+        for profile_id, per_day in native["profiles"].items():
+            for day, (requests, ids) in per_day.items():
+                if day >= first:
+                    add(day, f"profile:{profile_id}", requests, ids)
+        for day, source, account, session, started in self.store.usage(USAGE_WINDOW_DAYS):
+            if day >= first:
+                add(day, f"{source}:{account}", started, {"sdk:" + session})
+        for day, item in days.items():
+            counts = {key: len(ids) for key, ids in sessions[day].items() if ids}
+            item["sessions"] = sum(counts.values())
+            item["sessions_by_harness"] = counts
+        return {
+            "days": sorted(days.values(), key=lambda item: item["date"]),
+            "window_days": USAGE_WINDOW_DAYS,
+            "limited": bool(native.get("limited")),
+        }
 
     def stop(self):
         self.stopping.set()

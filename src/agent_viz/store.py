@@ -358,6 +358,26 @@ class Store:
             runs.setdefault(run_id, [0] * count)[count - 1 - age] += total
         return {"bucket_seconds": bucket, "buckets": count, "end": end_iso, "runs": runs}
 
+    def usage(self, window_days: int = 365) -> list[tuple[str, str, str, str, int]]:
+        """SDK runs per local day: (day, source, account, session_id, runs started)."""
+        since = datetime.fromtimestamp(time.time() - (window_days + 1) * 86400, UTC).isoformat()
+        query = """
+            SELECT date(json_extract(e.data, '$.occurred_at'), 'localtime') AS day,
+                   json_extract(r.data, '$.source'), json_extract(r.data, '$.account'),
+                   r.session_id, SUM(json_extract(e.data, '$.type') = 'run.started')
+            FROM events e JOIN (
+                SELECT run_id, json_extract(data, '$.session_id') AS session_id, data FROM runs
+            ) r ON r.run_id = e.run_id
+            WHERE e.producer_id NOT LIKE 'observation:%' AND e.received_at >= ?
+            GROUP BY day, 2, 3, 4"""
+        with self.lock:
+            rows = self.db.execute(query, (since,)).fetchall()
+        return [
+            (day, str(source), str(account), str(session), int(started))
+            for day, source, account, session, started in rows
+            if day
+        ]
+
     def events(self, run_id: str, after: int = 0, limit: int = 100) -> dict:
         limit = min(max(limit, 1), 200)
         with self.lock:

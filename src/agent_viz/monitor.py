@@ -8,8 +8,10 @@ from .sources import (
     DEFAULT_SCAN_LIMIT,
     MAX_SCAN_LIMIT,
     SourceProfile,
+    UsageDays,
     discover_profiles,
     scan_profile,
+    scan_usage,
 )
 
 
@@ -21,6 +23,7 @@ class Monitor:
         interval: float = 2,
         limit: int = DEFAULT_SCAN_LIMIT,
         max_age_days: float | None = None,
+        usage_interval: float = 60,
     ):
         if store is None:
             raise ValueError("Monitor requires a store")
@@ -30,6 +33,8 @@ class Monitor:
         self.interval = max(0.2, float(interval))
         self.limit = max(1, min(int(limit), MAX_SCAN_LIMIT))
         self.max_age_days = max_age_days
+        self.usage_interval = max(1.0, float(usage_interval))
+        self._usage: dict = {"profiles": {}, "limited": False}
         self.errors: dict[str, str] = {}
         self.counts: dict[str, int] = {}
         self.source_stats: list[dict] = []
@@ -40,7 +45,7 @@ class Monitor:
             "automatic_discovery": self.automatic,
         }
         self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._threads: list[threading.Thread] = []
         self._lock = threading.Lock()
 
     def scan_once(self) -> dict:
@@ -96,22 +101,53 @@ class Monitor:
             }
         return {"counts": counts, "errors": errors, "source_stats": stats}
 
+    def scan_usage_once(self) -> dict:
+        """Daily usage per profile; a slow full-year pass kept off the 2s scan loop."""
+        profiles: dict[str, UsageDays] = {}
+        limited = False
+        for profile in list(self.profiles):
+            coverage: dict = {}
+            try:
+                profiles[profile.id] = scan_usage(profile, diagnostics=coverage)
+            except Exception:
+                # The regular scan already reports this source as unavailable.
+                limited = True
+                continue
+            limited = limited or bool(
+                coverage.get("truncated")
+                or coverage.get("read_errors")
+                or coverage.get("clipped_files")
+                or coverage.get("oversized_records")
+            )
+        self._usage = {"profiles": profiles, "limited": limited}
+        return self._usage
+
     def start(self) -> None:
-        if self._thread and self._thread.is_alive():
+        if any(thread.is_alive() for thread in self._threads):
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="agent-viz-sources", daemon=True)
-        self._thread.start()
+        self._threads = [
+            threading.Thread(target=self._run, name="agent-viz-sources", daemon=True),
+            threading.Thread(target=self._run_usage, name="agent-viz-usage", daemon=True),
+        ]
+        for thread in self._threads:
+            thread.start()
 
     def _run(self) -> None:
         while not self._stop.is_set():
             self.scan_once()
             self._stop.wait(self.interval)
 
+    def _run_usage(self) -> None:
+        while not self._stop.is_set():
+            self.scan_usage_once()
+            self._stop.wait(self.usage_interval)
+
     def stop(self) -> None:
         self._stop.set()
-        if self._thread and self._thread is not threading.current_thread():
-            self._thread.join(timeout=max(2, self.interval + 1))
+        for thread in self._threads:
+            if thread is not threading.current_thread():
+                thread.join(timeout=max(2, self.interval + 1))
 
     def public_profiles(self) -> list[dict]:
         return [
@@ -128,3 +164,7 @@ class Monitor:
             "source_stats": [dict(s) for s in state["source_stats"]],
             "automatic_discovery": state["automatic_discovery"],
         }
+
+    def public_usage(self) -> dict:
+        """Counts and namespaced session IDs only; never paths or transcript text."""
+        return self._usage
