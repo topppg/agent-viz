@@ -177,6 +177,10 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.equal(expanded(), 'ask');
  assert.ok(rows().find(r => r.dataset.runId === 'ask').className.includes(' sub'));
  assert.ok(!detail().textContent.includes('goal from'));
+ rows().find(r => r.dataset.runId === 'child').listeners.click(); await tick();
+ assert.ok(detail().textContent.includes('Original task'));
+ assert.ok(!detail().textContent.includes('you asked'));
+ rows().find(r => r.dataset.runId === 'ask').listeners.click(); await tick();
  assert.ok(detail().textContent.includes('waiting on you'));
  assert.ok(detail().textContent.includes('Tuning retry limits'));
  flatten(detail()).find(x => x.dataset.focusKey === 'parent:root').listeners.click(); await tick();

@@ -221,6 +221,64 @@ class SourcesTests(unittest.TestCase):
         self.log(codex, "run.jsonl", rows)
         self.assertEqual(scan_profile(codex)[0]["task"], "Follow-up request")
 
+    def test_subagent_named_by_description_with_parent_prompt_as_goal(self):
+        profile = self.profile("claude", "claude-sub", text=True)
+        side = {
+            "type": "user",
+            "sessionId": "same",
+            "isSidechain": True,
+            "agentId": "a1b2c3",
+            "timestamp": "2026-10-20T08:00:00Z",
+        }
+        path = self.log(
+            profile,
+            "p/same/subagents/agent-a1b2c3.jsonl",
+            [
+                {**side, "message": {"content": "Find every caller of the retry helper"}},
+                {**side, "message": {"content": "A later user row"}},
+            ],
+        )
+        meta = path.with_name("agent-a1b2c3.meta.json")
+        meta.write_text(json.dumps({"description": "Map retry callers", "agentType": "Explore"}))
+        row = scan_profile(profile)[0]
+        self.assertEqual(row["name"], "Map retry callers")
+        self.assertEqual(row["task"], "Find every caller of the retry helper")
+        hidden = SourceProfile(
+            profile.id + "-h", "claude", "Hidden", profile.root, include_text=False
+        )
+        self.assertTrue(scan_profile(hidden)[0]["name"].startswith("Claude subagent"))
+        fork = self.log(
+            profile,
+            "p/same/subagents/agent-f00d.jsonl",
+            [
+                {"type": "fork-context-ref", "agentId": "f00d"},
+                {
+                    **side,
+                    "agentId": "f00d",
+                    "message": {
+                        "content": [
+                            {"type": "tool_result", "content": "SECRET inherited output"},
+                            {
+                                "type": "text",
+                                "text": "<fork-boilerplate>"
+                                + "x" * 3000
+                                + "</fork-boilerplate>\nYour directive: Ship A4",
+                            },
+                        ]
+                    },
+                },
+            ],
+        )
+        forked = next(r for r in scan_profile(profile) if r["run_id"].endswith("f00d"))
+        self.assertEqual(forked["task"], "Ship A4")
+        self.assertNotIn("SECRET", json.dumps(forked))
+        fork.unlink()
+        meta.unlink()
+        meta.symlink_to(self.root / "elsewhere.json")
+        (self.root / "elsewhere.json").write_text(json.dumps({"description": "Followed a link"}))
+        path.write_text(path.read_text() + "\n")
+        self.assertTrue(scan_profile(profile)[0]["name"].startswith("Claude subagent"))
+
     def test_malformed_partial_tails_and_symlink_skipped(self):
         profile = self.profile()
         self.log(profile, "good.jsonl", self.codex(), b'{bad}\n{"type":"event_msg"')

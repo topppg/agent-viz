@@ -87,6 +87,11 @@ information, are not redacted, and become part of local dashboard storage. Tool 
 these adapters. Turning text off prevents future capture; it does not erase
 existing local history.
 
+Claude subagents are named by the short description their parent gave them,
+read from the sibling `agent-<id>.meta.json` (bounded, symlinks not followed),
+and their goal is the first prompt the parent sent. Both are text, so a profile
+with `"include_text": false` keeps the generic name and hides the prompt.
+
 ## Bounds and limitations
 
 Each scan selects at most 5,000 recent JSONL files per profile by default (a
