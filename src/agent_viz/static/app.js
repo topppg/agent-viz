@@ -6,7 +6,7 @@
   const PALETTE = ["#7aa2f7", "#5eead4", "#c3a6ff", "#f0a07a", "#e6c07b", "#94e2d5", "#f5a3c7", "#a3be8c"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   const MAX_ROWS = 300;
-  const state = { snapshot: null, selected: null, view: "active", order: [], colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null };
+  const state = { snapshot: null, selected: null, view: "active", order: [], colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "" };
   const node = (tag, text, className) => {
     const el = document.createElement(tag);
     if (text !== undefined && text !== null) el.textContent = String(text);
@@ -134,7 +134,6 @@
     showError(null);
     render();
     if (state.selected) {
-      if (changed || historyReset) renderDetail();
       // Do not reset an older paginated history while the user is reading it.
       if ((previousCursor !== snapshot.cursor || historyReset) && !state.eventBusy && !state.more) loadEvents(false);
     }
@@ -142,7 +141,9 @@
   function render() {
     if (!state.snapshot) return;
     const list = harnesses();
-    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list); renderFlux(list); renderTable();
+    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list); renderFlux(list);
+    // Rebuild the table only when something visible changed, so clicks and focus survive live ticks.
+    if (tableKey() !== state.tableKey) renderTable(); else updateSeen();
   }
   function activeStatuses(runs) {
     // Same scope as the active view: long-quiet history is not counted.
@@ -258,7 +259,18 @@
     const key = statusOf(run).key;
     return { needs: 0, running: 1, waiting: 2, idle: 3, unknown: 4, quiet: 5, failed: 6, done: 7 }[key] ?? 8;
   }
+  function tableKey() {
+    return JSON.stringify([state.fingerprint, activity().end && Math.floor(time(activity().end) / 10000), state.view,
+      $("harness-filter").value, $("window-filter").value, $("search").value, state.selected, state.historyOpen,
+      state.events.length, state.eventBusy, state.more, Math.floor(serverNow() / 60000)]);
+  }
+  function seenText(value) {
+    const seen = time(value);
+    return seen !== null && serverNow() - seen < 2000 ? "now" : age(value);
+  }
+  function updateSeen() { [...$("runs").querySelectorAll("[data-seen]")].forEach((el) => { el.textContent = seenText(el.dataset.seen); }); }
   function renderTable() {
+    state.tableKey = tableKey();
     const focused = document.activeElement?.dataset?.focusKey;
     const host = $("runs"); host.replaceChildren(); host.setAttribute("aria-busy", "false");
     const runs = state.snapshot.runs;
@@ -290,6 +302,7 @@
       visited.add(run.run_id);
       state.order.push(run.run_id);
       host.append(row(run, prefix, !direct.has(run.run_id), orphan, maxRate));
+      if (state.selected === run.run_id) host.append(expansion(run, byId, children));
       const kids = (children.get(run.run_id) || []).filter((c) => visible.has(c.run_id)).sort(compare);
       kids.forEach((child, i) => {
         const last = i === kids.length - 1;
@@ -299,14 +312,15 @@
     runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare)
       .forEach((r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id)));
     if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
-    if (focused) [...host.children].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
+    if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
   function row(run, prefix, context, orphan, maxRate) {
     const status = statusOf(run);
     const button = node("button", null, `row run-row ${status.key}${state.selected === run.run_id ? " selected" : ""}${context ? " context" : ""}`);
     button.type = "button"; button.dataset.focusKey = `select:${run.run_id}`; button.dataset.runId = run.run_id;
     button.setAttribute("aria-current", String(state.selected === run.run_id));
-    const statusCell = node("span", `${status.glyph} ${status.text}`, `cell status g-${status.key}`);
+    button.setAttribute("aria-expanded", String(state.selected === run.run_id));
+    const statusCell = node("span", `${state.selected === run.run_id ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status g-${status.key}`);
     const agent = node("span", null, "cell");
     agent.append(node("span", prefix, "tree"), node("span", nameOf(run), "agent-name"));
     if (orphan) agent.append(node("span", "parent not yet available", "note"));
@@ -323,10 +337,10 @@
     const rateCell = node("span", null, "rate-cell");
     const bar = node("span", null, "bar"); bar.style.width = `${Math.round(rate / maxRate * 56)}px`; bar.style.background = state.colors.get(harness.key);
     rateCell.append(node("span", rate, "num"), bar);
-    const seen = time(run.last_seen);
-    const last = node("span", seen !== null && serverNow() - seen < 2000 ? "now" : age(run.last_seen), "cell");
+    const last = node("span", seenText(run.last_seen), "cell");
+    last.dataset.seen = run.last_seen || "";
     button.append(statusCell, agent, harnessCell, doingCell, rateCell, last);
-    button.addEventListener("click", () => selectRun(run.run_id));
+    button.addEventListener("click", () => selectRun(state.selected === run.run_id ? null : run.run_id));
     return button;
   }
   function renderHiddenNote(runs, direct) {
@@ -341,68 +355,102 @@
     $("window-label").hidden = state.view !== "all";
   }
 
-  function field(list, title, content) { if (!content) return; list.append(node("dt", title), node("dd", content)); }
-  function renderDetail() {
-    const focused = document.activeElement?.dataset?.focusKey;
-    const host = $("detail"); host.replaceChildren();
-    host.hidden = !state.selected;
-    if (!state.selected) return;
-    const run = state.snapshot?.runs.find((r) => r.run_id === state.selected);
-    const top = node("div", null, "detail-top");
-    const heading = node("h2", run ? nameOf(run) : "Selected agent"); heading.id = "detail-heading";
-    top.append(heading);
-    host.append(top);
-    if (!run) { host.append(node("p", "This agent is no longer in the available history.", "muted")); return; }
+  function goalOrigin(run) {
+    const summary = run.ai_summary;
+    if (!summary?.text) return "no summary yet · raw activity shown";
+    const source = summary.origin === "claude-recap" ? "Claude recap" : `AI summary${summary.model ? ` · ${summary.model.split("/").pop()}` : ""}`;
+    return `✦ goal from ${source} · ${age(summary.generated_at)} ago${summary.stale ? " · refresh due" : ""}`;
+  }
+  // Consecutive identical events collapse into one line, so tool bursts stay readable.
+  function compressEvents(events) {
+    const groups = [];
+    events.forEach((event) => {
+      const payload = event.payload || {};
+      // Only display safe selected labels, never raw arguments, results, paths or headers.
+      const detail = payload.text || payload.summary || payload.detail || payload.reason || payload.task || payload.label || payload.name || payload.state || payload.outcome || "";
+      const key = `${event.type}\u0000${detail}`;
+      const last = groups[groups.length - 1];
+      if (last && last.key === key) { last.count += 1; last.stamp = event.received_at || event.occurred_at; }
+      else groups.push({ key, type: event.type, detail, count: 1, stamp: event.received_at || event.occurred_at, late: event.applied === false });
+    });
+    return groups;
+  }
+  function expansion(run, byId, children) {
+    const host = node("div", null, "expansion"); host.id = "detail";
+    host.setAttribute("role", "region"); host.setAttribute("aria-label", `Details for ${nameOf(run)}`);
     const status = statusOf(run);
-    top.append(node("span", `${status.glyph} ${status.text}`, `status g-${status.key}`), node("span", harnessOf(run).label, "muted"));
-    const close = node("button", "Close"); close.type = "button"; close.dataset.focusKey = "close-detail"; close.addEventListener("click", () => selectRun(null));
-    top.append(close);
+    const parent = byId.get(run.parent_run_id);
+    if (status.key === "needs") {
+      const needs = node("p", `◐ waiting on you for ${age(run.last_seen)}${run.activity ? ` · ${run.activity}` : ""}`, "needs-line");
+      needs.append(node("span", ` · answer it in “${parent ? nameOf(parent) : nameOf(run)}”`, "needs-where"));
+      host.append(needs);
+    }
+    if (run.ai_summary?.text) host.append(node("p", run.ai_summary.text, "goal"));
     const fields = node("dl", null, "fields");
-    if (run.ai_summary?.text) field(fields, "✦ goal", `${run.ai_summary.text} · ${run.ai_summary.origin === "claude-recap" ? "Claude recap" : run.ai_summary.model || "AI"} · ${age(run.ai_summary.generated_at)} ago${run.ai_summary.stale ? " · goal changed, refresh due" : ""}`);
-    field(fields, "› activity", run.activity);
-    field(fields, "task", run.task);
-    const parent = state.snapshot.runs.find((r) => r.run_id === run.parent_run_id);
-    field(fields, "parent", run.parent_run_id ? (parent ? parent.name : "not yet available") : "");
-    field(fields, "running for", `${age(run.started_at, time(run.ended_at) || serverNow())} · last seen ${age(run.last_seen)} ago · ${rateOf(run.run_id)} events/min`);
-    field(fields, "result", run.summary);
-    field(fields, "evidence", typeof run.evidence === "string" ? run.evidence : (run.inferred ? "Inferred from local transcripts; not a live process guarantee." : "Application-reported events."));
-    field(fields, "warnings", Array.isArray(run.warnings) ? run.warnings.join(" · ") : "");
-    field(fields, "run id", run.run_id);
+    const field = (title, content) => { if (content) fields.append(node("dt", title), node("dd", content)); };
+    field("now", terminal.has(run.state) ? run.summary || label(run.state) : run.activity || "no activity reported");
+    field(run.parent_run_id ? "task" : "you asked", run.task || (run.inferred ? "text hidden · set include_text for this profile" : ""));
+    if (run.parent_run_id) {
+      const dd = node("dd");
+      if (parent) {
+        const link = node("button", nameOf(parent), "link"); link.type = "button"; link.dataset.focusKey = `parent:${parent.run_id}`;
+        link.addEventListener("click", () => selectRun(parent.run_id));
+        dd.append(link);
+      } else dd.append("not yet available");
+      fields.append(node("dt", "parent"), dd);
+    }
     host.append(fields);
+    const kids = children.get(run.run_id) || [];
+    if (kids.length) {
+      const strip = node("div", null, "chips"); strip.append(node("span", "subagents", "chips-label"));
+      kids.forEach((kid) => {
+        const kidStatus = statusOf(kid);
+        const chip = node("button", null, `chip ${kidStatus.key}`); chip.type = "button"; chip.dataset.focusKey = `chip:${kid.run_id}`;
+        chip.append(node("span", kidStatus.glyph, `g-${kidStatus.key}`), ` ${nameOf(kid)} `, node("span", `· ${kidStatus.text}`, "muted"));
+        chip.addEventListener("click", () => selectRun(kid.run_id));
+        strip.append(chip);
+      });
+      host.append(strip);
+    }
+    const footer = node("div", null, "expansion-footer");
+    footer.append(node("span", goalOrigin(run)), node("span", `${harnessOf(run).label}${run.project ? ` · ${run.project}` : ""} · ${age(run.started_at, time(run.ended_at) || serverNow())}`, "muted"), node("span", "", "spacer"));
+    const history = node("button", state.historyOpen ? "hide history" : "history ▸", "link"); history.type = "button"; history.dataset.focusKey = "history";
+    history.addEventListener("click", () => { state.historyOpen = !state.historyOpen; if (state.historyOpen && !state.events.length) loadEvents(true); else renderTable(); });
+    const close = node("button", "esc close", "link"); close.type = "button"; close.addEventListener("click", () => selectRun(null));
+    footer.append(history, close);
+    host.append(footer);
+    if (state.historyOpen) host.append(historyList(run));
+    return host;
+  }
+  function historyList(run) {
+    const box = node("div", null, "history");
     const operations = run.operations || [];
     if (operations.length) {
-      host.append(node("h3", `OPERATIONS (${operations.length})`));
       const ops = node("ul", null, "ops");
-      operations.slice(-20).forEach((op) => {
+      operations.slice(-10).forEach((op) => {
         const outcome = op.pending ? "running" : op.outcome || "unknown";
         const item = node("li");
         item.append(node("span", label(op.kind || "tool"), "t"), node("span", outcome, op.pending ? "pending" : outcome === "error" ? "bad" : "ok"), node("span", `${op.label || op.operation_id || "operation"}${op.detail ? ` · ${op.detail}` : ""}`));
         ops.append(item);
       });
-      host.append(ops);
+      box.append(ops);
     }
-    host.append(node("h3", "EVENT HISTORY"));
     const timeline = node("ol", null, "timeline"); timeline.id = "timeline";
-    state.events.forEach((event) => {
-      const item = node("li"); const stamp = time(event.received_at || event.occurred_at);
-      const payload = event.payload || {};
-      // Only display safe selected labels, never raw arguments, results, paths or headers.
-      const detail = payload.text || payload.summary || payload.detail || payload.reason || payload.task || payload.label || payload.name || payload.state || payload.outcome || "";
-      item.append(node("span", stamp ? new Date(stamp).toLocaleTimeString() : "unknown time", "t"), node("span", label(event.type || "event")), node("span", `${detail}${event.applied === false ? " · late, not applied" : ""}`));
+    compressEvents(state.events).reverse().forEach((group) => {
+      const item = node("li"); const stamp = time(group.stamp);
+      item.append(node("span", stamp ? new Date(stamp).toLocaleTimeString() : "unknown time", "t"),
+        node("span", `${label(group.type || "event")}${group.count > 1 ? ` ×${group.count}` : ""}`),
+        node("span", `${group.detail}${group.late ? " · late, not applied" : ""}`));
       timeline.append(item);
     });
-    host.append(timeline);
-    if (!state.events.length) host.append(node("p", state.eventBusy ? "Loading event history…" : "No events in the available history.", "muted"));
-    const actions = node("div", null, "detail-actions");
-    const reload = node("button", "Reload history"); reload.type = "button"; reload.dataset.focusKey = "reload-history"; reload.addEventListener("click", () => loadEvents(true));
-    actions.append(reload);
-    if (state.more) { const more = node("button", state.eventBusy ? "Loading…" : "Load more events"); more.id = "load-more"; more.type = "button"; more.dataset.focusKey = "load-more"; more.disabled = state.eventBusy; more.addEventListener("click", () => loadEvents(false)); actions.append(more); }
-    host.append(actions);
-    if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
+    box.append(timeline);
+    if (!state.events.length) box.append(node("p", state.eventBusy ? "Loading history…" : "No events in the available history.", "muted"));
+    if (state.more) { const more = node("button", state.eventBusy ? "Loading…" : "Load older events", "link"); more.id = "load-more"; more.type = "button"; more.dataset.focusKey = "load-more"; more.disabled = state.eventBusy; more.addEventListener("click", () => loadEvents(false)); box.append(more); }
+    return box;
   }
+  function renderDetail() { if (state.snapshot) renderTable(); }
   async function selectRun(id) {
-    state.selected = id; state.events = []; state.nextCursor = 0; state.more = false;
-    if (state.snapshot) renderTable();
+    state.selected = id; state.events = []; state.nextCursor = 0; state.more = false; state.historyOpen = false;
     renderDetail();
     if (id) await loadEvents(true);
   }
@@ -439,7 +487,7 @@
     const index = state.order.indexOf(state.selected);
     const next = state.order[Math.min(state.order.length - 1, Math.max(0, index === -1 ? 0 : index + step))];
     selectRun(next);
-    [...$("runs").children].find((el) => el.dataset.runId === next)?.focus({ preventScroll: false });
+    [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === next)?.focus({ preventScroll: false });
   }
 
   [...$("views").children].forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));

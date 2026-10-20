@@ -33,7 +33,6 @@ class StaticTests(unittest.TestCase):
         self.assertTrue(
             {
                 "runs",
-                "detail",
                 "harnesses",
                 "flux",
                 "counts",
@@ -77,10 +76,10 @@ class Element {
   addEventListener(key, fn) { this.listeners[key] = fn; }
   focus() { document.activeElement = this; }
   blur() {}
-  querySelectorAll() { return flatten(this).filter(x => x.dataset.focusKey); }
+  querySelectorAll(selector) { const key = (selector.match(/^\[data-([a-z-]+)\]$/) || [])[1]; const prop = key ? key.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) : 'focusKey'; return flatten(this).filter(x => x.dataset[prop] !== undefined); }
 }
 function flatten(el) { return el.children.filter(c => typeof c !== 'string').flatMap(c => [c, ...flatten(c)]); }
-const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs','detail'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
+const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
 ids['window-filter'].value = '604800000';
 ['active','waiting','all'].forEach(v => { const b = new Element('button'); b.dataset.view = v; ids.views.children.push(b); });
 const docListeners = {};
@@ -153,26 +152,53 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  rows()[1].focus();
  stream.listeners.snapshot({data:JSON.stringify(snapshot)});
  assert.equal(document.activeElement.dataset.runId, rows()[1].dataset.runId);
- // Selection, detail and safe event history.
+ // An identical snapshot keeps the same row elements, so clicks survive live ticks.
+ const stableRow = rows()[0];
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)});
+ assert.equal(rows()[0], stableRow);
+ // Clicking a row opens its details inline, directly under it.
+ const detail = () => flatten(ids.runs).find(x => x.id === 'detail');
+ const expanded = () => rows().find(r => r.attrs['aria-expanded'] === 'true')?.dataset.runId;
  rows().find(r => r.dataset.runId === 'orphan').listeners.click(); await tick();
- assert.equal(ids.detail.hidden, false);
- assert.ok(ids.detail.textContent.includes('Original task'));
- assert.ok(ids.detail.textContent.includes('<script>not executable</script>'));
- assert.ok(ids.detail.textContent.includes('claude · personal'));
- assert.ok(!flatten(ids.detail).some(x => x.tagName === 'script'));
+ assert.equal(expanded(), 'orphan');
+ const after = ids.runs.children.indexOf(rows().find(r => r.dataset.runId === 'orphan')) + 1;
+ assert.equal(ids.runs.children[after], detail());
+ assert.ok(detail().textContent.includes('Original task'));
+ assert.ok(detail().textContent.includes('claude · personal'));
+ assert.ok(detail().textContent.includes('not yet available'));
  assert.ok(requests.includes('/api/runs/orphan/events?after=0&limit=100'));
- // Keyboard navigation and close.
- docListeners.keydown({key:'k', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
- assert.ok(ids.detail.textContent.includes('Child'));
+ // History is collapsed until asked for; it renders event text safely.
+ assert.ok(!detail().textContent.includes('<script>not executable</script>'));
+ flatten(detail()).find(x => x.dataset.focusKey === 'history').listeners.click(); await tick();
+ assert.ok(detail().textContent.includes('<script>not executable</script>'));
+ assert.ok(!flatten(detail()).some(x => x.tagName === 'script'));
+ // Subagent chips and the parent link move the open row.
+ rows().find(r => r.dataset.runId === 'root').listeners.click(); await tick();
+ assert.ok(detail().textContent.includes('subagents'));
+ flatten(detail()).find(x => x.dataset.focusKey === 'chip:ask').listeners.click(); await tick();
+ assert.equal(expanded(), 'ask');
+ assert.ok(detail().textContent.includes('waiting on you'));
+ assert.ok(detail().textContent.includes('Tuning retry limits'));
+ flatten(detail()).find(x => x.dataset.focusKey === 'parent:root').listeners.click(); await tick();
+ assert.equal(expanded(), 'root');
+ // Clicking the open row again closes it; keyboard navigation and Escape.
+ rows().find(r => r.dataset.runId === 'root').listeners.click(); await tick();
+ assert.equal(detail(), undefined);
+ docListeners.keydown({key:'j', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.equal(expanded(), 'root');
+ docListeners.keydown({key:'j', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.equal(expanded(), 'ask');
  docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
- assert.equal(ids.detail.hidden, true);
+ assert.equal(detail(), undefined);
  // Connection status and history reset.
  rows()[0].listeners.click(); await tick();
+ const rootLoads = () => requests.filter(x => x === '/api/runs/root/events?after=0&limit=100').length;
+ const before = rootLoads();
  stream.onerror(); assert.ok(ids.connection.textContent.includes('disconnected'));
  stream.listeners.snapshot({data:JSON.stringify(snapshot)}); assert.equal(ids.connection.textContent,'live');
  stream.listeners.reset({data:JSON.stringify({...snapshot,cursor:0})}); await tick();
  assert.ok(ids.connection.textContent.includes('history reset'));
- assert.equal(requests.filter(x => x === '/api/runs/root/events?after=0&limit=100').length,2);
+ assert.equal(rootLoads(), before + 1);
  // Summaries off and empty chart.
  stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:false},activity:{bucket_seconds:10,buckets:60,end:now,runs:{}}})});
  assert.ok(ids['ai-status'].textContent.includes('summaries off'));

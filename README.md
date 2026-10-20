@@ -89,10 +89,12 @@ Do not record or share a live-source dashboard without reviewing its contents.
 
 ## What works now
 
-- `agtop` browser view: htop-style agent table (status, tree, harness, current
-  activity or AI summary, events/min, last seen), per-harness event rates with a
-  10-minute stacked chart, active/needs-you/all views, harness filter, search,
-  keyboard navigation, run detail, and paginated event history.
+- Browser view: an agent table (status, tree, harness, current activity or goal
+  summary, events/min, last seen), per-harness event rates with a 10-minute
+  stacked chart, active/needs-you/all views, harness filter, search and keyboard
+  navigation. Clicking a row opens it in place: goal, current activity, request
+  or task, parent and subagent links, and a collapsed event history in which
+  repeated events are grouped.
 - Explicit SDK lifecycle and independent tool/model operation outcomes, with
   separate work state and telemetry freshness.
 - Codex and Claude multi-profile discovery, namespaced identities, and available
