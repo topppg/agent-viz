@@ -30,11 +30,11 @@ been installed or executed.
 
 ## Run the working demo
 
-Python 3.11+ is required; there are **no runtime package dependencies**. From this
-directory:
+Python 3.12+ and [uv](https://docs.astral.sh/uv/) are required; there are **no runtime
+package dependencies**. From this directory:
 
 ```sh
-PYTHONPATH=src python3 -m agent_viz serve --demo --data-dir .agent-viz/demo --port 8766
+uv run agent-viz serve --demo --data-dir .agent-viz/demo --port 8766
 ```
 
 Open [the local dashboard](http://127.0.0.1:8766). Press Ctrl-C in that terminal
@@ -54,14 +54,14 @@ automatically without opening authentication files. New supported profiles are
 picked up on later scans:
 
 ```sh
-PYTHONPATH=src python3 -m agent_viz serve --data-dir .agent-viz/live --port 8767
+uv run agent-viz serve --data-dir .agent-viz/live --port 8767
 ```
 
 For a manually selected set of sources instead:
 
 ```sh
-PYTHONPATH=src python3 -m agent_viz discover --write-config .agent-viz/profiles.json
-PYTHONPATH=src python3 -m agent_viz serve --config .agent-viz/profiles.json --data-dir .agent-viz/live --port 8767
+uv run agent-viz discover --write-config .agent-viz/profiles.json
+uv run agent-viz serve --config .agent-viz/profiles.json --data-dir .agent-viz/live --port 8767
 ```
 
 Open [the local source dashboard](http://127.0.0.1:8767). The configuration
@@ -107,7 +107,7 @@ Do not record or share a live-source dashboard without reviewing its contents.
 ## Optional activity briefs
 
 ```sh
-PYTHONPATH=src python3 -m agent_viz serve --port 8767 \
+uv run agent-viz serve --port 8767 \
   --data-dir .agent-viz/live --summaries \
   --openrouter-key-file /absolute/path/to/private.env \
   --summary-budget-usd .05 --summary-max-calls 10
@@ -150,7 +150,8 @@ the application result; inspect `flush()` and `diagnostics` to detect loss.
 ## Validation
 
 ```sh
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+uv run ruff check . && uv run ruff format --check .
+uv run pytest
 node --check src/agent_viz/static/app.js
 uv build
 ```
@@ -189,7 +190,7 @@ Source config, validation databases, and build products are ignored by Git.
 Retention is manual in this prototype, not automatic:
 
 ```sh
-PYTHONPATH=src python3 -m agent_viz prune --data-dir .agent-viz/live --older-than-days 7
+uv run agent-viz prune --data-dir .agent-viz/live --older-than-days 7
 ```
 
 This deletes only eligible old observer records, never native transcripts. It

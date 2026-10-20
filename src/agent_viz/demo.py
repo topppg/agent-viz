@@ -5,7 +5,7 @@ import time
 from .sdk import Client
 
 
-def run_demo(url, token, delay=.3):
+def run_demo(url, token, delay=0.3):
     """Send a repeatable scenario, with fresh identities for each invocation.
 
     ``delay=0`` is useful in tests. No real files, tools, accounts, or models are
@@ -13,7 +13,7 @@ def run_demo(url, token, delay=.3):
     """
     if delay < 0:
         raise ValueError("delay must not be negative")
-    client = Client(url, token, account="synthetic-demo", timeout=.5)
+    client = Client(url, token, account="synthetic-demo", timeout=0.5)
     ids = {}
 
     def pause():
@@ -21,8 +21,13 @@ def run_demo(url, token, delay=.3):
             time.sleep(delay)
 
     try:
-        root = client.run("Release rehearsal", "Review an invented change safely",
-                          source="demo", project="synthetic", demo=True)
+        root = client.run(
+            "Release rehearsal",
+            "Review an invented change safely",
+            source="demo",
+            project="synthetic",
+            demo=True,
+        )
         ids["root"] = root.run_id
         root.activity("Splitting an invented review into independent checks")
         pause()
@@ -36,7 +41,9 @@ def run_demo(url, token, delay=.3):
         ids["nested"] = nested.run_id
         failed = nested.start_operation("tool", "Read invented test fixture")
         pause()
-        nested.finish_operation(failed, "error", "Simulated temporary read failure; no tool was called")
+        nested.finish_operation(
+            failed, "error", "Simulated temporary read failure; no tool was called"
+        )
         nested.activity("Retrying the simulated read with a corrected fixture name")
         with nested.operation("tool", "Read corrected invented fixture"):
             pause()
@@ -47,7 +54,9 @@ def run_demo(url, token, delay=.3):
         second.finish(summary="Example instructions checked")
         first.state("working", "Synthetic approval received")
         first.heartbeat()
-        orphan = root.child("Silent worker", "Deliberately stop sending events to demonstrate staleness")
+        orphan = root.child(
+            "Silent worker", "Deliberately stop sending events to demonstrate staleness"
+        )
         ids["stale"] = orphan.run_id
         orphan.activity("This synthetic worker will intentionally stop reporting")
         root.finish(summary="Coordinator finished; child state remains independent")
@@ -55,7 +64,12 @@ def run_demo(url, token, delay=.3):
         first.activity("Completing its check after the coordinator finished")
         first.finish(summary="Synthetic checks finished")
         flushed = client.flush(3)
-        return dict(run_ids=ids, runs=len(ids), intentionally_unfinished=ids["stale"],
-                    delivered=flushed, diagnostics=client.diagnostics)
+        return dict(
+            run_ids=ids,
+            runs=len(ids),
+            intentionally_unfinished=ids["stale"],
+            delivered=flushed,
+            diagnostics=client.diagnostics,
+        )
     finally:
         client.close(timeout=1)

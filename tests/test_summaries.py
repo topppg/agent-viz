@@ -1,12 +1,13 @@
 import json
-from pathlib import Path
 import tempfile
 import time
 import unittest
+from datetime import UTC
+from pathlib import Path
 from unittest.mock import Mock, patch
 
-from agent_viz.summaries import MODEL, Summarizer, _clean, _recent_text, _request
 from agent_viz.sources import SourceProfile
+from agent_viz.summaries import MODEL, Summarizer, _clean, _recent_text, _request
 
 
 class SummariesTests(unittest.TestCase):
@@ -24,10 +25,17 @@ class SummariesTests(unittest.TestCase):
         self.temp.cleanup()
 
     def make_run(self, **overrides):
-        from datetime import datetime, timezone
-        result = {"run_id": "private-native-id", "parent_run_id": None, "source": "sdk",
-                  "state": "working", "last_seen": datetime.now(timezone.utc).isoformat(),
-                  "task": "Fix the retry test", "activity": "Reading test expectations"}
+        from datetime import datetime
+
+        result = {
+            "run_id": "private-native-id",
+            "parent_run_id": None,
+            "source": "sdk",
+            "state": "working",
+            "last_seen": datetime.now(UTC).isoformat(),
+            "task": "Fix the retry test",
+            "activity": "Reading test expectations",
+        }
         result.update(overrides)
         return result
 
@@ -36,8 +44,19 @@ class SummariesTests(unittest.TestCase):
         self.instances.append(instance)
         return instance
 
-    def response(self, content=None, cost=.00012):
-        response = {"id": "gen-test-1", "choices": [{"message": {"content": content or json.dumps({"r1": "Investigating retry-test expectations"})}}], "usage": {}}
+    def response(self, content=None, cost=0.00012):
+        response = {
+            "id": "gen-test-1",
+            "choices": [
+                {
+                    "message": {
+                        "content": content
+                        or json.dumps({"r1": "Investigating retry-test expectations"})
+                    }
+                }
+            ],
+            "usage": {},
+        }
         if cost is not None:
             response["usage"]["cost"] = cost
         return response
@@ -51,7 +70,7 @@ class SummariesTests(unittest.TestCase):
             instance.tick()
         state = instance.public_state()
         self.assertEqual(state["calls"], 1)
-        self.assertAlmostEqual(state["actual_cost_usd"], .00012)
+        self.assertAlmostEqual(state["actual_cost_usd"], 0.00012)
         self.assertEqual(state["summaries"][0]["run_id"], "private-native-id")
         self.assertEqual(state["summaries"][0]["request_id"], "gen-test-1")
         payload = request.call_args.args[1]
@@ -83,9 +102,14 @@ class SummariesTests(unittest.TestCase):
 
     def test_only_recent_active_roots(self):
         instance = self.summarizer()
-        self.store.snapshot.return_value = {"runs": [self.make_run(state="idle"), self.make_run(state="completed"),
-                                                      self.make_run(parent_run_id="parent"),
-                                                      self.make_run(last_seen="2000-01-01T00:00:00Z")]}
+        self.store.snapshot.return_value = {
+            "runs": [
+                self.make_run(state="idle"),
+                self.make_run(state="completed"),
+                self.make_run(parent_run_id="parent"),
+                self.make_run(last_seen="2000-01-01T00:00:00Z"),
+            ]
+        }
         with patch("agent_viz.summaries._request") as request:
             instance.tick()
         request.assert_not_called()
@@ -103,8 +127,13 @@ class SummariesTests(unittest.TestCase):
     def test_redaction_input_and_output(self):
         instance = self.summarizer()
         secret = "sk-or-v1-abcdefghijklmnop"
-        self.store.snapshot.return_value["runs"][0]["task"] = f"Fix /Users/private/work/file.py email me@example.org Bearer token123 {secret} password=abcdef"
-        response = self.response(json.dumps({"r1": "Checking /Users/private/work for me@example.org " + secret}))
+        self.store.snapshot.return_value["runs"][0]["task"] = (
+            f"Fix /Users/private/work/file.py email me@example.org "
+            f"Bearer token123 {secret} password=abcdef"
+        )
+        response = self.response(
+            json.dumps({"r1": "Checking /Users/private/work for me@example.org " + secret})
+        )
         with patch("agent_viz.summaries._request", return_value=response) as request:
             instance.tick()
         sent = json.dumps(request.call_args.args[1])
@@ -118,7 +147,9 @@ class SummariesTests(unittest.TestCase):
 
     def test_timeout_unknown_billing_blocks_future_calls(self):
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", side_effect=TimeoutError("SECRET provider body")) as request:
+        with patch(
+            "agent_viz.summaries._request", side_effect=TimeoutError("SECRET provider body")
+        ) as request:
             instance.tick()
             self.age_calls(instance)
             instance.tick()
@@ -152,18 +183,23 @@ class SummariesTests(unittest.TestCase):
             instance.tick()
         state = instance.public_state()
         self.assertEqual(state["status"], "error")
-        self.assertAlmostEqual(state["actual_cost_usd"], .00012)
+        self.assertAlmostEqual(state["actual_cost_usd"], 0.00012)
         self.assertEqual(state["summaries"], [])
 
     def test_extra_missing_duplicate_and_wrong_type_ids_rejected(self):
-        for content in ('{"r2":"Unknown"}', '{"r1":"Fine","extra":"No"}',
-                        '{"r1":"First","r1":"Second"}', '{"r1":42}', '[]'):
+        for content in (
+            '{"r2":"Unknown"}',
+            '{"r1":"Fine","extra":"No"}',
+            '{"r1":"First","r1":"Second"}',
+            '{"r1":42}',
+            "[]",
+        ):
             with self.subTest(content=content):
                 instance = self.summarizer()
                 with patch("agent_viz.summaries._request", return_value=self.response(content)):
                     instance.tick()
                 self.assertEqual(instance.public_state()["summaries"], [])
-                self.assertAlmostEqual(instance.public_state()["actual_cost_usd"], .00012)
+                self.assertAlmostEqual(instance.public_state()["actual_cost_usd"], 0.00012)
 
     def test_call_limit(self):
         instance = self.summarizer(max_calls=1)
@@ -176,8 +212,10 @@ class SummariesTests(unittest.TestCase):
         self.assertEqual(instance.public_state()["status"], "call_limit")
 
     def test_budget_reserves_next_request(self):
-        instance = self.summarizer(budget_usd=.015)
-        with patch("agent_viz.summaries._request", return_value=self.response(cost=.006)) as request:
+        instance = self.summarizer(budget_usd=0.015)
+        with patch(
+            "agent_viz.summaries._request", return_value=self.response(cost=0.006)
+        ) as request:
             instance.tick()
             self.age_calls(instance)
             self.store.snapshot.return_value["runs"][0]["task"] = "Another task"
@@ -194,7 +232,7 @@ class SummariesTests(unittest.TestCase):
         self.instances.remove(instance)
         resumed = self.summarizer(state_path=path)
         self.assertEqual(resumed.public_state()["calls"], 1)
-        self.assertAlmostEqual(resumed.public_state()["actual_cost_usd"], .00012)
+        self.assertAlmostEqual(resumed.public_state()["actual_cost_usd"], 0.00012)
         self.assertEqual(resumed._candidates(), [])
         contents = path.read_bytes()
         self.assertNotIn(b"test-key-not-real", contents)
@@ -214,13 +252,41 @@ class SummariesTests(unittest.TestCase):
     def test_codex_text_excludes_reasoning_tools_instructions(self):
         rows = [
             {"type": "session_meta", "payload": {"base_instructions": "SECRET instructions"}},
-            {"type": "event_msg", "payload": {"type": "user_message", "message": "# AGENTS.md instructions SECRET"}},
-            {"type": "event_msg", "payload": {"type": "user_message", "message": "Fix the retry test"}},
+            {
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": "# AGENTS.md instructions SECRET"},
+            },
+            {
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": "Fix the retry test"},
+            },
             {"type": "response_item", "payload": {"type": "reasoning", "text": "SECRET reasoning"}},
-            {"type": "response_item", "payload": {"type": "message", "role": "assistant", "channel": "analysis", "content": "SECRET analysis"}},
-            {"type": "response_item", "payload": {"type": "function_call_output", "output": "SECRET output"}},
-            {"type": "response_item", "payload": {"type": "function_call", "arguments": "SECRET args"}},
-            {"type": "response_item", "payload": {"type": "message", "role": "assistant", "channel": "commentary", "content": [{"type": "output_text", "text": "Checking expectations"}]}},
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "channel": "analysis",
+                    "content": "SECRET analysis",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {"type": "function_call_output", "output": "SECRET output"},
+            },
+            {
+                "type": "response_item",
+                "payload": {"type": "function_call", "arguments": "SECRET args"},
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "channel": "commentary",
+                    "content": [{"type": "output_text", "text": "Checking expectations"}],
+                },
+            },
         ]
         result = _recent_text(rows, "codex")
         self.assertIn("Fix the retry test", result)
@@ -228,10 +294,29 @@ class SummariesTests(unittest.TestCase):
         self.assertNotIn("SECRET", result)
 
     def test_claude_text_excludes_thinking_and_tool_results(self):
-        rows = [{"type": "user", "message": {"content": "Fix the retry test"}},
-                {"type": "user", "message": {"content": [{"type": "tool_result", "content": "SECRET output"}, {"type": "text", "text": "SECRET supplemental tool output"}]}},
-                {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "SECRET thought"}, {"type": "tool_use", "input": "SECRET args"}, {"type": "text", "text": "Checking expectations"}]}},
-                {"type": "system", "message": {"content": "SECRET system"}}]
+        rows = [
+            {"type": "user", "message": {"content": "Fix the retry test"}},
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {"type": "tool_result", "content": "SECRET output"},
+                        {"type": "text", "text": "SECRET supplemental tool output"},
+                    ]
+                },
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "thinking", "thinking": "SECRET thought"},
+                        {"type": "tool_use", "input": "SECRET args"},
+                        {"type": "text", "text": "Checking expectations"},
+                    ]
+                },
+            },
+            {"type": "system", "message": {"content": "SECRET system"}},
+        ]
         result = _recent_text(rows, "claude")
         self.assertIn("Fix the retry test", result)
         self.assertIn("Checking expectations", result)
@@ -242,10 +327,24 @@ class SummariesTests(unittest.TestCase):
         folder = self.root / "sessions"
         folder.mkdir()
         path = folder / "run.jsonl"
-        rows = [{"type": "session_meta", "payload": {"id": "native", "timestamp": "2026-10-20T08:00:00Z"}},
-                {"type": "event_msg", "payload": {"type": "user_message", "message": "Fix retries"}}]
+        rows = [
+            {
+                "type": "session_meta",
+                "payload": {"id": "native", "timestamp": "2026-10-20T08:00:00Z"},
+            },
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Fix retries"}},
+        ]
         path.write_text("".join(json.dumps(row) + "\n" for row in rows))
-        self.store.snapshot.return_value = {"runs": [self.make_run(run_id="codex-one:native", source="codex", mode="observation", task="Text hidden")]}
+        self.store.snapshot.return_value = {
+            "runs": [
+                self.make_run(
+                    run_id="codex-one:native",
+                    source="codex",
+                    mode="observation",
+                    task="Text hidden",
+                )
+            ]
+        }
         instance = self.summarizer()
         instance.profiles_provider = lambda: [profile]
         candidates = instance._candidates()
@@ -254,7 +353,9 @@ class SummariesTests(unittest.TestCase):
         self.assertNotIn("Text hidden", candidates[0]["text"])
 
     def test_native_never_falls_back_to_hidden_metadata(self):
-        self.store.snapshot.return_value = {"runs": [self.make_run(source="codex", mode="observation", task="Text hidden")]}
+        self.store.snapshot.return_value = {
+            "runs": [self.make_run(source="codex", mode="observation", task="Text hidden")]
+        }
         instance = self.summarizer()
         self.assertEqual(instance._candidates(), [])
 
@@ -262,17 +363,28 @@ class SummariesTests(unittest.TestCase):
         connection = Mock()
         connection.getresponse.return_value.status = 302
         connection.getresponse.return_value.read.return_value = b"SECRET provider error"
-        with patch("agent_viz.summaries.http.client.HTTPSConnection", return_value=connection) as factory:
+        with patch(
+            "agent_viz.summaries.http.client.HTTPSConnection", return_value=connection
+        ) as factory:
             with self.assertRaisesRegex(ValueError, "Provider response unavailable"):
                 _request("not-real", {}, 20)
         factory.assert_called_once_with("openrouter.ai", timeout=20)
         connection.request.assert_called_once()
-        self.assertEqual(connection.request.call_args.args[:2], ("POST", "/api/v1/chat/completions"))
+        self.assertEqual(
+            connection.request.call_args.args[:2], ("POST", "/api/v1/chat/completions")
+        )
         connection.close.assert_called_once()
 
     def test_input_validation(self):
-        for kwargs in ({"budget_usd": -1}, {"budget_usd": float("nan")}, {"max_calls": True},
-                       {"max_calls": 0}, {"interval": 1}, {"timeout": 0}, {"timeout": 61}):
+        for kwargs in (
+            {"budget_usd": -1},
+            {"budget_usd": float("nan")},
+            {"max_calls": True},
+            {"max_calls": 0},
+            {"interval": 1},
+            {"timeout": 0},
+            {"timeout": 61},
+        ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 self.summarizer(**kwargs)
         with self.assertRaises(ValueError):
@@ -332,7 +444,10 @@ class SummariesTests(unittest.TestCase):
         self.assertTrue(instance.public_state()["summaries"][0]["stale"])
         # A same-content native scan can verify newer activity without a call.
         instance._verified_until[run["run_id"]] = time.time()
-        with patch("agent_viz.summaries._recent_files") as files, patch("agent_viz.summaries._request") as request:
+        with (
+            patch("agent_viz.summaries._recent_files") as files,
+            patch("agent_viz.summaries._request") as request,
+        ):
             self.assertFalse(instance.public_state()["summaries"][0]["stale"])
         files.assert_not_called()
         request.assert_not_called()

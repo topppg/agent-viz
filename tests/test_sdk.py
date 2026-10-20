@@ -1,9 +1,9 @@
 import asyncio
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from agent_viz.sdk import Client
 
@@ -62,7 +62,9 @@ class SDKTests(unittest.TestCase):
                 self.assertTrue(client.flush())
                 self.assertEqual(client.diagnostics["failed"], 0)
             events = server.events
-            self.assertEqual([event["sequence"] for event in events], list(range(1, len(events) + 1)))
+            self.assertEqual(
+                [event["sequence"] for event in events], list(range(1, len(events) + 1))
+            )
             self.assertEqual(len({event["event_id"] for event in events}), len(events))
             self.assertEqual(len({event["producer_id"] for event in events}), 1)
             self.assertTrue(all(event["schema_version"] == 1 for event in events))
@@ -84,7 +86,7 @@ class SDKTests(unittest.TestCase):
 
     def test_offline_queue_is_bounded_and_does_not_raise(self):
         # A held lock makes capacity assertions independent of sender scheduling.
-        client = Client("http://127.0.0.1:1", "test-token", queue_size=2, timeout=.05)
+        client = Client("http://127.0.0.1:1", "test-token", queue_size=2, timeout=0.05)
         with client._condition:
             run = client.run("Offline")
             self.assertTrue(run.activity("One"))
@@ -106,7 +108,7 @@ class SDKTests(unittest.TestCase):
             before = len(server.events)
             self.assertFalse(run.activity("After close"))
             client.run("After close")
-            time.sleep(.05)
+            time.sleep(0.05)
             self.assertEqual(len(server.events), before)
 
     def test_redirect_never_forwards_token(self):
@@ -142,13 +144,19 @@ class SDKTests(unittest.TestCase):
             asyncio.run(check())
 
     def test_invalid_collector_urls_are_rejected(self):
-        for url in ["https://example.com", "http://127.0.0.1@evil.test", "file:///tmp/test",
-                    "http://localhost/path", "http://localhost?token=x", "http://localhost#x"]:
+        for url in [
+            "https://example.com",
+            "http://127.0.0.1@evil.test",
+            "file:///tmp/test",
+            "http://localhost/path",
+            "http://localhost?token=x",
+            "http://localhost#x",
+        ]:
             with self.subTest(url=url), self.assertRaises(ValueError):
                 Client(url, "test-token")
 
     def test_oversized_event_drops_without_network(self):
-        client = Client("http://127.0.0.1:1", "test-token", timeout=.05)
+        client = Client("http://127.0.0.1:1", "test-token", timeout=0.05)
         with client._condition:
             run = client.run("Example")
             self.assertFalse(run.activity("x" * 40000))

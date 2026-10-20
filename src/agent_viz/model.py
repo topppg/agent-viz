@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 MAX_EVENT_BYTES = 32_768
 STATES = {"working", "waiting_tool", "waiting_child", "waiting_user", "idle"}
@@ -21,7 +21,7 @@ TYPES = {
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def timestamp(value: object) -> float:
@@ -69,8 +69,18 @@ def parse_json(data: bytes) -> object:
 def validate_event(raw: object) -> dict:
     if not isinstance(raw, dict):
         raise ValueError("event must be an object")
-    allowed = {"schema_version", "event_id", "session_id", "run_id", "parent_run_id",
-               "producer_id", "sequence", "occurred_at", "type", "payload"}
+    allowed = {
+        "schema_version",
+        "event_id",
+        "session_id",
+        "run_id",
+        "parent_run_id",
+        "producer_id",
+        "sequence",
+        "occurred_at",
+        "type",
+        "payload",
+    }
     required = allowed - {"parent_run_id"}
     if set(raw) - allowed or not required.issubset(raw):
         raise ValueError("invalid event fields")
@@ -98,7 +108,11 @@ def validate_event(raw: object) -> dict:
             if type(value) is not bool:
                 raise ValueError("demo must be boolean")
         else:
-            text(value, 600 if key in {"task", "text", "summary", "detail", "reason"} else 256, empty=True)
+            text(
+                value,
+                600 if key in {"task", "text", "summary", "detail", "reason"} else 256,
+                empty=True,
+            )
     if kind == "run.started":
         text(payload.get("name"), 240)
     elif kind == "run.activity":

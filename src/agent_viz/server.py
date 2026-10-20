@@ -18,7 +18,15 @@ class Collector(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, store, token: str, port: int = 0, host: str = "127.0.0.1", monitor=None, summarizer=None):
+    def __init__(
+        self,
+        store,
+        token: str,
+        port: int = 0,
+        host: str = "127.0.0.1",
+        monitor=None,
+        summarizer=None,
+    ):
         if host != "127.0.0.1":
             raise ValueError("only IPv4 loopback is supported")
         if len(token) < 24:
@@ -36,15 +44,32 @@ class Collector(ThreadingHTTPServer):
 
     def snapshot(self):
         data = self.store.snapshot(limit=5000)
-        observed = self.monitor.public_state() if self.monitor else {"profiles": [], "source_errors": {}, "source_stats": [], "automatic_discovery": False}
+        observed = (
+            self.monitor.public_state()
+            if self.monitor
+            else {
+                "profiles": [],
+                "source_errors": {},
+                "source_stats": [],
+                "automatic_discovery": False,
+            }
+        )
         profiles = observed["profiles"]
-        data["profiles"] = [{"id": p["id"], "label": p["label"], "kind": p["kind"]} for p in profiles]
+        data["profiles"] = [
+            {"id": p["id"], "label": p["label"], "kind": p["kind"]} for p in profiles
+        ]
         errors = observed["source_errors"]
-        data["source_errors"] = [{"label": next((p["label"] for p in profiles if p["id"] == key), key), "message": value}
-                                 for key, value in errors.items()]
+        data["source_errors"] = [
+            {"label": next((p["label"] for p in profiles if p["id"] == key), key), "message": value}
+            for key, value in errors.items()
+        ]
         data["source_stats"] = observed["source_stats"]
         data["automatic_discovery"] = observed["automatic_discovery"]
-        data["ai"] = self.summarizer.public_state() if self.summarizer else {"enabled": False, "status": "disabled", "summaries": []}
+        data["ai"] = (
+            self.summarizer.public_state()
+            if self.summarizer
+            else {"enabled": False, "status": "disabled", "summaries": []}
+        )
         summaries = {item["run_id"]: item for item in data["ai"].get("summaries", [])}
         for run in data["runs"]:
             if run["run_id"] in summaries:
@@ -86,7 +111,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+            "img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        )
         if length is not None:
             self.send_header("Content-Length", str(length))
 
@@ -107,11 +136,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
             return
         authorization = self.headers.get("Authorization", "")
-        if not hmac.compare_digest(authorization.encode("utf-8"), ("Bearer " + self.server.token).encode("utf-8")):
+        if not hmac.compare_digest(
+            authorization.encode("utf-8"), ("Bearer " + self.server.token).encode("utf-8")
+        ):
             self.close_connection = True
             self._json(401, {"error": "ingestion token required"})
             return
-        if self.headers.get("Transfer-Encoding") or self.headers.get_content_type() != "application/json":
+        if (
+            self.headers.get("Transfer-Encoding")
+            or self.headers.get_content_type() != "application/json"
+        ):
             self.close_connection = True
             self._json(400, {"error": "bounded JSON request required"})
             return
@@ -143,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/events":
             self._stream(parsed.query)
         elif path.startswith("/api/runs/") and path.endswith("/events"):
-            run_id = unquote(path[len("/api/runs/"):-len("/events")])
+            run_id = unquote(path[len("/api/runs/") : -len("/events")])
             query = parse_qs(parsed.query)
             try:
                 after = max(0, int(query.get("after", ["0"])[0]))
@@ -159,7 +193,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, data)
         elif path in {"/", "/app.js", "/style.css"}:
             name = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}[path]
-            content_types = {"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8"}
+            content_types = {
+                "index.html": "text/html; charset=utf-8",
+                "app.js": "text/javascript; charset=utf-8",
+                "style.css": "text/css; charset=utf-8",
+            }
             try:
                 data = (STATIC / name).read_bytes()
             except OSError:
@@ -194,7 +232,8 @@ class Handler(BaseHTTPRequestHandler):
                 # Always deliver a complete snapshot. No partial-delta loss on
                 # reconnect; a cursor from another/cleared store resets explicitly.
                 kind = "reset" if initial and after > data["cursor"] else "snapshot"
-                packet = f"id: {data['cursor']}\nevent: {kind}\ndata: {json.dumps(data, allow_nan=False)}\n\n"
+                body = json.dumps(data, allow_nan=False)
+                packet = f"id: {data['cursor']}\nevent: {kind}\ndata: {body}\n\n"
                 self.wfile.write(packet.encode())
                 self.wfile.flush()
                 initial = False

@@ -1,10 +1,10 @@
 """Dependency-free browser asset checks; optional Node exercises DOM behavior."""
-from html.parser import HTMLParser
-from pathlib import Path
+
 import shutil
 import subprocess
 import unittest
-
+from html.parser import HTMLParser
+from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "src" / "agent_viz" / "static"
 
@@ -30,14 +30,35 @@ class StaticTests(unittest.TestCase):
         parser = Assets()
         parser.feed((STATIC / "index.html").read_text())
         self.assertEqual(set(parser.references), {"/style.css", "/app.js"})
-        self.assertTrue({"runs", "detail", "profiles", "recency-filter", "source-filter", "account-filter", "state-filter", "connection", "demo-banner", "refresh", "source-errors"} <= parser.ids)
+        self.assertTrue(
+            {
+                "runs",
+                "detail",
+                "profiles",
+                "recency-filter",
+                "source-filter",
+                "account-filter",
+                "state-filter",
+                "connection",
+                "demo-banner",
+                "refresh",
+                "source-errors",
+            }
+            <= parser.ids
+        )
         script = (STATIC / "app.js").read_text()
-        for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write(", "eval("):
+        for forbidden in (
+            "innerHTML",
+            "outerHTML",
+            "insertAdjacentHTML",
+            "document.write(",
+            "eval(",
+        ):
             self.assertNotIn(forbidden, script)
 
     @unittest.skipUnless(shutil.which("node"), "Node is optional; browser syntax/DOM check skipped")
     def test_browser_renders_tree_filters_and_private_text_safely(self):
-        script = r'''
+        script = r"""
 const fs = require('fs'), vm = require('vm'), assert = require('assert');
 let document;
 class Element {
@@ -123,8 +144,13 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
  assert.equal(requests.filter(x => x === '/api/runs/grandchild/events?after=0&limit=100').length,3);
  assert.equal(flatten(ids.detail).filter(x => x.tagName === 'li').length,1);
 })().catch(error => { console.error(error);process.exitCode=1; });
-'''
-        result = subprocess.run([shutil.which("node"), "-e", script, str(STATIC / "app.js")], capture_output=True, text=True, timeout=10)
+"""
+        result = subprocess.run(
+            [shutil.which("node"), "-e", script, str(STATIC / "app.js")],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 

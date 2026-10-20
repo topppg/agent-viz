@@ -53,7 +53,11 @@ from the repo root down to that file's directory. Closer files add to or overrid
   approval per action.
 
 ## 5. Code
-- Python with no runtime package dependencies. Type hints everywhere; avoid `Any`.
+- Always use `uv` for Python. Never invoke `python`, `python3`, `pip` or `pip3` directly: `uv run …`, `uv add …`,
+  `uv sync`. Python 3.13 locally (`.python-version`); the package supports 3.12+.
+- `uv run ruff check .` and `uv run ruff format --check .` must pass (config in `pyproject.toml`). Never silence a
+  rule inline without a one-line reason.
+- No runtime package dependencies; dev tooling goes in the `dev` dependency group. Type hints everywhere; avoid `Any`.
 - Prefer one simple current implementation. No backward-compatibility shims, speculative abstractions or generic
   frameworks without a concrete present need. Refactor all callers together and remove superseded code.
 - Modules are named for what they are. No `utils.py`, `helpers.py`, `common.py`.
@@ -62,9 +66,12 @@ from the repo root down to that file's directory. Closer files add to or overrid
 
 ## 6. Git
 - Conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`), one line, lowercase subject.
-- Small, focused commits. Run the tests before each commit.
+- Small, focused commits. Run the lint, format and test commands below before each commit.
 
 ## Commands
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+uv sync
+uv run ruff check . && uv run ruff format --check .
+uv run pytest
+uv run agent-viz serve --demo --data-dir .agent-viz/demo --port 8766
 ```

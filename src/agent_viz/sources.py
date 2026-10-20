@@ -3,16 +3,17 @@
 These are adapters for observed file formats, not supported vendor APIs. They
 never establish whether a process or a signed-in account is currently alive.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import stat
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 HEAD_BYTES = 256 * 1024
@@ -77,7 +78,15 @@ def discover_profiles(home: str | Path | None = None) -> list[SourceProfile]:
             if child.name.startswith(".codex-"):
                 candidates.append(("codex", "Codex · " + child.name.removeprefix(".codex-"), child))
             if child.name == ".claude" or child.name.startswith(".claude-"):
-                candidates.append(("claude", "Claude · " + child.name.removeprefix(".claude").lstrip("-") if child.name != ".claude" else "Claude · default", child))
+                candidates.append(
+                    (
+                        "claude",
+                        "Claude · " + child.name.removeprefix(".claude").lstrip("-")
+                        if child.name != ".claude"
+                        else "Claude · default",
+                        child,
+                    )
+                )
     except OSError:
         pass
     result = []
@@ -124,11 +133,19 @@ def load_profiles(config_path: str | Path) -> list[SourceProfile]:
 def _file_inventory(root: Path | list[Path], limit: int) -> tuple[list[Path], dict]:
     limit = max(1, min(int(limit), MAX_SCAN_LIMIT))
     roots = root if isinstance(root, list) else [root]
-    diagnostics = {"files_seen": 0, "selected_files": 0, "truncated": False,
-                   "scan_limit": limit, "discovery_limited": False,
-                   "entry_budget_hit": False, "depth_budget_hit": False,
-                   "unreadable_directories": 0, "symlinks_skipped": 0,
-                   "transcript_trees": [p.name for p in roots], "tree_count": len(roots)}
+    diagnostics = {
+        "files_seen": 0,
+        "selected_files": 0,
+        "truncated": False,
+        "scan_limit": limit,
+        "discovery_limited": False,
+        "entry_budget_hit": False,
+        "depth_budget_hit": False,
+        "unreadable_directories": 0,
+        "symlinks_skipped": 0,
+        "transcript_trees": [p.name for p in roots],
+        "tree_count": len(roots),
+    }
     pending = []
     for path in roots:
         if path.is_symlink():
@@ -156,7 +173,9 @@ def _file_inventory(root: Path | list[Path], limit: int) -> tuple[list[Path], di
                             diagnostics["depth_budget_hit"] = True
                     elif entry.name.endswith(".jsonl") and entry.is_file(follow_symlinks=False):
                         try:
-                            files.append((entry.stat(follow_symlinks=False).st_mtime_ns, Path(entry.path)))
+                            files.append(
+                                (entry.stat(follow_symlinks=False).st_mtime_ns, Path(entry.path))
+                            )
                         except OSError:
                             pass
         except OSError:
@@ -167,10 +186,18 @@ def _file_inventory(root: Path | list[Path], limit: int) -> tuple[list[Path], di
     if pending:
         diagnostics["entry_budget_hit"] = True
     selected = [path for _, path in sorted(files, key=lambda pair: pair[0], reverse=True)[:limit]]
-    limited = bool(diagnostics["entry_budget_hit"] or diagnostics["depth_budget_hit"]
-                   or diagnostics["unreadable_directories"] or diagnostics["symlinks_skipped"])
-    diagnostics.update(files_seen=len(files), selected_files=len(selected),
-                       discovery_limited=limited, truncated=limited or len(files) > len(selected))
+    limited = bool(
+        diagnostics["entry_budget_hit"]
+        or diagnostics["depth_budget_hit"]
+        or diagnostics["unreadable_directories"]
+        or diagnostics["symlinks_skipped"]
+    )
+    diagnostics.update(
+        files_seen=len(files),
+        selected_files=len(selected),
+        discovery_limited=limited,
+        truncated=limited or len(files) > len(selected),
+    )
     return selected, diagnostics
 
 
@@ -237,12 +264,18 @@ def _safe(value: Any, limit: int = 160) -> str:
 
 def _id(value: Any) -> str:
     # Native IDs, unlike labels, must not carry free-form content or paths.
-    return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", value) else ""
+    return (
+        value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", value) else ""
+    )
 
 
 def _ns(profile: SourceProfile, native_id: str) -> str:
     value = f"{profile.id}:{native_id}"
-    return value if len(value) <= 180 else f"{profile.id}:sha256-{hashlib.sha256(native_id.encode()).hexdigest()[:32]}"
+    return (
+        value
+        if len(value) <= 180
+        else f"{profile.id}:sha256-{hashlib.sha256(native_id.encode()).hexdigest()[:32]}"
+    )
 
 
 def _time(value: Any) -> str | None:
@@ -252,7 +285,7 @@ def _time(value: Any) -> str | None:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             return None
-        return parsed.astimezone(timezone.utc).isoformat()
+        return parsed.astimezone(UTC).isoformat()
     except (ValueError, OverflowError):
         return None
 
@@ -261,25 +294,50 @@ def _text(message: Any) -> str:
     if isinstance(message, str):
         return _safe(message)
     if isinstance(message, list):
-        return _safe(" ".join(x.get("text", "") for x in message if isinstance(x, dict) and x.get("type") in {"text", "input_text", "output_text"} and isinstance(x.get("text"), str)))
+        return _safe(
+            " ".join(
+                x.get("text", "")
+                for x in message
+                if isinstance(x, dict)
+                and x.get("type") in {"text", "input_text", "output_text"}
+                and isinstance(x.get("text"), str)
+            )
+        )
     return ""
 
 
 def _base(profile: SourceProfile, native: str, project: str, started: str | None) -> dict:
     # An observer collection is NOT a vendor conversation/session. Its identity
     # stays fixed when ancestor transcripts enter or leave a bounded scan window.
-    return {"run_id": _ns(profile, native), "session_id": f"{profile.id}:observed",
-            "parent_run_id": None, "native_id": native,
-            "name": f"{profile.kind.title()} {native[:8]}",
-            "task": "Text hidden · enable include_text for this profile",
-            "activity": "Transcript observed", "source": profile.kind,
-            "account": profile.label, "project": project, "state": "unknown",
-            "inferred": True, "evidence": "Read-only transcript; no process liveness proof",
-            "last_seen": started, "started_at": started, "health": "observed"}
+    return {
+        "run_id": _ns(profile, native),
+        "session_id": f"{profile.id}:observed",
+        "parent_run_id": None,
+        "native_id": native,
+        "name": f"{profile.kind.title()} {native[:8]}",
+        "task": "Text hidden · enable include_text for this profile",
+        "activity": "Transcript observed",
+        "source": profile.kind,
+        "account": profile.label,
+        "project": project,
+        "state": "unknown",
+        "inferred": True,
+        "evidence": "Read-only transcript; no process liveness proof",
+        "last_seen": started,
+        "started_at": started,
+        "health": "observed",
+    }
 
 
 def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | None:
-    meta = next((x.get("payload", {}) for x in records if x.get("type") == "session_meta" and isinstance(x.get("payload"), dict)), None)
+    meta = next(
+        (
+            x.get("payload", {})
+            for x in records
+            if x.get("type") == "session_meta" and isinstance(x.get("payload"), dict)
+        ),
+        None,
+    )
     if not meta:
         return None
     native = _id(meta.get("id")) or _id(meta.get("session_id"))
@@ -289,8 +347,14 @@ def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | 
     cwd = meta.get("cwd", "")
     project = _safe(Path(cwd).name, 80) if isinstance(cwd, str) else ""
     source = meta.get("source", {})
-    spawn = source.get("subagent", {}).get("thread_spawn", {}) if isinstance(source, dict) and isinstance(source.get("subagent"), dict) else {}
-    parent = _id(meta.get("parent_thread_id")) or (_id(spawn.get("parent_thread_id")) if isinstance(spawn, dict) else "")
+    spawn = (
+        source.get("subagent", {}).get("thread_spawn", {})
+        if isinstance(source, dict) and isinstance(source.get("subagent"), dict)
+        else {}
+    )
+    parent = _id(meta.get("parent_thread_id")) or (
+        _id(spawn.get("parent_thread_id")) if isinstance(spawn, dict) else ""
+    )
     out = _base(profile, native, project, started)
     if parent and parent != native:
         out["parent_run_id"] = _ns(profile, parent)
@@ -318,17 +382,25 @@ def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | 
             event = p.get("type")
             if event in {"function_call", "custom_tool_call", "local_shell_call"}:
                 state, activity, evidence = "waiting_tool", "Tool call recorded", str(event)
-            elif event in {"function_call_output", "custom_tool_call_output", "local_shell_call_output"}:
+            elif event in {
+                "function_call_output",
+                "custom_tool_call_output",
+                "local_shell_call_output",
+            }:
                 state, activity, evidence = "working", "Tool result recorded", str(event)
             elif event in {"message", "reasoning", "agent_message"} and p.get("role") != "user":
                 state, activity, evidence = "working", "Model activity recorded", str(event)
                 if profile.include_text and event in {"message", "agent_message"}:
                     activity = _text(p.get("content")) or activity
         if state and (stamp is None or last_state_time is None or stamp >= last_state_time):
-            out.update(state=state, activity=activity, evidence=f"Codex transcript: {evidence}; inferred session state")
+            out.update(
+                state=state,
+                activity=activity,
+                evidence=f"Codex transcript: {evidence}; inferred session state",
+            )
             last_state_time = stamp or last_state_time
     out.pop("_task_set", None)
-    out["last_seen"] = out["last_seen"] or datetime.fromtimestamp(mtime, timezone.utc).isoformat()
+    out["last_seen"] = out["last_seen"] or datetime.fromtimestamp(mtime, UTC).isoformat()
     return out
 
 
@@ -336,7 +408,9 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
     session = next((_id(x.get("sessionId")) for x in records if _id(x.get("sessionId"))), "")
     if not session:
         return None
-    side = next((x for x in records if x.get("isSidechain") is True and _id(x.get("agentId"))), None)
+    side = next(
+        (x for x in records if x.get("isSidechain") is True and _id(x.get("agentId"))), None
+    )
     # parentUuid is a MESSAGE link, never an agent-parent relationship.
     agent = _id(side.get("agentId")) if side else ""
     native = f"{session}:agent:{agent}" if agent else session
@@ -356,8 +430,14 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
         state, activity, evidence = None, None, None
         if kind == "user" and isinstance(message, dict):
             content = message.get("content", [])
-            result = isinstance(content, list) and any(isinstance(x, dict) and x.get("type") == "tool_result" for x in content)
-            state, activity, evidence = "working", "Tool result recorded" if result else "User turn recorded", "user/tool_result" if result else "user"
+            result = isinstance(content, list) and any(
+                isinstance(x, dict) and x.get("type") == "tool_result" for x in content
+            )
+            state, activity, evidence = (
+                "working",
+                "Tool result recorded" if result else "User turn recorded",
+                "user/tool_result" if result else "user",
+            )
             if profile.include_text and not result and not task_set:
                 text = _text(content)
                 if text:
@@ -365,11 +445,21 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
         elif kind == "assistant" and isinstance(message, dict):
             stop = message.get("stop_reason")
             content = message.get("content", [])
-            tool = isinstance(content, list) and any(isinstance(x, dict) and x.get("type") == "tool_use" for x in content)
+            tool = isinstance(content, list) and any(
+                isinstance(x, dict) and x.get("type") == "tool_use" for x in content
+            )
             if stop in {"end_turn", "stop_sequence", "max_tokens"}:
-                state, activity, evidence = "idle", "Turn ended · session may resume", "assistant stop_reason"
+                state, activity, evidence = (
+                    "idle",
+                    "Turn ended · session may resume",
+                    "assistant stop_reason",
+                )
             elif tool or stop == "tool_use":
-                state, activity, evidence = "waiting_tool", "Tool call recorded", "assistant tool_use"
+                state, activity, evidence = (
+                    "waiting_tool",
+                    "Tool call recorded",
+                    "assistant tool_use",
+                )
             else:
                 state, activity, evidence = "working", "Model activity recorded", "assistant"
                 if profile.include_text:
@@ -377,21 +467,33 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
         elif kind == "system" and row.get("subtype") == "turn_duration":
             state, activity, evidence = "idle", "Turn ended · session may resume", "turn_duration"
         if state and (stamp is None or last_state_time is None or stamp >= last_state_time):
-            out.update(state=state, activity=activity, evidence=f"Claude transcript: {evidence}; inferred session state")
+            out.update(
+                state=state,
+                activity=activity,
+                evidence=f"Claude transcript: {evidence}; inferred session state",
+            )
             last_state_time = stamp or last_state_time
-    out["last_seen"] = out["last_seen"] or datetime.fromtimestamp(mtime, timezone.utc).isoformat()
+    out["last_seen"] = out["last_seen"] or datetime.fromtimestamp(mtime, UTC).isoformat()
     return out
 
 
-def scan_profile(profile: SourceProfile, limit: int = DEFAULT_SCAN_LIMIT, *, diagnostics: dict | None = None) -> list[dict]:
+def scan_profile(
+    profile: SourceProfile, limit: int = DEFAULT_SCAN_LIMIT, *, diagnostics: dict | None = None
+) -> list[dict]:
     """Observe at most ``limit`` recent files; no credentials, hooks, or APIs.
 
     Raises OSError for a missing/unreadable root so the monitor can surface a
     sanitized source error. Individual disappearing/corrupt files are skipped.
     """
     selected, coverage = _file_inventory(_source_trees(profile), limit)
-    coverage.update(id=profile.id, label=profile.label, kind=profile.kind,
-                    read_errors=0, unsupported_files=0, observations=0)
+    coverage.update(
+        id=profile.id,
+        label=profile.label,
+        kind=profile.kind,
+        read_errors=0,
+        unsupported_files=0,
+        observations=0,
+    )
     result = []
     active_keys = set()
     prefix = f"{profile.id}:{profile.include_text}:{profile.label}"
@@ -406,7 +508,9 @@ def scan_profile(profile: SourceProfile, limit: int = DEFAULT_SCAN_LIMIT, *, dia
                 value = cached[1]
             else:
                 rows = _records(path)
-                value = (_codex if profile.kind == "codex" else _claude)(profile, rows, info.st_mtime)
+                value = (_codex if profile.kind == "codex" else _claude)(
+                    profile, rows, info.st_mtime
+                )
                 _CACHE[key] = (signature, value)
             if value:
                 result.append(dict(value))

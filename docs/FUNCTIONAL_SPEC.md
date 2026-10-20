@@ -104,7 +104,7 @@ sequence/reconnect behavior is a milestone-one design decision with tests.
 
 ## 5. Integration and transport
 
-Implemented shape: Python 3.11+ SDK; a small standard-library Python HTTP service
+Implemented shape: Python 3.12+ SDK; a small standard-library Python HTTP service
 using SQLite; browser snapshots plus Server-Sent Events (a one-way live update
 stream); buildless HTML/JavaScript. No runtime package dependency is needed.
 Full snapshots and a persistent journal ID avoid missed-delta recovery ambiguity.

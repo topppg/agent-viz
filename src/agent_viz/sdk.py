@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
-from datetime import datetime, timezone
 import ipaddress
 import json
 import threading
 import time
-from urllib import error, parse, request
 import uuid
+from collections import deque
+from datetime import UTC, datetime
+from urllib import error, parse, request
 
 
 def _now():
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _local_url(url):
@@ -31,7 +31,7 @@ def _local_url(url):
     if not local:
         raise ValueError("Only loopback collectors are supported")
     # Reading .port also validates malformed port values.
-    parsed.port
+    _ = parsed.port
     if parsed.path not in {"", "/"}:
         raise ValueError("Collector URL must not include a path")
     return url.rstrip("/")
@@ -51,8 +51,7 @@ class Client:
     ``diagnostics`` or ``flush()`` to detect incomplete delivery.
     """
 
-    def __init__(self, url, token, account="local", session_id=None,
-                 queue_size=256, timeout=.5):
+    def __init__(self, url, token, account="local", session_id=None, queue_size=256, timeout=0.5):
         self.url = _local_url(url)
         if not isinstance(token, str) or not token or "\n" in token or "\r" in token:
             raise ValueError("A nonempty collector token is required")
@@ -70,7 +69,9 @@ class Client:
         self._closed = False
         self._stats = dict(delivered=0, dropped=0, failed=0, retried=0)
         self._opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
-        self._thread = threading.Thread(target=self._deliver, name="agent-viz-delivery", daemon=True)
+        self._thread = threading.Thread(
+            target=self._deliver, name="agent-viz-delivery", daemon=True
+        )
         self._thread.start()
 
     @property
@@ -83,10 +84,17 @@ class Client:
             if self._closed:
                 return False
             self._sequence += 1
-            event = dict(schema_version=1, event_id=str(uuid.uuid4()),
-                         session_id=self.session_id, run_id=run_id,
-                         producer_id=self.producer_id, sequence=self._sequence,
-                         occurred_at=_now(), type=event_type, payload=payload)
+            event = dict(
+                schema_version=1,
+                event_id=str(uuid.uuid4()),
+                session_id=self.session_id,
+                run_id=run_id,
+                producer_id=self.producer_id,
+                sequence=self._sequence,
+                occurred_at=_now(),
+                type=event_type,
+                payload=payload,
+            )
             if parent_run_id:
                 event["parent_run_id"] = parent_run_id
             try:
@@ -114,9 +122,15 @@ class Client:
                 item[1] += 1
                 if item[1] > 1:
                     self._stats["retried"] += 1
-                req = request.Request(self.url + "/api/events", data=item[0],
-                                      headers={"Authorization": "Bearer " + self._token,
-                                               "Content-Type": "application/json"}, method="POST")
+                req = request.Request(
+                    self.url + "/api/events",
+                    data=item[0],
+                    headers={
+                        "Authorization": "Bearer " + self._token,
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
             successful = False
             retryable = True
             try:
@@ -140,7 +154,7 @@ class Client:
                     if not successful:
                         self._stats["dropped"] += 1
                 else:
-                    self._condition.wait(timeout=.05 * item[1])
+                    self._condition.wait(timeout=0.05 * item[1])
                 self._condition.notify_all()
 
     def run(self, name, task="", parent=None, project=None, source="sdk", demo=False):
@@ -204,8 +218,9 @@ class Run:
             return self.client._emit(self.run_id, event_type, payload, self.parent_run_id)
 
     def child(self, name, task=""):
-        return self.client.run(name, task, parent=self, project=self._project,
-                               source=self._source, demo=self._demo)
+        return self.client.run(
+            name, task, parent=self, project=self._project, source=self._source, demo=self._demo
+        )
 
     def activity(self, text, provenance="application"):
         return self._send("run.activity", dict(text=text, provenance=provenance))
@@ -222,8 +237,9 @@ class Run:
         return operation_id
 
     def finish_operation(self, operation_id, outcome="success", detail=""):
-        return self._send("operation.finished", dict(operation_id=operation_id,
-                          outcome=outcome, detail=detail))
+        return self._send(
+            "operation.finished", dict(operation_id=operation_id, outcome=outcome, detail=detail)
+        )
 
     def operation(self, kind, label):
         return Operation(self, kind, label)
@@ -240,8 +256,9 @@ class Run:
         return self
 
     def __exit__(self, exc_type, exc, traceback):
-        self.finish("failed" if exc_type else "completed",
-                    "Run raised an exception" if exc_type else "")
+        self.finish(
+            "failed" if exc_type else "completed", "Run raised an exception" if exc_type else ""
+        )
 
 
 class Operation:
@@ -254,5 +271,8 @@ class Operation:
         return self
 
     def __exit__(self, exc_type, exc, traceback):
-        self.run.finish_operation(self.operation_id, "error" if exc_type else "success",
-                                  "Operation raised an exception" if exc_type else "")
+        self.run.finish_operation(
+            self.operation_id,
+            "error" if exc_type else "success",
+            "Operation raised an exception" if exc_type else "",
+        )
