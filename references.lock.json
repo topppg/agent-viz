@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "captured_on": "2026-10-20",
+  "purpose": "Local read-only research; ignored shallow clones, not project dependencies",
+  "repositories": [
+    {
+      "directory": "references/agenthud",
+      "url": "https://github.com/IAMMARBIT/AgentHUD.git",
+      "branch": "main",
+      "commit": "569abe07044779efff4a4e762a535fe40e8fdda2",
+      "license_notes": "Root LICENSE: MIT"
+    },
+    {
+      "directory": "references/claude-agent-monitor",
+      "url": "https://github.com/reubenrajan/claude-agent-monitor.git",
+      "branch": "master",
+      "commit": "1f08cc81051b4cb4d786875f204a2e518dbdfc5f",
+      "license_notes": "Root LICENSE: MIT"
+    },
+    {
+      "directory": "references/agent-top",
+      "url": "https://github.com/kannandreams/agent-top.git",
+      "branch": "main",
+      "commit": "5961bf0087d9f827bc4963a8d00c3780000a3ad1",
+      "license_notes": "Root LICENSE: MIT"
+    },
+    {
+      "directory": "references/cyberark-agentwatch",
+      "url": "https://github.com/cyberark/agentwatch.git",
+      "branch": "main",
+      "commit": "56012207e0b2570c1a9716b6fec72288c3958d48",
+      "license_notes": "Root LICENSE: Apache-2.0; NOTICES.txt present"
+    },
+    {
+      "directory": "references/atc-claude-kanban",
+      "url": "https://github.com/atc-net/atc-claude-kanban.git",
+      "branch": "main",
+      "commit": "94e8db7658e588df1bee336b90d0f10cdab10a16",
+      "license_notes": "Root LICENSE: MIT"
+    },
+    {
+      "directory": "references/agent-dashboard",
+      "url": "https://github.com/YusufKaya00/AgentDashboard.git",
+      "branch": "main",
+      "commit": "433f353140f6d3bb3728d89ea3156caf39179b75",
+      "license_notes": "No root license; README explicitly withholds reuse/redistribution rights; reference only"
+    },
+    {
+      "directory": "references/agentops",
+      "url": "https://github.com/AgentOps-AI/agentops.git",
+      "branch": "main",
+      "commit": "f8e907b92dabe47232978023fdcb01e2a7d4b752",
+      "license_notes": "Root SDK LICENSE: MIT; app/LICENSE: Elastic License 2.0; app is reference only"
+    }
+  ]
+}

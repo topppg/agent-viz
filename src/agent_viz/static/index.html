@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0c0d12">
+  <title>Agent Viz · spectral operations terminal</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="ghost-mark" viewBox="0 0 48 58" fill="none" aria-hidden="true" focusable="false"><path d="M8 47V23a16 16 0 0 1 32 0v24l-8-5-8 6-8-6-8 5Z"/><path class="ghost-eyes" d="M19 23v5m10-5v5"/><path class="ghost-tail" d="M16 52h16M20 56h8"/></svg>
+      <div><p class="shell-path">local://agent-viz <span class="shell-cursor" aria-hidden="true">▌</span></p><h1>Agent Viz<span class="version-tag">/ 001</span></h1><p class="brand-subtitle">Spectral operations terminal</p></div>
+    </div>
+    <div class="masthead-controls"><div class="boundary-labels"><span>Local only</span><span>Read only</span></div><div class="connection-tools"><span id="connection" role="status">Connecting…</span><button id="refresh" type="button">Refresh</button></div></div>
+  </header>
+  <main>
+    <div id="demo-banner" class="banner" hidden>SYNTHETIC DEMO · Invented activity, no provider calls.</div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <section id="source-errors" aria-label="Source warnings" hidden></section>
+    <div class="section-label"><span>01 / Sources</span><span>Local observation channels</span></div>
+    <section id="profiles" class="profiles" aria-label="Source profiles"></section>
+    <div class="section-label"><span>02 / Observatory</span><span>Work state ≠ connection health</span></div>
+    <section id="overview" class="stats" aria-label="Run overview"></section>
+    <section id="ai-brief" class="ai-brief" aria-label="AI activity brief" hidden></section>
+    <section class="filters" aria-label="Filter runs"><span class="filter-kicker">View<br>protocols</span>
+      <label>Source <select id="source-filter"><option value="">All sources</option></select></label>
+      <label>Account / profile <select id="account-filter"><option value="">All accounts</option></select></label>
+      <label>State <select id="state-filter"><option value="">All states</option></select></label>
+      <label>Evidence window <select id="recency-filter"><option value="all" selected>All history</option><option value="5m">Last 5 minutes</option><option value="1h">Last hour</option><option value="24h">Last 24 hours</option></select></label>
+      <label class="search-label">Find <input id="search" type="search" placeholder="Name, task, activity" autocomplete="off"></label>
+      <button id="expand-all" type="button">Expand all</button>
+    </section>
+    <p id="freshness" class="muted explanation">Loading local activity…</p>
+    <div class="workspace">
+      <section class="tree-panel" aria-labelledby="runs-heading"><h2 id="runs-heading">Delegation graph <span id="run-count" class="muted"></span></h2><p class="graph-caption">Working branches first <span>● sessions &nbsp; ├ delegation &nbsp; ○ historical evidence</span></p><div id="runs" aria-busy="true"><p class="empty">Loading runs…</p></div></section>
+      <aside id="detail" class="detail-panel" aria-labelledby="detail-heading"><h2 id="detail-heading">Run detail</h2><p class="empty">Select a signal in the topology to inspect its activity and event history.</p></aside>
+    </div>
+  </main>
+  <footer><span class="footer-brand">AGENT VIZ / LOCAL OBSERVATORY</span><span>Local data may contain private labels. Review before sharing a recording.</span></footer>
+</body>
+</html>
