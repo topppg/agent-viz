@@ -1,0 +1,393 @@
+import builtins
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from agent_viz import focus
+from agent_viz.focus import Process, Step, Target
+from agent_viz.sources import SourceProfile
+
+CLAUDE_ID = "11111111-2222-4333-8444-555555555555"
+OTHER_ID = "22222222-2222-4333-8444-555555555555"
+CODEX_ID = "019a0000-aaaa-7bbb-8ccc-dddddddddddd"
+START = "Tue Oct 20 10:00:00 2026"
+
+
+class FakeSystem:
+    """Answers ps/lsof argv lists from invented processes; records every call."""
+
+    def __init__(self, processes=None, lsof=None, env_output=""):
+        self.processes = processes or {}
+        self.lsof = lsof
+        self.env_output = env_output
+        self.calls = []
+
+    def __call__(self, argv, env=None):
+        self.calls.append((list(argv), env))
+        if argv[:2] == ["ps", "eww"]:
+            return 0, self.env_output
+        if argv[0] == "ps":
+            process = self.processes.get(int(argv[-1]))
+            if not process:
+                return 1, ""
+            return 0, f"{process.ppid:>5} {process.tty:<8} {process.start}     {process.command}\n"
+        if argv[0].endswith("lsof"):
+            return self.lsof
+        return 0, ""
+
+
+def proc(pid, ppid=1, command="/usr/local/bin/claude", tty="ttys003", start=START):
+    return Process(pid, ppid, tty, start, command)
+
+
+def write_session(root, pid, session_id, proc_start=START):
+    (root / "sessions").mkdir(parents=True, exist_ok=True)
+    data = {"pid": pid, "sessionId": session_id, "cwd": "/invented/project"}
+    if proc_start is not None:
+        data["procStart"] = proc_start
+    (root / "sessions" / f"{pid}.json").write_text(json.dumps(data))
+
+
+class ClaudeResolutionTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.root = Path(self.folder.name) / ".claude-work"
+        self.addCleanup(self.folder.cleanup)
+
+    def test_live_stale_and_reused_pids(self):
+        write_session(self.root, 111, CLAUDE_ID)
+        write_session(self.root, 222, OTHER_ID)
+        write_session(
+            self.root, 333, "33333333-2222-4333-8444-555555555555", "Mon Oct 19 1:00:00 2026"
+        )
+        system = FakeSystem({111: proc(111), 333: proc(333)})
+        with patch.object(focus, "_run", system):
+            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (True, 111))
+            self.assertEqual(focus.claude_pid(self.root, OTHER_ID), (True, None))
+            self.assertEqual(
+                focus.claude_pid(self.root, "33333333-2222-4333-8444-555555555555"), (True, None)
+            )
+            self.assertEqual(focus.claude_pid(self.root, "missing-0000"), (True, None))
+        self.assertIn("TZ", system.calls[0][1])
+        self.assertEqual(system.calls[0][1]["TZ"], "UTC")
+
+    def test_pid_mismatch_and_missing_directory(self):
+        (self.root / "sessions").mkdir(parents=True)
+        (self.root / "sessions" / "111.json").write_text(
+            json.dumps({"pid": 999, "sessionId": CLAUDE_ID})
+        )
+        with patch.object(focus, "_run", FakeSystem({111: proc(111), 999: proc(999)})):
+            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (True, None))
+            self.assertEqual(focus.claude_pid(self.root / "absent", CLAUDE_ID), (False, None))
+
+    def test_key_files_are_never_opened(self):
+        write_session(self.root, 111, CLAUDE_ID)
+        key = self.root / "sessions" / "111.abcdef.key"
+        key.write_text("invented secret")
+        (self.root / "sessions" / "111.json.key").write_text("invented secret")
+        opened = []
+        real_open, real_os_open = builtins.open, os.open
+
+        def guard_open(path, *args, **kwargs):
+            opened.append(str(path))
+            assert not str(path).endswith(".key")
+            return real_open(path, *args, **kwargs)
+
+        def guard_os_open(path, *args, **kwargs):
+            opened.append(str(path))
+            assert not str(path).endswith(".key")
+            return real_os_open(path, *args, **kwargs)
+
+        with (
+            patch.object(focus, "_run", FakeSystem({111: proc(111)})),
+            patch("builtins.open", guard_open),
+            patch("os.open", guard_os_open),
+        ):
+            self.assertEqual(focus.claude_pid(self.root, OTHER_ID), (True, None))
+            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (True, 111))
+        self.assertTrue(opened)
+        self.assertFalse([p for p in opened if p.endswith(".key")])
+
+
+class CodexResolutionTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.root = Path(self.folder.name) / "profiles" / "work"
+        day = self.root / "sessions" / "2026" / "10" / "20"
+        day.mkdir(parents=True)
+        self.rollout = day / f"rollout-2026-10-20T10-00-00-{CODEX_ID}.jsonl"
+        meta = {"type": "session_meta", "payload": {"id": CODEX_ID, "cwd": "/invented/my app"}}
+        self.rollout.write_text(json.dumps(meta) + "\n")
+
+    def test_rollout_holder_found_by_lsof(self):
+        system = FakeSystem({4242: proc(4242, command="/opt/bin/codex")}, lsof=(0, "4242\n"))
+        with (
+            patch.object(focus, "_run", system),
+            patch.object(focus.shutil, "which", return_value="/usr/sbin/lsof"),
+        ):
+            self.assertEqual(focus._rollout(self.root, CODEX_ID), self.rollout)
+            self.assertEqual(focus.codex_pid(self.root, self.rollout), (True, 4242))
+        self.assertIn(
+            ["/usr/sbin/lsof", "-t", "--", str(self.rollout)], [c[0] for c in system.calls]
+        )
+
+    def test_not_open_unknown_and_archived(self):
+        with patch.object(focus.shutil, "which", return_value="/usr/sbin/lsof"):
+            with patch.object(focus, "_run", FakeSystem(lsof=(1, ""))):
+                self.assertEqual(focus.codex_pid(self.root, self.rollout), (True, None))
+            with patch.object(focus, "_run", FakeSystem(lsof=None)):
+                self.assertEqual(focus.codex_pid(self.root, self.rollout), (False, None))
+        with patch.object(focus.shutil, "which", return_value=None):
+            self.assertEqual(focus.codex_pid(self.root, self.rollout), (False, None))
+        archived = self.root / "archived_sessions" / self.rollout.name
+        archived.parent.mkdir()
+        with patch.object(focus, "_run", side_effect=AssertionError("no process lookup")):
+            self.assertEqual(focus.codex_pid(self.root, archived), (True, None))
+
+
+class EnvironmentTests(unittest.TestCase):
+    def test_only_selected_valid_keys_and_last_occurrence(self):
+        output = (
+            "/usr/bin/claude --flag TMUX_PANE=%9 OPENROUTER_API_KEY=sk-or-invented "
+            "CMUX_WORKSPACE_ID=--evil CMUX_PANEL_ID=ABCD-1234 TMUX_PANE=%3 "
+            "ITERM_SESSION_ID=w0t1p0:not-a-guid TERM_PROGRAM=iTerm.app HOME=/invented\n"
+        )
+        with (
+            patch.object(focus, "_run", FakeSystem(env_output=output)),
+            patch.object(focus.sys, "platform", "darwin"),
+        ):
+            env = focus._environment(1)
+        self.assertEqual(
+            env, {"CMUX_PANEL_ID": "ABCD-1234", "TMUX_PANE": "%3", "TERM_PROGRAM": "iTerm.app"}
+        )
+
+
+class AdapterTests(unittest.TestCase):
+    def pick(self, env, chain=None, platform="darwin", sockets=True, which=None, cli="/cmux"):
+        chain = chain or [proc(10)]
+        tools = {"tmux": "/bin/tmux", **(which or {})}
+        with (
+            patch.object(focus, "_lineage", return_value=chain),
+            patch.object(focus, "_environment", return_value=env),
+            patch.object(focus.sys, "platform", platform),
+            patch.object(focus, "_is_socket", return_value=sockets),
+            patch.object(focus, "_cmux_cli", return_value=cli),
+            patch.object(focus.shutil, "which", side_effect=lambda name: tools.get(name)),
+        ):
+            return focus.adapter(10)
+
+    def test_cmux_panel_first(self):
+        target = self.pick(
+            {
+                "CMUX_WORKSPACE_ID": "WS-1",
+                "CMUX_PANEL_ID": "PANEL-1",
+                "CMUX_SOCKET_PATH": "/tmp/cmux.sock",
+                "TMUX": "/tmp/tmux-1/default,1,0",
+                "TMUX_PANE": "%2",
+            }
+        )
+        self.assertEqual(target.label, "cmux")
+        self.assertEqual(target.steps[0].argv, ("/cmux", "select-workspace", "--workspace", "WS-1"))
+        self.assertEqual(
+            target.steps[1].argv,
+            ("/cmux", "focus-panel", "--panel", "PANEL-1", "--workspace", "WS-1"),
+        )
+        self.assertFalse(any(s.required for s in target.steps[2:]))
+        self.assertEqual(target.env, (("CMUX_SOCKET_PATH", "/tmp/cmux.sock"),))
+        self.assertEqual(target.public(), {"available": True, "kind": "focus", "label": "cmux"})
+
+    def test_tmux_pane_then_terminal_app(self):
+        env = {
+            "TMUX": "/tmp/tmux-1/default,1,0",
+            "TMUX_PANE": "%7",
+            "__CFBundleIdentifier": "com.googlecode.iterm2",
+            "ITERM_SESSION_ID": "w0t0p0:AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+        }
+        target = self.pick(env)
+        self.assertEqual(target.label, "tmux")
+        argv = [s.argv for s in target.steps]
+        self.assertIn(("/bin/tmux", "-S", "/tmp/tmux-1/default", "select-pane", "-t", "%7"), argv)
+        self.assertEqual(argv[-1], ("/usr/bin/open", "-b", "com.googlecode.iterm2"))
+        self.assertEqual(self.pick(env, sockets=False).label, "iTerm")
+
+    def test_iterm_terminal_and_generic(self):
+        guid = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+        target = self.pick({"ITERM_SESSION_ID": f"w0t0p0:{guid}"})
+        self.assertEqual(target.label, "iTerm")
+        self.assertEqual(target.steps[0].argv[0], "/usr/bin/osascript")
+        self.assertEqual(target.steps[0].argv[-2:], (guid, "/dev/ttys003"))
+        target = self.pick({"TERM_PROGRAM": "Apple_Terminal"})
+        self.assertEqual(target.label, "Terminal")
+        self.assertEqual(target.steps[0].argv[-1], "/dev/ttys003")
+        self.assertEqual(
+            self.pick({"TERM_PROGRAM": "Apple_Terminal"}, [proc(10, tty="??")]), focus.UNSUPPORTED
+        )
+        target = self.pick(
+            {"TERM_PROGRAM": "vscode", "__CFBundleIdentifier": "com.microsoft.VSCode"}
+        )
+        self.assertEqual(target.label, "VS Code")
+        self.assertEqual(target.steps, (Step(("/usr/bin/open", "-b", "com.microsoft.VSCode")),))
+
+    def test_ancestor_app_bundle(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = Path(folder) / "ChatGPT.app"
+            (app / "Contents").mkdir(parents=True)
+            chain = [proc(10, 9, f"{app}/Contents/Resources/codex-cli/codex", "??"), proc(9)]
+            target = self.pick({}, chain)
+        self.assertEqual(target.label, "ChatGPT")
+        self.assertEqual(target.steps[0].argv, ("/usr/bin/open", "-a", str(app)))
+
+    def test_linux_tmux_window_or_unsupported(self):
+        env = {"TMUX": "/tmp/tmux-1/default,1,0", "TMUX_PANE": "%1", "WINDOWID": "42"}
+        target = self.pick(env, platform="linux", which={"wmctrl": "/bin/wmctrl"})
+        self.assertEqual(target.label, "tmux")
+        self.assertEqual(target.steps[-1].argv, ("/bin/wmctrl", "-i", "-a", "0x2a"))
+        target = self.pick({"WINDOWID": "42"}, platform="linux", which={"wmctrl": "/bin/wmctrl"})
+        self.assertEqual(target.label, "window")
+        self.assertEqual(
+            self.pick({"__CFBundleIdentifier": "com.apple.Terminal"}, platform="linux"),
+            focus.UNSUPPORTED,
+        )
+        with patch.object(focus, "_lineage", return_value=[]):
+            self.assertEqual(focus.adapter(10), focus.UNSUPPORTED)
+
+
+class ResumeAndResolveTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.home = Path(self.folder.name).resolve()
+
+    def test_resume_commands_for_default_and_custom_roots(self):
+        home = self.home
+        self.assertEqual(
+            focus.resume_command("claude", home / ".claude", CLAUDE_ID, "/invented/my app", home),
+            f"cd '/invented/my app' && claude --resume {CLAUDE_ID}",
+        )
+        self.assertEqual(
+            focus.resume_command("claude", home / ".claude-work", CLAUDE_ID, "", home),
+            f"CLAUDE_CONFIG_DIR={home / '.claude-work'} claude --resume {CLAUDE_ID}",
+        )
+        self.assertEqual(
+            focus.resume_command("codex", home / ".codex", CODEX_ID, "", home),
+            f"codex resume {CODEX_ID}",
+        )
+        self.assertEqual(
+            focus.resume_command("codex", home / "odd dir", CODEX_ID, "/p", home),
+            f"cd /p && CODEX_HOME='{home / 'odd dir'}' codex resume {CODEX_ID}",
+        )
+
+    def profile(self, kind, name):
+        return SourceProfile(f"{kind}-test", kind, "Test", str(self.home / name))
+
+    def run_for(self, profile, native, **extra):
+        return {
+            "mode": "observation",
+            "source": profile.kind,
+            "session_id": f"{profile.id}:observed",
+            "native_id": native,
+            "parent_run_id": None,
+            **extra,
+        }
+
+    def test_eligibility(self):
+        profile = self.profile("claude", ".claude-work")
+        self.assertEqual(focus.resolve(None, [profile]), focus.UNSUPPORTED)
+        sdk = {"mode": "sdk", "source": "sdk", "session_id": "s", "native_id": CLAUDE_ID}
+        self.assertEqual(focus.resolve(sdk, [profile]), focus.UNSUPPORTED)
+        self.assertEqual(focus.resolve(self.run_for(profile, CLAUDE_ID), []), focus.UNSUPPORTED)
+        self.assertEqual(
+            focus.resolve(self.run_for(profile, "--evil"), [profile]), focus.UNSUPPORTED
+        )
+        wrong = {**self.run_for(profile, CLAUDE_ID), "source": "codex"}
+        self.assertEqual(focus.resolve(wrong, [profile]), focus.UNSUPPORTED)
+
+    def test_claude_live_subagent_focuses_parent_and_stopped_offers_resume(self):
+        profile = self.profile("claude", ".claude-work")
+        root = Path(profile.root)
+        write_session(root, 111, CLAUDE_ID)
+        project = root / "projects" / "-invented-project"
+        project.mkdir(parents=True)
+        (project / f"{OTHER_ID}.jsonl").write_text(json.dumps({"cwd": "/invented/project"}) + "\n")
+        live = Target("focus", "cmux")
+        with (
+            patch.object(focus, "_run", FakeSystem({111: proc(111)})),
+            patch.object(focus, "adapter", return_value=live) as adapter,
+        ):
+            run = self.run_for(profile, f"{CLAUDE_ID}:agent:abc123", parent_run_id="p")
+            self.assertEqual(focus.resolve(run, [profile], self.home), live)
+            adapter.assert_called_once_with(111)
+            target = focus.resolve(self.run_for(profile, OTHER_ID), [profile], self.home)
+            stopped_sub = self.run_for(profile, f"{OTHER_ID}:agent:abc123", parent_run_id="p")
+            self.assertEqual(focus.resolve(stopped_sub, [profile], self.home), focus.UNSUPPORTED)
+        self.assertEqual(target.kind, "resume")
+        self.assertEqual(
+            target.command,
+            f"cd /invented/project && CLAUDE_CONFIG_DIR={root} claude --resume {OTHER_ID}",
+        )
+        self.assertEqual(target.public()["command"], target.command)
+
+    def test_claude_without_sessions_directory_is_not_resumable(self):
+        profile = self.profile("claude", ".claude")
+        (Path(profile.root) / "projects").mkdir(parents=True)
+        self.assertEqual(
+            focus.resolve(self.run_for(profile, CLAUDE_ID), [profile], self.home), focus.UNSUPPORTED
+        )
+
+    def test_codex_stopped_resume_and_unknown(self):
+        profile = self.profile("codex", ".codex")
+        day = Path(profile.root) / "sessions" / "2026" / "10" / "20"
+        day.mkdir(parents=True)
+        meta = {"type": "session_meta", "payload": {"id": CODEX_ID, "cwd": "/invented/app"}}
+        (day / f"rollout-x-{CODEX_ID}.jsonl").write_text(json.dumps(meta) + "\n")
+        run = self.run_for(profile, CODEX_ID)
+        with patch.object(focus.shutil, "which", return_value="/usr/sbin/lsof"):
+            with patch.object(focus, "_run", FakeSystem(lsof=(1, ""))):
+                target = focus.resolve(run, [profile], self.home)
+            with patch.object(focus, "_run", FakeSystem(lsof=(2, ""))):
+                self.assertEqual(focus.resolve(run, [profile], self.home), focus.UNSUPPORTED)
+        self.assertEqual(target.command, f"cd /invented/app && codex resume {CODEX_ID}")
+        missing = self.run_for(profile, "019a1111-aaaa-7bbb-8ccc-dddddddddddd")
+        self.assertEqual(focus.resolve(missing, [profile], self.home), focus.UNSUPPORTED)
+
+
+class FocusTests(unittest.TestCase):
+    def test_required_and_optional_steps(self):
+        calls = []
+
+        def fake(argv, env=None):
+            calls.append((argv, env))
+            return (1, "ignored output") if argv[0] == "optional" else (0, "")
+
+        target = Target(
+            "focus",
+            "cmux",
+            steps=(Step(("optional",), required=False), Step(("required",))),
+            env=(("CMUX_SOCKET_PATH", "/tmp/s"),),
+        )
+        with patch.object(focus, "_run", fake):
+            self.assertTrue(focus.focus(target))
+            self.assertEqual(calls[-1][1]["CMUX_SOCKET_PATH"], "/tmp/s")
+            failing = Target("focus", "x", steps=(Step(("optional",)),))
+            self.assertFalse(focus.focus(failing))
+            self.assertFalse(focus.focus(Target("resume", "resume", command="claude")))
+        self.assertEqual(len(calls), 3)
+
+    def test_run_uses_argv_without_shell(self):
+        with patch.object(focus.subprocess, "run") as run:
+            run.return_value.returncode, run.return_value.stdout = 0, "out"
+            self.assertEqual(focus._run(["ps", "-p", "1"]), (0, "out"))
+        args, kwargs = run.call_args
+        self.assertEqual(args[0], ["ps", "-p", "1"])
+        self.assertNotIn("shell", kwargs)
+        self.assertEqual(kwargs["timeout"], focus.TIMEOUT)
+        with patch.object(focus.subprocess, "run", side_effect=FileNotFoundError):
+            self.assertIsNone(focus._run(["missing"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

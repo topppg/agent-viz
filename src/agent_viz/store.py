@@ -317,6 +317,11 @@ class Store:
                 raise
             return True
 
+    def run(self, run_id: str) -> dict | None:
+        """Server-side record including private native identity; never sent as-is."""
+        with self.lock:
+            return self._get(run_id)
+
     def snapshot(self, limit: int = 500) -> dict:
         with self.lock:
             rows = [json.loads(r[0]) for r in self.db.execute("SELECT data FROM runs")]
