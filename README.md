@@ -6,8 +6,9 @@ Open it and immediately know which agents need your attention, what they're
 doing, and where to continue.
 
 Spiritboard is a local dashboard for every coding agent you run. Claude Code,
-Codex, opencode, Pi and DeepSeek Harness sessions, and Grok Bot agents, from your terminals, your desktop apps
-and each of your accounts appear side by side, with what each one is working on, whether it is running,
+Codex, opencode, Pi and DeepSeek Harness sessions, and the agents of the Grok Bot
+desktop app, from your terminals, your desktop apps and each of your accounts
+appear side by side, with what each one is working on, whether it is running,
 waiting for you or gone, and a button that takes you straight to it.
 
 It only reads what the agents already write to disk. It never starts, steers or
@@ -58,8 +59,8 @@ New harnesses plug in as one module each (see [the source guide](docs/SOURCES.md
 
 - **What each one is doing.** The session's own title (your `/rename`, the
   Claude desktop app's title, Claude's generated title, the Codex thread name, the
-  opencode session title, a Pi `/name` or the DeepSeek Harness title), its goal,
-  your latest request and
+  opencode session title, a Pi `/name`, the DeepSeek Harness title or the Grok Bot
+  agent's name), its goal, your latest request and
   the agent's latest reply or commentary. Subagents sit under their parent,
   named by the task the parent gave them. Sessions the Claude desktop app runs
   are tagged **Claude desktop**; ones archived there never count as active.
