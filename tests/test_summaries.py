@@ -585,6 +585,61 @@ class SummariesTests(unittest.TestCase):
         )
         self.assertEqual(instance.public_state()["calls"], 0)
 
+    def test_desktop_summary_uses_the_enriched_session_title(self):
+        profile = self.claude_profile(
+            [
+                {"type": "user", "sessionId": "session", "message": {"content": "Fix retries"}},
+                {"type": "ai-title", "aiTitle": "Generated", "sessionId": "session"},
+            ]
+        )
+        self.store.snapshot.return_value["runs"][0].update(
+            name="Desktop title", app="Claude desktop"
+        )
+        instance = self.summarizer()
+        instance.profiles_provider = lambda: [profile]
+        with patch("spiritboard.summaries._request", return_value=self.response()) as request:
+            instance.tick()
+        self.assertEqual(instance.public_state()["summaries"][0]["title"], "Desktop title")
+        sent = request.call_args.args[1]["messages"][1]["content"]
+        self.assertIn("Desktop title", sent)
+        self.assertNotIn("Generated", sent)
+
+    def test_archived_desktop_sessions_never_generate_provider_or_free_summaries(self):
+        for recap in (False, True):
+            with self.subTest(recap=recap):
+                rows = [
+                    {
+                        "type": "user",
+                        "sessionId": "session",
+                        "timestamp": "2026-10-20T08:00:00Z",
+                        "message": {"content": "Fix retries"},
+                    }
+                ]
+                if recap:
+                    rows.append(
+                        {
+                            "type": "system",
+                            "subtype": "away_summary",
+                            "sessionId": "session",
+                            "timestamp": "2026-10-20T08:05:00Z",
+                            "content": "Repairing retries.",
+                        }
+                    )
+                profile = self.claude_profile(rows)
+                self.store.snapshot.return_value["runs"][0].update(
+                    archived=True, app="Claude desktop", name="Archived title"
+                )
+                instance = self.summarizer()
+                instance.profiles_provider = lambda profile=profile: [profile]
+                with patch(
+                    "spiritboard.summaries._request", return_value=self.response()
+                ) as request:
+                    instance.tick()
+                request.assert_not_called()
+                state = instance.public_state()
+                self.assertEqual(state["calls"], 0)
+                self.assertEqual(state["summaries"], [])
+
     def test_request_after_recap_uses_provider_with_goal_context(self):
         rows = [
             {

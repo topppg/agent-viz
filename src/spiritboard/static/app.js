@@ -85,8 +85,8 @@
     if (status.key === "quiet" || status.key === "closed") return { mark: "›", text: `last said: ${raw}`, cls: "dim" };
     return { mark: "›", text: raw, cls: status.key === "needs" ? "needs" : "" };
   }
-  // Session titles (Claude ai-title, Codex thread name) come with summaries.
-  const nameOf = (run) => run.ai_summary?.title || run.name || "Unnamed run";
+  // Desktop metadata and /rename take priority, even over a cached summary title.
+  const nameOf = (run) => (run.app === "Claude desktop" && run.name) || run.ai_summary?.title || run.name || "Unnamed run";
   function inView(run) {
     const status = statusOf(run);
     if (state.view === "waiting") return status.key === "needs";

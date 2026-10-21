@@ -318,6 +318,7 @@ class Summarizer:
             run
             for run in self.store.snapshot(limit=10000)["runs"]
             if (run.get("state") in ACTIVE or run.get("state") == "idle")
+            and not run.get("archived")
             and (not run.get("parent_run_id") or run.get("state") == "waiting_user")
             and 0 <= current - _stamp(run.get("last_seen")) <= RECENT_SECONDS
         ]
@@ -348,6 +349,9 @@ class Summarizer:
                             # Titles go to the provider, so they are redacted like other text.
                             native_title = titles.get(observation.get("native_id", ""), "")
                             goal["title"] = redact(native_title, 120) or goal["title"]
+                            run = native[observation["run_id"]]
+                            if run.get("app") == "Claude desktop" and not run.get("parent_run_id"):
+                                goal["title"] = redact(run.get("name"), 120) or goal["title"]
                             goal["free"] = (
                                 harness.free_recaps
                                 and bool(goal["recap"])

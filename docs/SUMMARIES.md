@@ -70,6 +70,7 @@ enabled setting or explicit `--summaries`, a new installation makes no summary c
 
 ## When summaries refresh
 
+- Archived sessions are excluded from summary generation, including local recaps.
 - Only sessions seen in the last 15 minutes are eligible: working, waiting or
   idle top-level sessions (idle means the turn ended and it awaits your next
   direction), plus any run, including a subagent, waiting for user input.
