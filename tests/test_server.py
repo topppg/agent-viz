@@ -70,6 +70,15 @@ class ServerTests(unittest.TestCase):
         snapshot = json.loads(self.request("GET", "/api/snapshot")[2])
         self.assertEqual(snapshot["runs"], [])
 
+    def test_loopback_startup_does_not_need_a_dns_lookup(self):
+        with patch("socket.getfqdn", side_effect=AssertionError("No DNS needed for loopback")):
+            server = Collector(self.store, TOKEN)
+            try:
+                self.assertEqual(server.server_name, "127.0.0.1")
+                self.assertGreater(server.server_port, 0)
+            finally:
+                server.server_close()
+
     def test_ingestion_auth_schema_dedup_and_history(self):
         raw = json.dumps(self.event())
         self.assertEqual(self.post(raw, token="wrong")[0], 401)

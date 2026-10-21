@@ -5,10 +5,14 @@ from __future__ import annotations
 import hmac
 import json
 import re
+import socket
+import sys
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import focus
@@ -20,7 +24,8 @@ FOCUS_ROUTE = re.compile(r"/api/runs/([^/]{1,768})/focus")
 
 class Collector(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    # On Windows SO_REUSEADDR lets a second socket bind a listening port; bind exclusively.
+    allow_reuse_address = sys.platform != "win32"
 
     def __init__(
         self,
@@ -42,7 +47,15 @@ class Collector(ThreadingHTTPServer):
         self.stopping = threading.Event()
         self._activity: tuple[int, dict] | None = None
         self.focus_lock = threading.Lock()
+        self.instance_id = uuid.uuid4().hex
         super().__init__((host, port), Handler)
+
+    def server_bind(self) -> None:
+        # HTTPServer's reverse-DNS lookup can stall; this server only binds numeric loopback.
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     @property
     def url(self):
@@ -112,7 +125,7 @@ class Collector(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "AgentViz/0.1"
+    server_version = "Spiritboard/0.1"
 
     def log_message(self, *_):
         # Never put private run IDs, source paths, or labels into HTTP access logs.
@@ -232,7 +245,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, self.server.focus_target(run_id).public())
         elif path == "/api/health":
-            self._json(200, {"ok": True, "service": "spiritboard", "version": 1})
+            self._json(
+                200,
+                {
+                    "ok": True,
+                    "service": "spiritboard",
+                    "version": 1,
+                    "instance_id": self.server.instance_id,
+                },
+            )
         elif path == "/api/snapshot":
             self._json(200, self.server.snapshot())
         elif path == "/api/events":

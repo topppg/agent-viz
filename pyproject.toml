@@ -6,10 +6,26 @@ build-backend = "hatchling.build"
 name = "spiritboard"
 version = "0.1.0"
 description = "Local, read-only visibility into agent runs and subagents"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = []
+keywords = ["agents", "dashboard", "local-first", "monitoring"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+]
+
+[project.urls]
+Homepage = "https://github.com/topppg/spiritboard"
+Source = "https://github.com/topppg/spiritboard"
+Issues = "https://github.com/topppg/spiritboard/issues"
+Documentation = "https://github.com/topppg/spiritboard/blob/main/docs/DISTRIBUTION.md"
 
 [project.scripts]
 spiritboard = "spiritboard.cli:main"

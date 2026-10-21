@@ -1,0 +1,64 @@
+name: Distribution
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  installed-package:
+    name: Installed package (${{ matrix.os }}, Python ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv build --no-sources
+      - name: Validate distribution metadata
+        run: uvx --from twine==6.2.0 twine check --strict dist/*
+      - name: Test installed wheel and source distribution away from checkout
+        run: |
+          for package in "$GITHUB_WORKSPACE"/dist/*.whl "$GITHUB_WORKSPACE"/dist/*.tar.gz; do
+            uv run --no-cache --isolated --no-project --no-config --directory "$RUNNER_TEMP" --with "$package" python - <<'PY'
+          import importlib.metadata
+          import importlib.resources
+          import pathlib
+          import subprocess
+          import tempfile
+
+          distribution = importlib.metadata.distribution("spiritboard")
+          assert not distribution.requires, "Runtime dependencies were added unexpectedly"
+          assert distribution.metadata["Description-Content-Type"] == "text/markdown"
+          assets = importlib.resources.files("spiritboard").joinpath("static")
+          for name in ("index.html", "app.js", "style.css"):
+              assert assets.joinpath(name).read_bytes(), f"Missing packaged asset: {name}"
+          with tempfile.TemporaryDirectory() as directory:
+              for flag in ("--help", "--version"):
+                  result = subprocess.run(
+                      ["spiritboard", flag], cwd=directory, check=True,
+                      capture_output=True, text=True, timeout=15,
+                  )
+                  assert "spiritboard" in result.stdout.lower()
+              assert not list(pathlib.Path(directory).iterdir()), "CLI inspection created local data"
+          print(f"Installed Spiritboard {distribution.version}: CLI and dashboard assets passed")
+          PY
+            uv run --no-cache --isolated --no-project --no-config --directory "$RUNNER_TEMP" \
+              --with "$package" --with pytest==9.1.1 \
+              pytest "$GITHUB_WORKSPACE/tests/test_cli_process.py" --import-mode=importlib -q
+          done
