@@ -209,7 +209,10 @@
     const active = list.filter((h) => h.rate > 0).length;
     const focused = document.activeElement?.dataset?.focusKey;
     const host = $("harnesses");
-    host.replaceChildren(...list.map((h) => {
+    // Only harnesses with something running (or the one filtered on); idle ones stay in the filter.
+    const running = (h) => h.rate > 0 || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs");
+    const shown = list.filter((h) => running(h) || $("harness-filter").value === h.key);
+    host.replaceChildren(...shown.map((h) => {
       const button = node("button", null, `harness${$("harness-filter").value === h.key ? " is-selected" : ""}`);
       button.type = "button"; button.dataset.focusKey = `harness:${h.key}`;
       button.setAttribute("aria-pressed", String($("harness-filter").value === h.key));
@@ -227,6 +230,9 @@
       return button;
     }));
     if (!list.length) host.append(node("p", "No harnesses yet. Start the demo or configure a source profile.", "empty"));
+    else if (!shown.length) host.append(node("p", "Nothing running right now.", "empty"));
+    const idle = list.length - shown.length;
+    if (idle) host.append(node("p", `${idle} idle harness${idle === 1 ? "" : "es"} · pick one in the harness filter`, "harness-idle muted"));
     if (focused) [...host.children].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
   function renderFlux(list) {
