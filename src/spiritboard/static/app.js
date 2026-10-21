@@ -241,7 +241,7 @@
       return button;
     }));
     if (!list.length) host.append(node("p", "No harnesses yet. Start the demo or configure a source profile.", "empty"));
-    else if (!shown.length) host.append(node("p", "Nothing running right now.", "empty"));
+    else if (!shown.length) host.append(node("p", state.past ? "Nothing running at this moment." : "Nothing running right now.", "empty"));
     const idle = list.length - shown.length;
     if (idle) host.append(node("p", `${idle} idle harness${idle === 1 ? "" : "es"} · pick one in the harness filter`, "harness-idle muted"));
     if (focused) [...host.children].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
@@ -420,7 +420,7 @@
     renderHiddenNote(runs, direct);
     state.order = [];
     if (!runs.length) { host.append(node("p", "No agents yet. Start the synthetic demo or configure a local source profile. This dashboard never starts agents.", "empty")); return; }
-    if (!direct.size) { host.append(node("p", state.view === "active" ? "Nothing active right now. Press e to show all history." : "No agents match these filters.", "empty")); return; }
+    if (!direct.size) { host.append(node("p", state.view === "active" ? `Nothing active ${state.past ? "at this moment" : "right now"}. Press e to show all history.` : "No agents match these filters.", "empty")); return; }
     const maxRate = Math.max(1, ...[...visible].map(rateOf));
     const visited = new Set();
     const renderRun = (run, prefix, pad, orphan) => {
