@@ -657,6 +657,56 @@ class SourcesTests(unittest.TestCase):
         self.log(codex, "run.jsonl", rows)
         self.assertEqual(scan_profile(codex)[0]["activity"], "Writing the page")
 
+    def test_codex_subagent_is_named_by_its_task_not_the_parent_history(self):
+        profile = self.profile("codex", "codex-sub", text=True)
+        item = {"type": "response_item", "timestamp": "2026-10-20T08:00:01Z"}
+        meta = {
+            "id": "child",
+            "timestamp": "2026-10-20T08:00:00Z",
+            "agent_path": "/root/summary_settings_ui",
+            "source": {
+                "subagent": {
+                    "thread_spawn": {
+                        "parent_thread_id": "parent",
+                        "agent_path": "/root/summary_settings_ui",
+                    }
+                }
+            },
+        }
+
+        def said(role, value):
+            kind = "input_text" if role == "user" else "output_text"
+            content = [{"type": kind, "text": value}]
+            return {**item, "payload": {"type": "message", "role": role, "content": content}}
+
+        assignment = {
+            **item,
+            "payload": {
+                "type": "agent_message",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Message Type: NEW_TASK\nTask name: /root/summary_settings_ui\n"
+                        "Sender: /root\nPayload:\n",
+                    },
+                    {"type": "encrypted_content", "encrypted_content": "SECRET"},
+                ],
+            },
+        }
+        call = {**item, "payload": {"type": "function_call", "arguments": "SECRET args"}}
+        inherited = [said("user", "Parent request"), said("assistant", "Parent reply")]
+        start = [{"type": "session_meta", "payload": meta}, *inherited, assignment, call]
+        self.log(profile, "child.jsonl", start)
+        row = scan_profile(profile)[0]
+        self.assertEqual(
+            (row["name"], row["task"], row["activity"]),
+            ("summary settings ui", "", "Tool call recorded"),
+        )
+        self.log(profile, "child.jsonl", [*start, said("assistant", "Wiring the settings form")])
+        self.assertEqual(scan_profile(profile)[0]["activity"], "Wiring the settings form")
+        hidden = SourceProfile(profile.id + "-h", "codex", "Hidden", profile.root, False)
+        self.assertNotIn("summary", scan_profile(hidden)[0]["name"])
+
     def test_codex_inter_agent_messages_are_not_replies(self):
         profile = self.profile("codex", "codex-agents", text=True)
         item = {"type": "response_item", "timestamp": "2026-10-20T08:00:01Z"}
