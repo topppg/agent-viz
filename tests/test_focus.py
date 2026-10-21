@@ -539,6 +539,20 @@ class LivenessTests(unittest.TestCase):
             with self.subTest(result=result), patch.object(focus, "_run", return_value=result):
                 self.assertIsNone(focus.live_sessions(profile))
 
+    def test_claude_live_sessions_symlink_metadata_is_unknown(self) -> None:
+        root = self.base / ".claude-work"
+        write_session(root, 111, CLAUDE_ID)
+        record = root / "sessions" / "111.json"
+        target = self.base / "outside-session.json"
+        record.replace(target)
+        record.symlink_to(target)
+        profile = SourceProfile("claude-work", "claude", "Claude test", str(root))
+        with (
+            patch.object(focus, "_small_json", side_effect=AssertionError("Do not read links")),
+            patch.object(focus, "_run", side_effect=AssertionError("No complete inventory")),
+        ):
+            self.assertIsNone(focus.live_sessions(profile))
+
     def test_codex_live_sessions_from_held_thread_locks(self):
         root = self.base / "codex-work"
         locks = root / "thread-writer-locks"

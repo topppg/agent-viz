@@ -325,7 +325,12 @@ def live_sessions(profile: SourceProfile) -> frozenset[str] | None:
 def _claude_live(root: Path) -> frozenset[str] | None:
     try:
         with os.scandir(root / "sessions") as entries:
-            names = [e.name for e in entries if PID_FILE.fullmatch(e.name) and not e.is_symlink()]
+            names = []
+            for entry in entries:
+                if PID_FILE.fullmatch(entry.name):
+                    if entry.is_symlink():
+                        return None
+                    names.append(entry.name)
     except OSError:
         return None
     recorded: dict[int, tuple[str, str | None]] = {}
