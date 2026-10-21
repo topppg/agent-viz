@@ -69,6 +69,12 @@ Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w
 that column, click again to reverse it, and a third time to restore the default
 attention order. Subagents stay under their parent while sorting.
 
+Zoom the event-rate chart out to the last hour, day, week or 30 days. Click a
+bar to see the board as it was at that moment, rebuilt from the recorded
+events; `L`, "back to live" or the newest bar returns to now. Liveness was
+never recorded, so the past board never calls a session closed, and its open
+and resume buttons are off.
+
 ## Quick start
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run
@@ -238,14 +244,17 @@ permissions cause a clear error instead of being changed automatically.
 
 This directory holds `events.sqlite3`, a private ingestion token, an instance
 lock and, with summaries on, `summaries.sqlite3`. Keep it and any custom source
-config out of version control. Retention is manual:
+config out of version control. The running dashboard deletes history older
+than 30 days at startup and then hourly; `--retention-days N` changes that and
+`--retention-days 0` keeps everything. To prune by hand:
 
 ```sh
 spiritboard prune --older-than-days 7
 ```
 
-This deletes only old observer records, never your agents' transcripts. Stop the
-dashboard first; pruning refuses while that data directory is in use. You can
+Either way this deletes only old observer records, never your agents' transcripts,
+and keeps active runs. Stop the dashboard before a manual prune; it refuses while
+that data directory is in use. You can
 run separate boards with separate `--data-dir` values and ports.
 
 ## Development
