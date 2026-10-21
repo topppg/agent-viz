@@ -13,6 +13,10 @@ waiting for you or gone, and a button that takes you straight to it.
 It only reads what the agents already write to disk. It never starts, steers or
 stops an agent, and nothing leaves your machine unless you turn on summaries.
 
+![Spiritboard showing sixteen agents across Claude Code, Codex, opencode and Pi](docs/dashboard.png)
+
+<sub>Synthetic data: invented sessions, projects and activity.</sub>
+
 ## Supported harnesses
 
 | Harness | Reads | Live or closed | Open | Resume |
