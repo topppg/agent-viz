@@ -208,6 +208,8 @@
       .map((w) => typeof w === "string" ? w : `${w.label || w.profile || "Source"}: ${w.message || "Source unavailable"}`);
     (state.snapshot.source_stats || []).filter((s) => s.truncated || s.discovery_limited)
       .forEach((s) => warnings.push(`${s.label}: scanned ${s.selected_files} of ${s.files_seen} files; older sessions may be missing.`));
+    (state.snapshot.source_stats || []).filter((s) => s.unsupported_schema)
+      .forEach((s) => warnings.push(`${s.label}: storage format not recognized; some sessions were skipped.`));
     if (state.snapshot.ai?.error) warnings.push(`Summaries: ${state.snapshot.ai.error}`);
     const host = $("source-errors");
     host.hidden = !warnings.length;

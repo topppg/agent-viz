@@ -6,7 +6,7 @@ Open it and immediately know which agents need your attention, what they're
 doing, and where to continue.
 
 Spiritboard is a local dashboard for every coding agent you run. Claude Code,
-Codex, opencode, Pi and DeepSeek Harness sessions from your terminals, your desktop apps
+Codex, opencode, Pi and DeepSeek Harness sessions, and Grok Bot agents, from your terminals, your desktop apps
 and each of your accounts appear side by side, with what each one is working on, whether it is running,
 waiting for you or gone, and a button that takes you straight to it.
 
@@ -27,11 +27,14 @@ stops an agent, and nothing leaves your machine unless you turn on summaries.
 | **opencode** | `opencode.db`, read-only | an `opencode` process in the session's directory | its terminal | `opencode -s <id>` |
 | **Pi** | `~/.pi/agent/sessions`, `PI_CODING_AGENT_DIR` | a `pi` process in the session's directory | its terminal | `pi --session <file>` |
 | **DeepSeek Harness** | `~/.dsh` (zstd-compressed), `DSH_HOME` | the `session.lock` the app holds | the app window | not yet |
+| **Grok Bot** (macOS app) | the app's local cache, `GROK_BOT_HOME` | unknown: its agents run in the cloud | — | — |
 | **Your own agents** | the Python SDK below | heartbeats | — | — |
 
 Claude Code, Codex and opencode are checked against real sessions. The Claude
 desktop marker, Pi and DeepSeek Harness are built from each app's own code and
 documentation and covered by tests, but have seen little or no real data yet.
+Grok Bot is read from the app's local cache, whose undocumented format was observed
+on one machine and may change; unrecognized versions are skipped with a warning.
 New harnesses plug in as one module each (see [the source guide](docs/SOURCES.md#adding-a-harness)).
 
 ## What you see
@@ -87,7 +90,7 @@ the isolated Python environment (Python 3.12+), including the small JWT and
 cryptography dependencies used to verify ChatGPT sign-in, plus `keyring` for
 your system's credential store.
 
-See your own agents. Supported Codex, Claude, opencode, Pi and DeepSeek Harness storage
+See your own agents. Supported Codex, Claude, opencode, Pi, DeepSeek Harness and Grok Bot storage
 is discovered automatically, without opening authentication files or tables:
 
 ```sh
@@ -123,8 +126,9 @@ A PyPI release is not published yet; do not substitute `uvx spiritboard` until i
 - **Discovery.** The standard `~/.claude`, `~/.codex`, `~/.pi/agent` and `~/.dsh`
   folders, named variants such as `~/.claude-work` or `~/.codex-switch/profiles/*`,
   `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `PI_CODING_AGENT_DIR` /
-  `PI_CODING_AGENT_SESSION_DIR` / `DSH_HOME`, and opencode's `opencode.db` (and
-  release-channel databases) in `$XDG_DATA_HOME/opencode` or
+  `PI_CODING_AGENT_SESSION_DIR` / `DSH_HOME`, Grok Bot's cache in
+  `~/Library/Application Support/Grok Bot` (macOS) or `GROK_BOT_HOME`, and
+  opencode's `opencode.db` (and release-channel databases) in `$XDG_DATA_HOME/opencode` or
   `~/.local/share/opencode`, or `OPENCODE_DB`. The opencode database is opened
   read-only. DeepSeek Harness logs are zstd-compressed: their text needs Python 3.14+
   or the `zstd` command; without either, its sessions are listed with liveness but
@@ -150,7 +154,8 @@ A PyPI release is not published yet; do not substitute `uvx spiritboard` until i
   per-session owner. With N live `opencode` processes in a directory, its N most
   recently updated top-level sessions and their children count as open. A live
   `pi` process marks that directory's most recent session open. A session is only
-  marked closed when the relevant check can run.
+  marked closed when the relevant check can run. Grok Bot agents run in the cloud,
+  so their liveness is unknown.
 
 What is read, and the bounds on it, are in the [source guide](docs/SOURCES.md).
 

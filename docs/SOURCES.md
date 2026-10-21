@@ -1,9 +1,9 @@
-# Local Codex, Claude, opencode, Pi and DeepSeek Harness sources
+# Local Codex, Claude, opencode, Pi, DeepSeek Harness and Grok Bot sources
 
 ## What works
 
-The collector can observe multiple Codex, Claude, opencode, Pi and DeepSeek Harness
-storage profiles together.
+The collector can observe multiple Codex, Claude, opencode, Pi, DeepSeek Harness and
+Grok Bot storage profiles together.
 Each profile has its own stable ID, label and transcript directory. The same
 native session ID in two profiles creates two separate dashboard runs. Labels
 describe storage profiles; they do **not** prove which account is signed in.
@@ -21,7 +21,7 @@ four-profile configuration or restarting the dashboard when another profile
 appears. It checks the standard `.codex`, `.claude`, `.pi/agent` and `.dsh` directories, named
 `.codex-*` and `.claude-*` directories, `.codex-switch/profiles/*`, and the current process's
 `CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR` /
-`DSH_HOME` selectors. Aliases pointing to the same storage
+`DSH_HOME` / `GROK_BOT_HOME` selectors, and on macOS `~/Library/Application Support/Grok Bot`. Aliases pointing to the same storage
 directory are deduplicated. Distinct storage directories are **not** collapsed
 because they contain identical native session IDs: copied histories and separate
 accounts stay distinct. No account, authentication, key or credential file
@@ -55,7 +55,8 @@ directory holding `opencode.db`). It is opened with a `mode=ro` URI and
 authorizer refuses any read of the `account`, `account_state` and
 `control_account` tables. Only the `session`, `message` and `part` tables are
 queried; a database without them (for example only the 2.x `session_v2` tables)
-yields no sessions and an `unsupported_schema` coverage flag rather than an error.
+yields no sessions and an `unsupported_schema` coverage flag (shown as a source
+warning) rather than an error.
 Each session row is one inventory unit: its key is the session ID, and its cache
 signature is the message count and the newest `time_updated` of the session and
 its messages (plus its parts, for sessions active in the last 15 minutes).
@@ -247,6 +248,52 @@ is the header's `session-<uuid>`.
   write) and records no pid. `lsof` names the holder; it counts only when it is
   the DeepSeek Harness app or runtime. Spiritboard never takes its own lock.
   A session never written to since it opened therefore reads as not live.
+
+## Grok Bot
+
+Grok Bot is a macOS desktop app whose agents run in remote cloud boxes; no local
+process belongs to an agent. On macOS the profile root is
+`~/Library/Application Support/Grok Bot` (or `GROK_BOT_HOME`); it counts as a root
+when it holds `sand-client-persistence/`. Elsewhere nothing is discovered. The
+format below was observed in Grok Bot 0.71 on one machine; it is undocumented and
+may change.
+
+- **What is read.** Only `sand-client-persistence/*.blob`, regular files (links are
+  skipped), at most 5,000 entries and 8 MiB per file. A blob's name is its key in
+  lower-case base32 without padding. Two keys are used:
+  `sand.client.slice.account.<account>.roster.last-roster` (one row per agent:
+  `id`, `name`, `createdAt`, `lastActivityAt`, `updatedAt`, `isHiddenFromSidebar`)
+  and `….transcript.replicas.<agent id>` (the agent's recent `entries`, which the
+  app caches for at most a few hundred entries). The replica ID is the roster row's
+  `id`. The `<account>` segment is only used to pair the two and never leaves the
+  adapter. Other blobs (layout, usage, journals, experiments) are not parsed.
+- **Never read.** `sand-secrets.json`, `box-secrets-push-state.v1.json`, cookies,
+  Local/Session Storage, IndexedDB and everything else outside
+  `sand-client-persistence/`. No network call is made and the app is never launched.
+- **Versions.** Roster `schemaVersion` 4 and replica `schemaVersion` 1 are read.
+  Any other version, or a value that is not an object, is skipped: coverage reports
+  `unsupported_schema: true` with an `unsupported_blobs` count, and the dashboard
+  shows a source warning. A blob that is mid-write, malformed or too large is skipped
+  (`unreadable_blobs` for the roster).
+- **Sessions.** Each roster agent is one session, ordered by `lastActivityAt`;
+  `--max-age-days` applies to it. An agent hidden from the app's sidebar is shown as
+  archived and left out of summaries. An agent without a cached transcript is listed
+  with state `unknown`. The row's `path` is a path inside the cloud box, so no
+  project is shown. `last_seen` is the newest entry `timestampMs` or
+  `lastActivityAt`; `started_at` is `createdAt` (epoch milliseconds).
+- **Text.** The name is the agent's `name`. The request is the latest user
+  `message` `content`; the reply is the latest agent `send-message` whose `message`
+  is `{"type": "text", "content": …}` after it. Drafts, forms, attachments, widget
+  answers, rich text and event payloads are not read into a run.
+- **State.** A newest user message or attachment is `working` for 30 minutes, then
+  `idle` ("No reply recorded"); any `isStreaming` message among the five newest entries is
+  `working`. A newest agent question that is still open (a `widget` without
+  `respondedValue` or `widgetSkipped`, a `user-form` without `formResolution`, or a
+  box request without `boxResolution`) is `waiting_user` for a day, then `idle`. Any other newest agent
+  message is `idle`, so a recent one reads as your turn. `event` entries
+  (`name-changed`, `automation-changed`) only move `last_seen`.
+- **Liveness, open and resume.** Liveness is always unknown, so a Grok Bot agent is
+  never shown closed. No focus or resume is offered.
 
 ## Opening a session's app
 
