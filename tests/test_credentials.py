@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -211,6 +212,65 @@ def test_interrupted_initial_write_is_still_removable(tmp_path, native_credentia
         store.load("openrouter")
     monkeypatch.setattr(native_credentials, "delete_password", deleter)
     store.delete("openrouter")
+    assert not native_credentials.values
+
+
+@pytest.mark.parametrize("failure", ["initial-write", "replacement-write", "superseded"])
+def test_unlock_then_explicit_save_cleans_retired_generations(
+    tmp_path, native_credentials, monkeypatch, failure
+) -> None:
+    store = CredentialStore(tmp_path)
+    if failure != "initial-write":
+        store.save("codex", "old")
+    setter = native_credentials.set_password
+    deleter = native_credentials.delete_password
+
+    def blocked_write(service, username, value):
+        setter(service, username, value)
+        raise RuntimeError("interrupted synthetic write")
+
+    def blocked_delete(service, username):
+        raise RuntimeError("locked synthetic keychain")
+
+    if failure != "superseded":
+        monkeypatch.setattr(native_credentials, "set_password", blocked_write)
+    monkeypatch.setattr(native_credentials, "delete_password", blocked_delete)
+    with pytest.raises(CredentialStoreError):
+        store.save("codex", "interrupted")
+    with pytest.raises(CredentialStoreError):
+        store.load("codex")
+    retained = set(native_credentials.values)
+    assert retained
+    with pytest.raises(CredentialStoreError):
+        store.save("codex", "still-locked")
+    assert set(native_credentials.values) == retained
+    monkeypatch.setattr(native_credentials, "set_password", setter)
+    monkeypatch.setattr(native_credentials, "delete_password", deleter)
+    CredentialStore(tmp_path).save("codex", "retry-succeeded")
+    assert store.load("codex") == "retry-succeeded"
+    assert not retained.intersection(native_credentials.values)
+    assert len(native_credentials.values) == 1
+    manifest = tmp_path / "auth" / "credentials" / "codex.json"
+    assert json.loads(manifest.read_text())["retired"] == []
+
+
+def test_multiple_store_instances_serialize_save_and_delete(tmp_path, native_credentials) -> None:
+    stores = [CredentialStore(tmp_path), CredentialStore(tmp_path / ".")]
+    assert stores[0]._lock is stores[1]._lock
+
+    def change(index: int) -> None:
+        store = stores[index % len(stores)]
+        if index % 3:
+            store.save("codex", f"synthetic-{index}" * 100)
+        else:
+            store.delete("codex")
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        list(workers.map(change, range(40)))
+    stores[0].save("codex", "final")
+    assert stores[1].load("codex") == "final"
+    assert len(native_credentials.values) == 1
+    stores[1].delete("codex")
     assert not native_credentials.values
 
 

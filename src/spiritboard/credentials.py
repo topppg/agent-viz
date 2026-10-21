@@ -25,6 +25,7 @@ _CHUNK_SIZE = 1000
 _MAX_PAYLOAD = 256 * 1024
 _MAX_CHUNKS = (4 * ((_MAX_PAYLOAD + 2) // 3) + _CHUNK_SIZE - 1) // _CHUNK_SIZE
 _MAX_MANIFEST = 8192
+_STORE_LOCK = threading.RLock()
 
 
 class CredentialStoreError(ValueError):
@@ -72,7 +73,7 @@ class CredentialStore:
         canonical = os.path.normcase(str(self._root.resolve()))
         self._namespace = hashlib.sha256(os.fsencode(canonical)).hexdigest()
         self._directory = self._root / "auth" / "credentials"
-        self._lock = threading.RLock()
+        self._lock = _STORE_LOCK
 
     def load(self, name: str) -> str | None:
         try:
@@ -114,10 +115,10 @@ class CredentialStore:
                     "digest": hashlib.sha256(raw).hexdigest(),
                 }
                 previous = self._read(name)
-                if previous is not None and previous["retired"]:
-                    raise ValueError
-                active = previous["active"] if previous is not None else None
                 backend = _native_backend()
+                if previous is not None and previous["retired"]:
+                    previous = self._cleanup(backend, name, previous)
+                active = previous["active"] if previous is not None else None
                 # Record the new generation before writing secrets, so interruption is recoverable.
                 self._write(name, {"version": 1, "active": active, "retired": [record]})
                 try:
@@ -182,6 +183,18 @@ class CredentialStore:
                 backend.delete_password(service, _USERNAME)
             if backend.get_password(service, _USERNAME) is not None:
                 raise ValueError
+
+    def _cleanup(self, backend: _Backend, name: str, manifest: dict) -> dict | None:
+        retired = list(manifest["retired"])
+        while retired:
+            self._remove(backend, name, retired[0])
+            retired.pop(0)
+            if manifest["active"] is None and not retired:
+                self._unlink(name)
+                return None
+            manifest = {"version": 1, "active": manifest["active"], "retired": retired}
+            self._write(name, manifest)
+        return manifest
 
     def _directories(self, *, create: bool = False) -> bool:
         for path in (self._root, self._root / "auth", self._directory):
