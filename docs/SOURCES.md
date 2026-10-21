@@ -122,6 +122,11 @@ the backward request search finds the newest one instead. The reply is the
 agent's own prose: text that starts with markup is skipped, and Codex
 `agent_message` items, which are routed between agents, never count.
 
+A Codex subagent's transcript starts with a copy of its parent's history, and
+the task its parent sends it is encrypted. With text shown it is named by its
+task path (`/root/summary_settings_ui` → "summary settings ui"), takes no
+request from the copied history, and its reply starts after its own `NEW_TASK`.
+
 Sessions are named by their own titles when text is shown: a Claude `/rename`
 (`custom-title`), else Claude's generated `ai-title`, the Codex thread name
 from the profile's `session_index.jsonl` (cached by size and mtime), and the
