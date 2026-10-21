@@ -211,7 +211,8 @@
       const statuses = activeStatuses(h.runs);
       const parts = [[(s) => BUSY.has(s.key), "running"], [(s) => s.key === "needs", "needs you"], [(s) => s.key === "quiet", "quiet"]]
         .map(([test, text]) => [statuses.filter(test).length, text]).filter(([n]) => n).map(([n, text]) => `${n} ${text}`);
-      const name = node("span", null); name.append(node("span", h.label, "name"), node("span", parts.join(" · ") || (h.runs.length ? "nothing active" : "no observations yet"), "sub"));
+      const sub = parts.join(" · ") || (h.runs.length ? "nothing active" : "no observations yet");
+      const name = node("span", null, "who"); name.title = `${h.label} · ${sub}`; name.append(node("span", h.label, "name"), node("span", sub, "sub"));
       const rate = node("span", h.rate, "rate"); if (h.rate === busiest && h.rate) rate.style.color = state.colors.get(h.key);
       const noisy = active > 1 && h.rate === busiest && h.rate >= 30 && h.rate >= total * .5;
       const flag = node("span", noisy ? "▲ noisy" : h.rate ? "" : h.latest ? `idle ${age(h.latest)}` : "", `flag${noisy ? " noisy" : ""}`);
