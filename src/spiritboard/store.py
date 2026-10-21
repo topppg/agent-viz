@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .harnesses import HARNESSES
 from .model import STATES, TERMINAL, canonical, now, text, timestamp, validate_event
 
 
@@ -241,7 +242,7 @@ class Store:
         data = {k: v for k, v in observation.items() if k in allowed}
         for key in ("run_id", "session_id", "name", "source", "account"):
             text(data.get(key))
-        if data["source"] not in {"codex", "claude"}:
+        if data["source"] not in HARNESSES:
             raise ValueError("unknown observation source")
         for key in ("native_id", "task", "activity", "evidence", "project"):
             data[key] = text(data.get(key, ""), 600, empty=True)

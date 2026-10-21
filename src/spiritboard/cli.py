@@ -18,6 +18,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from . import __version__
+from .harnesses import HARNESSES
 from .launcher import Instance, LaunchError, default_data_dir, running_url
 from .server import Collector
 from .sources import discover_profiles, load_profiles
@@ -104,8 +105,7 @@ def serve_dashboard(args: argparse.Namespace) -> int:
         "limit_per_profile": args.limit_per_profile,
         "max_age_days": args.max_age_days,
         # Discovery selectors only matter when discovery runs.
-        "codex_home": os.environ.get("CODEX_HOME") if discovery else None,
-        "claude_config_dir": os.environ.get("CLAUDE_CONFIG_DIR") if discovery else None,
+        **{h.env.lower(): os.environ.get(h.env) if discovery else None for h in HARNESSES.values()},
     }
     with ExitStack() as resources:
         instance = resources.enter_context(Instance(args.data_dir, settings))

@@ -6,8 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from spiritboard import focus
-from spiritboard.focus import Process, Step, Target
+from spiritboard import focus, processes
+from spiritboard.focus import Step, Target
+from spiritboard.harnesses import claude, codex
+from spiritboard.processes import Process
 from spiritboard.sources import SourceProfile
 
 CLAUDE_ID = "11111111-2222-4333-8444-555555555555"
@@ -70,13 +72,13 @@ class ClaudeResolutionTests(unittest.TestCase):
             self.root, 333, "33333333-2222-4333-8444-555555555555", "Mon Oct 19 01:00:00 2026"
         )
         system = FakeSystem({111: proc(111), 333: proc(333)})
-        with patch.object(focus, "_run", system):
-            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (True, 111))
-            self.assertEqual(focus.claude_pid(self.root, OTHER_ID), (True, None))
+        with patch.object(processes, "run", system):
+            self.assertEqual(claude.session_pid(self.root, CLAUDE_ID), (True, 111))
+            self.assertEqual(claude.session_pid(self.root, OTHER_ID), (True, None))
             self.assertEqual(
-                focus.claude_pid(self.root, "33333333-2222-4333-8444-555555555555"), (True, None)
+                claude.session_pid(self.root, "33333333-2222-4333-8444-555555555555"), (True, None)
             )
-            self.assertEqual(focus.claude_pid(self.root, "missing-0000"), (True, None))
+            self.assertEqual(claude.session_pid(self.root, "missing-0000"), (True, None))
         self.assertIn("TZ", system.calls[0][1])
         self.assertEqual(system.calls[0][1]["TZ"], "UTC")
 
@@ -85,9 +87,9 @@ class ClaudeResolutionTests(unittest.TestCase):
         (self.root / "sessions" / "111.json").write_text(
             json.dumps({"pid": 999, "sessionId": CLAUDE_ID})
         )
-        with patch.object(focus, "_run", FakeSystem({111: proc(111), 999: proc(999)})):
-            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
-            self.assertEqual(focus.claude_pid(self.root / "absent", CLAUDE_ID), (False, None))
+        with patch.object(processes, "run", FakeSystem({111: proc(111), 999: proc(999)})):
+            self.assertEqual(claude.session_pid(self.root, CLAUDE_ID), (False, None))
+            self.assertEqual(claude.session_pid(self.root / "absent", CLAUDE_ID), (False, None))
 
     def test_unreadable_or_unattributable_session_metadata_is_unknown(self):
         write_session(self.root, 111, CLAUDE_ID)
@@ -95,41 +97,41 @@ class ClaudeResolutionTests(unittest.TestCase):
         for raw in ("not json", "{}", '{"pid": 111}', '{"pid": 111, "sessionId": 5}'):
             with self.subTest(raw=raw):
                 path.write_text(raw)
-                with patch.object(focus, "_run", FakeSystem({111: proc(111)})):
-                    self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
-        with patch.object(focus, "_small_json", return_value=None):
-            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
+                with patch.object(processes, "run", FakeSystem({111: proc(111)})):
+                    self.assertEqual(claude.session_pid(self.root, CLAUDE_ID), (False, None))
+        with patch.object(claude, "small_json", return_value=None):
+            self.assertEqual(claude.session_pid(self.root, CLAUDE_ID), (False, None))
 
     def test_missing_proc_start_and_ps_failure_are_not_trusted(self):
         write_session(self.root, 111, CLAUDE_ID, proc_start=None)
-        with patch.object(focus, "_run", FakeSystem({111: proc(111)})):
-            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
+        with patch.object(processes, "run", FakeSystem({111: proc(111)})):
+            self.assertEqual(claude.session_pid(self.root, CLAUDE_ID), (False, None))
         write_session(self.root, 111, CLAUDE_ID)
-        with patch.object(focus, "_run", FakeSystem({111: proc(111)}, ps_ok=False)):
+        with patch.object(processes, "run", FakeSystem({111: proc(111)}, ps_ok=False)):
             with self.assertRaises(OSError):
-                focus.claude_pid(self.root, CLAUDE_ID)
+                claude.session_pid(self.root, CLAUDE_ID)
 
     def test_process_lookup_error_is_not_confirmed_absence(self):
         write_session(self.root, 111, CLAUDE_ID)
-        with patch.object(focus, "_run", return_value=(2, "")):
+        with patch.object(processes, "run", return_value=(2, "")):
             with self.assertRaises(OSError):
-                focus.claude_pid(self.root, CLAUDE_ID)
+                claude.session_pid(self.root, CLAUDE_ID)
 
     def test_unverifiable_start_is_unknown_but_absent_pid_is_stopped(self):
         for recorded in (None, "", "not a process timestamp"):
             with self.subTest(recorded=recorded):
                 write_session(self.root, 111, CLAUDE_ID, proc_start=recorded)
-                with patch.object(focus, "_run", FakeSystem({111: proc(111)})):
-                    self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
-                with patch.object(focus, "_run", FakeSystem()):
-                    self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (True, None))
+                with patch.object(processes, "run", FakeSystem({111: proc(111)})):
+                    self.assertEqual(claude.session_pid(self.root, CLAUDE_ID), (False, None))
+                with patch.object(processes, "run", FakeSystem()):
+                    self.assertEqual(claude.session_pid(self.root, CLAUDE_ID), (True, None))
 
     def test_unverifiable_observed_process_start_is_unknown(self):
         write_session(self.root, 111, CLAUDE_ID)
         with patch.object(
-            focus, "_run", FakeSystem({111: proc(111, start="Bad Bad 20 10:00:00 2026")})
+            processes, "run", FakeSystem({111: proc(111, start="Bad Bad 20 10:00:00 2026")})
         ):
-            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
+            self.assertEqual(claude.session_pid(self.root, CLAUDE_ID), (False, None))
 
     def test_key_files_are_never_opened(self):
         write_session(self.root, 111, CLAUDE_ID)
@@ -150,12 +152,12 @@ class ClaudeResolutionTests(unittest.TestCase):
             return real_os_open(path, *args, **kwargs)
 
         with (
-            patch.object(focus, "_run", FakeSystem({111: proc(111)})),
+            patch.object(processes, "run", FakeSystem({111: proc(111)})),
             patch("builtins.open", guard_open),
             patch("os.open", guard_os_open),
         ):
-            self.assertEqual(focus.claude_pid(self.root, OTHER_ID), (True, None))
-            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (True, 111))
+            self.assertEqual(claude.session_pid(self.root, OTHER_ID), (True, None))
+            self.assertEqual(claude.session_pid(self.root, CLAUDE_ID), (True, 111))
         self.assertTrue(opened)
         self.assertFalse([p for p in opened if p.endswith(".key")])
 
@@ -174,34 +176,34 @@ class CodexResolutionTests(unittest.TestCase):
     def test_rollout_holder_found_by_lsof(self):
         system = FakeSystem({4242: proc(4242, command="/opt/bin/codex")}, lsof=(0, "4242\n"))
         with (
-            patch.object(focus, "_run", system),
+            patch.object(processes, "run", system),
             patch.object(focus.shutil, "which", return_value="/usr/sbin/lsof"),
         ):
-            self.assertEqual(focus._rollout(self.root, CODEX_ID), self.rollout)
-            self.assertIsNone(focus._rollout(self.root, CODEX_ID[:-4]))
-            self.assertEqual(focus.codex_pid(self.root, self.rollout), (True, 4242))
+            self.assertEqual(codex.find_rollout(self.root, CODEX_ID), self.rollout)
+            self.assertIsNone(codex.find_rollout(self.root, CODEX_ID[:-4]))
+            self.assertEqual(codex.rollout_pid(self.root, self.rollout), (True, 4242))
         self.assertIn(
             ["/usr/sbin/lsof", "-t", "--", str(self.rollout)], [c[0] for c in system.calls]
         )
 
     def test_not_open_unknown_and_archived(self):
         with patch.object(focus.shutil, "which", return_value="/usr/sbin/lsof"):
-            with patch.object(focus, "_run", FakeSystem(lsof=(1, ""))):
-                self.assertEqual(focus.codex_pid(self.root, self.rollout), (True, None))
-            with patch.object(focus, "_run", FakeSystem(lsof=None)):
-                self.assertEqual(focus.codex_pid(self.root, self.rollout), (False, None))
+            with patch.object(processes, "run", FakeSystem(lsof=(1, ""))):
+                self.assertEqual(codex.rollout_pid(self.root, self.rollout), (True, None))
+            with patch.object(processes, "run", FakeSystem(lsof=None)):
+                self.assertEqual(codex.rollout_pid(self.root, self.rollout), (False, None))
             editor = FakeSystem({7: proc(7, command="/usr/bin/vim")}, lsof=(0, "7\n"))
-            with patch.object(focus, "_run", editor):
-                self.assertEqual(focus.codex_pid(self.root, self.rollout), (False, None))
-            with patch.object(focus, "_run", FakeSystem(lsof=(1, ""))):
+            with patch.object(processes, "run", editor):
+                self.assertEqual(codex.rollout_pid(self.root, self.rollout), (False, None))
+            with patch.object(processes, "run", FakeSystem(lsof=(1, ""))):
                 gone = self.rollout.with_name("gone.jsonl")
-                self.assertEqual(focus.codex_pid(self.root, gone), (False, None))
+                self.assertEqual(codex.rollout_pid(self.root, gone), (False, None))
         with patch.object(focus.shutil, "which", return_value=None):
-            self.assertEqual(focus.codex_pid(self.root, self.rollout), (False, None))
+            self.assertEqual(codex.rollout_pid(self.root, self.rollout), (False, None))
         archived = self.root / "archived_sessions" / self.rollout.name
         archived.parent.mkdir()
-        with patch.object(focus, "_run", side_effect=AssertionError("no process lookup")):
-            self.assertEqual(focus.codex_pid(self.root, archived), (True, None))
+        with patch.object(processes, "run", side_effect=AssertionError("no process lookup")):
+            self.assertEqual(codex.rollout_pid(self.root, archived), (True, None))
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -213,9 +215,9 @@ class EnvironmentTests(unittest.TestCase):
             "ITERM_SESSION_ID=w0t1p0:not-a-guid TERM_PROGRAM=iTerm.app HOME=/invented\n"
         )
         with patch.object(focus.sys, "platform", "darwin"):
-            with patch.object(focus, "_run", FakeSystem(env_output=output, args_output=args)):
+            with patch.object(processes, "run", FakeSystem(env_output=output, args_output=args)):
                 env = focus._environment(1)
-            with patch.object(focus, "_run", FakeSystem(env_output=output, args_output="/x")):
+            with patch.object(processes, "run", FakeSystem(env_output=output, args_output="/x")):
                 self.assertEqual(focus._environment(1), {})
         self.assertEqual(
             env, {"CMUX_PANEL_ID": "ABCD-1234", "TMUX_PANE": "%3", "TERM_PROGRAM": "iTerm.app"}
@@ -321,20 +323,20 @@ class ResumeAndResolveTests(unittest.TestCase):
     def test_resume_commands_for_default_and_custom_roots(self):
         home = self.home
         self.assertEqual(
-            focus.resume_command("claude", home / ".claude", CLAUDE_ID, "/invented/my app"),
+            claude.resume_command(home / ".claude", CLAUDE_ID, "/invented/my app"),
             f"cd '/invented/my app' && CLAUDE_CONFIG_DIR={home / '.claude'} "
             f"claude --resume {CLAUDE_ID}",
         )
         self.assertEqual(
-            focus.resume_command("claude", home / ".claude-work", CLAUDE_ID, ""),
+            claude.resume_command(home / ".claude-work", CLAUDE_ID, ""),
             f"CLAUDE_CONFIG_DIR={home / '.claude-work'} claude --resume {CLAUDE_ID}",
         )
         self.assertEqual(
-            focus.resume_command("codex", home / ".codex", CODEX_ID, ""),
+            codex.resume_command(home / ".codex", CODEX_ID, ""),
             f"CODEX_HOME={home / '.codex'} codex resume {CODEX_ID}",
         )
         self.assertEqual(
-            focus.resume_command("codex", home / "odd dir", CODEX_ID, "/p"),
+            codex.resume_command(home / "odd dir", CODEX_ID, "/p"),
             f"cd /p && CODEX_HOME='{home / 'odd dir'}' codex resume {CODEX_ID}",
         )
 
@@ -372,7 +374,7 @@ class ResumeAndResolveTests(unittest.TestCase):
         (project / f"{OTHER_ID}.jsonl").write_text(json.dumps({"cwd": "/invented/project"}) + "\n")
         live = Target("focus", "cmux")
         with (
-            patch.object(focus, "_run", FakeSystem({111: proc(111)})),
+            patch.object(processes, "run", FakeSystem({111: proc(111)})),
             patch.object(focus, "adapter", return_value=live) as adapter,
         ):
             run = self.run_for(profile, f"{CLAUDE_ID}:agent:abc123", parent_run_id="p")
@@ -401,7 +403,7 @@ class ResumeAndResolveTests(unittest.TestCase):
             with self.subTest(recorded=recorded):
                 write_session(Path(profile.root), 111, CLAUDE_ID, proc_start=recorded)
                 with (
-                    patch.object(focus, "_run", FakeSystem({111: proc(111)})),
+                    patch.object(processes, "run", FakeSystem({111: proc(111)})),
                     patch.object(focus, "adapter") as adapter,
                 ):
                     self.assertEqual(
@@ -422,12 +424,12 @@ class ResumeAndResolveTests(unittest.TestCase):
         ):
             with self.subTest(raw=raw):
                 path.write_text(raw)
-                with patch.object(focus, "_run", FakeSystem({111: proc(111)})):
+                with patch.object(processes, "run", FakeSystem({111: proc(111)})):
                     self.assertEqual(
                         focus.resolve(self.run_for(profile, CLAUDE_ID), [profile]),
                         focus.UNSUPPORTED,
                     )
-        with patch.object(focus, "_small_json", return_value=None):
+        with patch.object(claude, "small_json", return_value=None):
             self.assertEqual(
                 focus.resolve(self.run_for(profile, CLAUDE_ID), [profile]), focus.UNSUPPORTED
             )
@@ -435,7 +437,7 @@ class ResumeAndResolveTests(unittest.TestCase):
     def test_claude_process_lookup_error_never_offers_resume(self):
         profile = self.profile("claude", ".claude")
         write_session(Path(profile.root), 111, CLAUDE_ID)
-        with patch.object(focus, "_run", return_value=(2, "")):
+        with patch.object(processes, "run", return_value=(2, "")):
             self.assertEqual(
                 focus.resolve(self.run_for(profile, CLAUDE_ID), [profile]), focus.UNSUPPORTED
             )
@@ -448,9 +450,9 @@ class ResumeAndResolveTests(unittest.TestCase):
         (day / f"rollout-x-{CODEX_ID}.jsonl").write_text(json.dumps(meta) + "\n")
         run = self.run_for(profile, CODEX_ID)
         with patch.object(focus.shutil, "which", return_value="/usr/sbin/lsof"):
-            with patch.object(focus, "_run", FakeSystem(lsof=(1, ""))):
+            with patch.object(processes, "run", FakeSystem(lsof=(1, ""))):
                 target = focus.resolve(run, [profile])
-            with patch.object(focus, "_run", FakeSystem(lsof=(2, ""))):
+            with patch.object(processes, "run", FakeSystem(lsof=(2, ""))):
                 self.assertEqual(focus.resolve(run, [profile]), focus.UNSUPPORTED)
         self.assertEqual(
             target.command,
@@ -474,7 +476,7 @@ class FocusTests(unittest.TestCase):
             steps=(Step(("optional",), required=False), Step(("required",))),
             env=(("CMUX_SOCKET_PATH", "/tmp/s"),),
         )
-        with patch.object(focus, "_run", fake):
+        with patch.object(processes, "run", fake):
             self.assertTrue(focus.focus(target))
             self.assertEqual(calls[-1][1]["CMUX_SOCKET_PATH"], "/tmp/s")
             failing = Target("focus", "x", steps=(Step(("optional",)),))
@@ -483,15 +485,15 @@ class FocusTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
 
     def test_run_uses_argv_without_shell(self):
-        with patch.object(focus.subprocess, "run") as run:
+        with patch.object(processes.subprocess, "run") as run:
             run.return_value.returncode, run.return_value.stdout = 0, "out"
-            self.assertEqual(focus._run(["ps", "-p", "1"]), (0, "out"))
+            self.assertEqual(processes.run(["ps", "-p", "1"]), (0, "out"))
         args, kwargs = run.call_args
         self.assertEqual(args[0], ["ps", "-p", "1"])
         self.assertNotIn("shell", kwargs)
-        self.assertEqual(kwargs["timeout"], focus.TIMEOUT)
-        with patch.object(focus.subprocess, "run", side_effect=FileNotFoundError):
-            self.assertIsNone(focus._run(["missing"]))
+        self.assertEqual(kwargs["timeout"], processes.TIMEOUT)
+        with patch.object(processes.subprocess, "run", side_effect=FileNotFoundError):
+            self.assertIsNone(processes.run(["missing"]))
 
 
 if __name__ == "__main__":
@@ -511,11 +513,11 @@ class LivenessTests(unittest.TestCase):
         (root / "sessions" / "111.secret.key").write_text("SECRET")
         profile = SourceProfile("claude-work", "claude", "Claude · work", str(root))
         ps_output = f"  111 {START}\n  222 Mon Oct 19 01:00:00 2026\n"
-        with patch.object(focus, "_run", return_value=(0, ps_output)) as run:
+        with patch.object(processes, "run", return_value=(0, ps_output)) as run:
             self.assertEqual(focus.live_sessions(profile), frozenset({CLAUDE_ID}))
         self.assertEqual(run.call_args.args[0][-1], "111,222")
         self.assertEqual(run.call_args.args[1]["TZ"], "UTC")
-        with patch.object(focus, "_run", return_value=None):
+        with patch.object(processes, "run", return_value=None):
             self.assertIsNone(focus.live_sessions(profile))
         missing = SourceProfile("claude-none", "claude", "None", str(self.base / "absent"))
         self.assertIsNone(focus.live_sessions(missing))
@@ -526,9 +528,9 @@ class LivenessTests(unittest.TestCase):
         for recorded in (None, "", "not a process timestamp"):
             with self.subTest(recorded=recorded):
                 write_session(root, 111, CLAUDE_ID, proc_start=recorded)
-                with patch.object(focus, "_run", return_value=(0, f"111 {START}\n")):
+                with patch.object(processes, "run", return_value=(0, f"111 {START}\n")):
                     self.assertIsNone(focus.live_sessions(profile))
-                with patch.object(focus, "_run", return_value=(1, "")):
+                with patch.object(processes, "run", return_value=(1, "")):
                     self.assertEqual(focus.live_sessions(profile), frozenset())
 
     def test_claude_live_sessions_unverifiable_process_output_is_unknown(self):
@@ -536,7 +538,7 @@ class LivenessTests(unittest.TestCase):
         profile = SourceProfile("claude-work", "claude", "Claude test", str(root))
         write_session(root, 111, CLAUDE_ID)
         for result in ((2, ""), (0, "unparseable output\n"), (0, "")):
-            with self.subTest(result=result), patch.object(focus, "_run", return_value=result):
+            with self.subTest(result=result), patch.object(processes, "run", return_value=result):
                 self.assertIsNone(focus.live_sessions(profile))
 
     def test_claude_live_sessions_symlink_metadata_is_unknown(self) -> None:
@@ -548,8 +550,8 @@ class LivenessTests(unittest.TestCase):
         record.symlink_to(target)
         profile = SourceProfile("claude-work", "claude", "Claude test", str(root))
         with (
-            patch.object(focus, "_small_json", side_effect=AssertionError("Do not read links")),
-            patch.object(focus, "_run", side_effect=AssertionError("No complete inventory")),
+            patch.object(claude, "small_json", side_effect=AssertionError("Do not read links")),
+            patch.object(processes, "run", side_effect=AssertionError("No complete inventory")),
         ):
             self.assertIsNone(focus.live_sessions(profile))
 
@@ -569,10 +571,10 @@ class LivenessTests(unittest.TestCase):
             f"p4000\nctail\nf3\nn{locks}/01a1bbbb-0000-7000-8000-000000000002.lock\n"
         )
         with patch.object(focus.shutil, "which", return_value="/usr/sbin/lsof"):
-            with patch.object(focus, "_run", return_value=(0, lsof)):
+            with patch.object(processes, "run", return_value=(0, lsof)):
                 live = focus.live_sessions(profile)
             self.assertEqual(live, frozenset({"01a1aaaa-0000-7000-8000-000000000001"}))
-            with patch.object(focus, "_run", return_value=(1, "")):
+            with patch.object(processes, "run", return_value=(1, "")):
                 self.assertEqual(focus.live_sessions(profile), frozenset())
         with patch.object(focus.shutil, "which", return_value=None):
             self.assertIsNone(focus.live_sessions(profile))

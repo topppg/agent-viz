@@ -9,7 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from spiritboard import sources as sources_module
+from spiritboard import transcripts
+from spiritboard.harnesses import claude
 from spiritboard.monitor import Monitor
 from spiritboard.sources import (
     SourceProfile,
@@ -18,6 +19,11 @@ from spiritboard.sources import (
     scan_inventory,
     scan_profile,
 )
+from spiritboard.transcripts import Session
+
+
+def unit(path):
+    return Session(str(path), path, 0, 0, 0.0)
 
 
 class SourcesTests(unittest.TestCase):
@@ -287,21 +293,23 @@ class SourcesTests(unittest.TestCase):
     @unittest.skipUnless(hasattr(os, "mkfifo"), "Requires named pipes")
     def test_metadata_readers_do_not_block_on_fifo(self):
         for reader, filename in [
-            ("_subagent_description", "agent-synthetic.meta.json"),
-            ("_last_request", "request.jsonl"),
+            ("subagent_description", "agent-synthetic.meta.json"),
+            ("latest_request", "request.jsonl"),
         ]:
             with self.subTest(reader=reader):
                 path = self.root / filename
                 os.mkfifo(path)
                 code = (
                     "from pathlib import Path; import sys; "
-                    f"from spiritboard.sources import {reader}; "
+                    "from spiritboard.harnesses.claude import "
+                    "latest_request, subagent_description; "
+                    "from spiritboard.transcripts import Session; "
                     "path = Path(sys.argv[1]); "
                     + (
-                        "assert _subagent_description("
+                        "assert subagent_description("
                         "path.with_name(path.name.replace('.meta.json', '.jsonl'))) == ''"
-                        if reader == "_subagent_description"
-                        else "assert _last_request(path, 'claude') == ''"
+                        if reader == "subagent_description"
+                        else "assert latest_request(Session(str(path), path, 0, 0, 0.0)) == ''"
                     )
                 )
                 # A separate process bounds both a blocking open and a blocking read.
@@ -329,8 +337,8 @@ class SourcesTests(unittest.TestCase):
 
     def test_metadata_readers_check_descriptor_type_before_reading(self):
         for reader, args in [
-            (sources_module._subagent_description, (self.root / "agent-synthetic.jsonl",)),
-            (sources_module._last_request, (self.root / "request.jsonl", "claude")),
+            (claude.subagent_description, (self.root / "agent-synthetic.jsonl",)),
+            (claude.latest_request, (unit(self.root / "request.jsonl"),)),
         ]:
             with self.subTest(reader=reader.__name__):
                 stream = MagicMock()
@@ -339,10 +347,10 @@ class SourcesTests(unittest.TestCase):
                 opened = MagicMock()
                 opened.__enter__.return_value = stream
                 with (
-                    patch("spiritboard.sources.os.open", return_value=123) as open_file,
-                    patch("spiritboard.sources.os.fdopen", return_value=opened),
+                    patch("spiritboard.transcripts.os.open", return_value=123) as open_file,
+                    patch("spiritboard.transcripts.os.fdopen", return_value=opened),
                     patch(
-                        "spiritboard.sources.os.fstat",
+                        "spiritboard.transcripts.os.fstat",
                         return_value=SimpleNamespace(st_mode=stat.S_IFIFO, st_size=100),
                     ),
                 ):
@@ -355,26 +363,26 @@ class SourcesTests(unittest.TestCase):
         path = self.root / "agent-synthetic.jsonl"
         meta = path.with_suffix(".meta.json")
         meta.write_text(json.dumps({"description": "Valid description"}))
-        self.assertEqual(sources_module._subagent_description(path), "Valid description")
+        self.assertEqual(claude.subagent_description(path), "Valid description")
         meta.write_bytes(b" " * 65_537)
-        self.assertEqual(sources_module._subagent_description(path), "")
+        self.assertEqual(claude.subagent_description(path), "")
         meta.unlink()
         meta.mkdir()
-        self.assertEqual(sources_module._subagent_description(path), "")
+        self.assertEqual(claude.subagent_description(path), "")
         meta.rmdir()
         target = self.root / "target.json"
         target.write_text(json.dumps({"description": "Linked description"}))
         meta.symlink_to(target)
-        self.assertEqual(sources_module._subagent_description(path), "")
+        self.assertEqual(claude.subagent_description(path), "")
 
     def test_last_request_rejects_directories_and_symlinks(self):
         target = self.root / "request.jsonl"
         target.write_text(json.dumps({"type": "user", "message": {"content": "Valid"}}) + "\n")
-        self.assertEqual(sources_module._last_request(target, "claude"), "Valid")
+        self.assertEqual(claude.latest_request(unit(target)), "Valid")
         link = self.root / "linked.jsonl"
         link.symlink_to(target)
-        self.assertEqual(sources_module._last_request(link, "claude"), "")
-        self.assertEqual(sources_module._last_request(self.root, "claude"), "")
+        self.assertEqual(claude.latest_request(unit(link)), "")
+        self.assertEqual(claude.latest_request(unit(self.root)), "")
 
     def test_idle_activity_is_the_last_reply(self):
         claude = self.profile("claude", "claude-reply", text=True)
@@ -505,8 +513,9 @@ class SourcesTests(unittest.TestCase):
         )
         path = self.log(profile, "run.jsonl", rows)
         self.assertGreater(path.stat().st_size, 900_000)
-        real_search = sources_module._last_request
-        with patch("spiritboard.sources._last_request", wraps=real_search) as search:
+        with patch(
+            "spiritboard.harnesses.codex.last_request", wraps=transcripts.last_request
+        ) as search:
             self.assertEqual(scan_profile(profile)[0]["task"], "Deep request")
             with path.open("a") as stream:
                 stream.write(json.dumps(filler) + "\n")
@@ -577,10 +586,7 @@ class SourcesTests(unittest.TestCase):
         os.utime(old, (time.time() - 10 * 86400,) * 2)
         self.log(profile, "new.jsonl", self.codex("new"))
         coverage = {}
-        with patch(
-            "spiritboard.sources._records",
-            wraps=__import__("spiritboard.sources", fromlist=["_records"])._records,
-        ) as records:
+        with patch("spiritboard.harnesses.codex.records", wraps=transcripts.records) as records:
             rows = scan_profile(profile, max_age_days=7, diagnostics=coverage)
         self.assertEqual({row["native_id"] for row in rows}, {"new"})
         self.assertEqual(records.call_count, 1)
@@ -703,12 +709,12 @@ class SourcesTests(unittest.TestCase):
         self.assertTrue(diagnostics["truncated"])
         self.assertFalse(diagnostics["discovery_limited"])
         self.assertNotIn("root", diagnostics)
-        with patch("spiritboard.sources.MAX_ENTRIES", 1):
+        with patch("spiritboard.transcripts.MAX_ENTRIES", 1):
             bounded = scan_inventory(profile)
             self.assertTrue(bounded["entry_budget_hit"])
             self.assertTrue(bounded["discovery_limited"])
         self.log(profile, "nested/deep.jsonl", self.codex("deep"))
-        with patch("spiritboard.sources.MAX_DEPTH", 0):
+        with patch("spiritboard.transcripts.MAX_DEPTH", 0):
             bounded = scan_inventory(profile)
             self.assertTrue(bounded["depth_budget_hit"])
             self.assertTrue(bounded["truncated"])

@@ -11,15 +11,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
-from spiritboard.sources import SourceProfile, codex_titles
+from spiritboard.harnesses import claude, codex
+from spiritboard.sources import SourceProfile
 from spiritboard.summaries import (
     MODEL,
     Summarizer,
-    _clean,
     _goal,
     _goal_text,
     _request,
 )
+from spiritboard.transcripts import redact
 
 
 class SummariesTests(unittest.TestCase):
@@ -81,9 +82,8 @@ class SummariesTests(unittest.TestCase):
         path = self.root / "session_index.jsonl"
         os.mkfifo(path)
         code = (
-            "import sys; from spiritboard.sources import SourceProfile; "
-            "from pathlib import Path; from spiritboard.sources import codex_titles; "
-            "assert codex_titles(Path(sys.argv[1])) == {}"
+            "import sys; from pathlib import Path; from spiritboard.harnesses import codex; "
+            "assert codex.titles(Path(sys.argv[1])) == {}"
         )
         result = subprocess.run(
             [sys.executable, "-c", code, str(self.root)],
@@ -115,14 +115,14 @@ class SummariesTests(unittest.TestCase):
         opened = MagicMock()
         opened.__enter__.return_value = stream
         with (
-            patch("spiritboard.sources.os.open", return_value=123) as open_file,
-            patch("spiritboard.sources.os.fdopen", return_value=opened),
+            patch("spiritboard.harnesses.codex.os.open", return_value=123) as open_file,
+            patch("spiritboard.harnesses.codex.os.fdopen", return_value=opened),
             patch(
-                "spiritboard.sources.os.fstat",
+                "spiritboard.harnesses.codex.os.fstat",
                 return_value=SimpleNamespace(st_mode=stat.S_IFIFO, st_size=100),
             ),
         ):
-            self.assertEqual(codex_titles(Path(profile.root)), {})
+            self.assertEqual(codex.titles(Path(profile.root)), {})
         self.assertTrue(open_file.call_args.args[1] & os.O_NONBLOCK)
         stream.read.assert_not_called()
         stream.seek.assert_not_called()
@@ -131,12 +131,12 @@ class SummariesTests(unittest.TestCase):
         profile = SourceProfile("one", "codex", "Test", str(self.root))
         path = self.root / "session_index.jsonl"
         path.mkdir()
-        self.assertEqual(codex_titles(Path(profile.root)), {})
+        self.assertEqual(codex.titles(Path(profile.root)), {})
         path.rmdir()
         target = self.root / "target.jsonl"
         target.write_text('{"id":"synthetic","thread_name":"Linked title"}\n')
         path.symlink_to(target)
-        self.assertEqual(codex_titles(Path(profile.root)), {})
+        self.assertEqual(codex.titles(Path(profile.root)), {})
 
     def test_success_actual_cost_and_opaque_ids(self):
         instance = self.summarizer()
@@ -370,7 +370,7 @@ class SummariesTests(unittest.TestCase):
                 },
             },
         ]
-        result = _goal_text(_goal(rows, "codex"))
+        result = _goal_text(_goal(codex.goal_context(rows)))
         self.assertIn("Fix the retry test", result)
         self.assertIn("Checking expectations", result)
         self.assertNotIn("SECRET", result)
@@ -399,7 +399,7 @@ class SummariesTests(unittest.TestCase):
             },
             {"type": "system", "message": {"content": "SECRET system"}},
         ]
-        result = _goal_text(_goal(rows, "claude"))
+        result = _goal_text(_goal(claude.goal_context(rows)))
         self.assertIn("Fix the retry test", result)
         self.assertIn("Checking expectations", result)
         self.assertNotIn("SECRET", result)
@@ -428,7 +428,7 @@ class SummariesTests(unittest.TestCase):
             {"type": "custom-title", "customTitle": "My name"},
             {"type": "ai-title", "aiTitle": "Later generated title"},
         ]
-        goal = _goal(rows, "claude")
+        goal = _goal(claude.goal_context(rows))
         self.assertEqual(goal["users"], ["Fix the retry test"])
         self.assertEqual(goal["title"], "My name")
         self.assertEqual(goal["last_user_at"], "")
@@ -650,7 +650,7 @@ class SummariesTests(unittest.TestCase):
         self.assertIn("title: Retry repair", candidate["text"])
 
     def test_control_characters_stripped(self):
-        self.assertEqual(_clean("Checking\x00\x1b[31m tests\n"), "Checking [31m tests")
+        self.assertEqual(redact("Checking\x00\x1b[31m tests\n"), "Checking [31m tests")
 
 
 if __name__ == "__main__":

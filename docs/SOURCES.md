@@ -187,3 +187,27 @@ select a different profile. Resume is offered only when no live
 process is found and liveness could be checked, and never for subagents. The
 browser re-checks the target before copying, so a session that came back to life
 is opened rather than forked.
+
+## Adding a harness
+
+Each agent harness is one module in `src/spiritboard/harnesses/` that builds a
+frozen `Harness` (`harnesses/harness.py`) and is registered in
+`HARNESSES` (`harnesses/__init__.py`, keyed by `kind`; registry order is the
+discovery order). Profiles, the store, liveness, focus and summaries accept any
+registered kind and call only these fields:
+
+| Field | Contract |
+| --- | --- |
+| `kind`, `name`, `env` | Source kind, display name (`Codex`), and the environment selector naming a storage root (`CODEX_HOME`). |
+| `home_roots(home)`, `home_label(entry_name)`, `is_root(root)` | Discovery: `(label, root)` pairs always checked, a label for a matching home entry (or `None`), and whether a root holds session storage. Never open credential or configuration files. |
+| `inventory(root, limit, max_age_days, archived)` | The newest `limit` `Session` units (`key`, `path`, `size`, `mtime_ns`, `mtime`) and coverage counters; raises `OSError` when no storage is readable. `archived=False` restricts it to live storage (summaries). |
+| `observe(profile, session)` | One observation dict (`run_id` via `ns`, `session_id` `<profile>:observed`, `parent_run_id`, `name`, `task`, `activity`, `state`, `last_seen`, `started_at`, `project`, …) or `None`. Text appears only when `profile.include_text`. |
+| `latest_request(session)`, `titles(root)` | Deep request search when the bounded read missed it; optional native-ID → title index. |
+| `live_sessions(root)`, `owner(native_id)` | Native IDs a live process owns (`None` when unknown) and the native ID whose process owns a (sub)agent. |
+| `session_pid(root, session_id)`, `resume(root, session_id)` | `(known, pid)` for focus and the resume command (or `None`); IDs always match `SESSION_ID`. |
+| `goal(session)`, `free_recaps` | Summary context (`Goal`: redacted title and recap, raw user/assistant messages that summaries filters and redacts) and whether a recap is itself a summary. |
+
+Build on `transcripts.py` (bounded no-follow readers, `walk_jsonl`, `safe`,
+`redact`, `ns`, `observation`) and `processes.py` (`ps`/`lsof` argv, no shell).
+Adding a harness means the module, its registry entry and synthetic tests; no
+other module changes.
