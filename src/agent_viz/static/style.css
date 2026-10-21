@@ -3,7 +3,6 @@
   --bg: #07080b; --panel: #0d0f14; --line: #1c1f27; --line-soft: #12141a; --head: #1a1d25;
   --text: #e6e9ef; --muted: #8e95a3; --dim: #5d6474;
   --run: #5eead4; --wait: #fbbf24; --ai: #c3a6ff; --err: #f87171;
-  --heat-0: #161a22; --heat-1: #0f4541; --heat-2: #167a6d; --heat-3: #2db8a5; --heat-4: #7ff5e1;
   font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.5;
 }
@@ -61,21 +60,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 20px 24px; display: flex; fle
 .flux .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
 .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .axis .now { color: var(--run); }
-
-.usage-panel { display: flex; flex-direction: column; gap: 6px; }
-.heatmap-wrap { overflow-x: auto; }
-.heatmap { display: grid; grid-template-columns: 30px repeat(53, minmax(10px, 1fr)); grid-template-rows: 16px; grid-auto-rows: auto; gap: 3px; max-width: 1180px; color: var(--muted); font-size: 11px; }
-.heatmap .wd { align-self: center; line-height: 1; }
-.heatmap .mo { white-space: nowrap; line-height: 16px; }
-.day { display: block; aspect-ratio: 1; min-width: 10px; border-radius: 2px; background: var(--heat-0); }
-.day.l1 { background: var(--heat-1); } .day.l2 { background: var(--heat-2); } .day.l3 { background: var(--heat-3); } .day.l4 { background: var(--heat-4); }
-/* Transcript activity without a user request, distinct from a day with nothing at all. */
-.day.seen { box-shadow: inset 0 0 0 1px #3d7f77; }
-.day.out { background: transparent; }
-.heatmap .day:not(.out):hover { outline: 1px solid var(--text); outline-offset: 0; }
-.usage-legend { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; max-width: 1180px; justify-content: flex-end; }
-.usage-legend .day { width: 11px; min-width: 11px; }
-.usage-legend .seen { margin-left: 14px; }
 
 .agents { display: flex; flex-direction: column; gap: 8px; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
