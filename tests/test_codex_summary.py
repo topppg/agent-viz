@@ -710,12 +710,26 @@ class CodexConnectionTests(unittest.TestCase):
             self.connection.disconnect()
         self.assertFalse(self.connection.public_state()["connected"])
         self.assertTrue(self.connection.public_state()["storage_error"])
+        self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
         connection.close.assert_called()
         with patch.object(self.connection, "_json") as network:
             with self.assertRaises(CodexError):
                 self.connection.request(PAYLOAD, 5)
         network.assert_not_called()
         self.vault.delete.assert_not_called()
+        self.vault.save.side_effect = self.vault_values.__setitem__
+        self.connection.disconnect()
+        self.assertFalse(self.connection.public_state()["storage_error"])
+        self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
+
+    def test_disconnect_after_locked_start_cannot_claim_unknown_grant_was_revoked(self):
+        self.vault.load.side_effect = CredentialStoreError("synthetic-private-backend-error")
+        self.connection.start()
+        self.vault.save.side_effect = CredentialStoreError("synthetic-private-backend-error")
+        with self.assertRaises(CodexError):
+            self.connection.disconnect()
+        self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
+        self.assertFalse(self.connection.public_state()["connected"])
 
     def test_legacy_plaintext_credentials_are_never_read_migrated_or_deleted(self):
         legacy = self.root / "auth" / "codex" / "connection.json"

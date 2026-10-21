@@ -340,6 +340,9 @@ class CodexConnection:
     def disconnect(self) -> None:
         with self._lock:
             refresh, client = self._record.get("refresh_token"), self._record.get("client_id")
+            self._revocation_unconfirmed = (
+                self._revocation_unconfirmed or bool(refresh and client) or self._storage_error
+            )
             self._generation += 1
             generation = self._generation
             self._pending = None
