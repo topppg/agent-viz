@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from agent_viz import sources as sources_module
 from agent_viz.monitor import Monitor
 from agent_viz.sources import (
     SourceProfile,
@@ -319,6 +320,83 @@ class SourcesTests(unittest.TestCase):
         )
         self.log(codex, "run.jsonl", rows)
         self.assertEqual(scan_profile(codex)[0]["activity"], "Done: retries are capped at three.")
+
+    def test_codex_response_item_requests_and_commentary_as_activity(self):
+        profile = self.profile("codex", "codex-items", text=True)
+        rows = self.codex()[:1]
+        item = {"type": "response_item", "timestamp": "2026-10-20T08:00:01Z"}
+        rows += [
+            {
+                **item,
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "<environment_context>SECRET</environment_context>",
+                        }
+                    ],
+                },
+            },
+            {
+                **item,
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "How are we doing in prod?"}],
+                },
+            },
+            {
+                **item,
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Checking the dashboards"}],
+                },
+            },
+            {**item, "payload": {"type": "reasoning", "summary": []}},
+            {**item, "payload": {"type": "function_call", "arguments": "SECRET args"}},
+        ]
+        self.log(profile, "run.jsonl", rows)
+        row = scan_profile(profile)[0]
+        self.assertEqual(row["task"], "How are we doing in prod?")
+        self.assertEqual(
+            (row["state"], row["activity"]), ("waiting_tool", "Checking the dashboards")
+        )
+        self.assertNotIn("SECRET", json.dumps(row))
+
+    def test_last_request_found_before_the_read_tail(self):
+        profile = self.profile("codex", "codex-long", text=True)
+        filler = {
+            "type": "response_item",
+            "timestamp": "2026-10-20T08:00:03Z",
+            "payload": {"type": "function_call_output", "output": "x" * 4000},
+        }
+        rows = (
+            self.codex()[:1]
+            + [filler] * 100
+            + [
+                {
+                    "type": "response_item",
+                    "timestamp": "2026-10-20T08:00:02Z",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "Deep request"}],
+                    },
+                },
+            ]
+            + [filler] * 200
+        )
+        path = self.log(profile, "run.jsonl", rows)
+        self.assertGreater(path.stat().st_size, 900_000)
+        with patch("agent_viz.sources._last_request", wraps=sources_module._last_request) as search:
+            self.assertEqual(scan_profile(profile)[0]["task"], "Deep request")
+            with path.open("a") as stream:
+                stream.write(json.dumps(filler) + "\n")
+            self.assertEqual(scan_profile(profile)[0]["task"], "Deep request")
+        self.assertEqual(search.call_count, 1)
 
     def test_malformed_partial_tails_and_symlink_skipped(self):
         profile = self.profile()
