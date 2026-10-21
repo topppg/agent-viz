@@ -59,6 +59,9 @@ class StaticTests(unittest.TestCase):
                 "past-bar",
                 "zoom",
                 "axis",
+                "more",
+                "top-actions",
+                "keys-toggle",
             }
             <= parser.ids
         )
@@ -91,7 +94,7 @@ class Element {
   querySelectorAll(selector) { const key = (selector.match(/^\[data-([a-z-]+)\]$/) || [])[1]; const prop = key ? key.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) : 'focusKey'; return flatten(this).filter(x => x.dataset[prop] !== undefined); }
 }
 function flatten(el) { return el.children.filter(c => typeof c !== 'string').flatMap(c => [c, ...flatten(c)]); }
-const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs','past-bar','zoom','flux-window','flux-note','axis'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
+const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs','past-bar','zoom','flux-window','flux-note','axis','more','top-actions','keys-toggle','keys'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
 const headers = Object.fromEntries(['harness','status','agent','doing','rate','seen'].map(key => { const button = new Element('button'); button.dataset.sort = key; button.textContent = key; return [key, button]; }));
 ids['window-filter'].value = '604800000';
 ['active','waiting','all'].forEach(v => { const b = new Element('button'); b.dataset.view = v; ids.views.children.push(b); });

@@ -331,13 +331,14 @@
     const totals = new Array(count).fill(0).map((_, i) => byHarness.reduce((sum, h) => sum + h.series[i], 0));
     const peak = Math.max(...totals);
     if (!peak) { host.append(node("span", `No events in the ${windowText}`, "empty")); host.setAttribute("aria-label", `No events in the ${windowText}`); return; }
-    const height = 170; const unit = height / Math.max(peak, 3);
+    // Percent heights let the same bars fill the full chart or the compact sparkline.
+    const unit = 100 / Math.max(peak, 3);
     totals.forEach((_, i) => {
       const col = node("div", null, "col");
       // Top-to-bottom matches the harness list order reversed, so the first harness sits on the baseline.
       [...byHarness].reverse().forEach((h) => {
         if (!h.series[i]) return;
-        const seg = node("span"); seg.style.height = `${h.series[i] * unit}px`; seg.style.background = state.colors.get(h.key); col.append(seg);
+        const seg = node("span"); seg.style.height = `${h.series[i] * unit}%`; seg.style.background = state.colors.get(h.key); col.append(seg);
       });
       col.addEventListener("click", () => travel(i, data));
       host.append(col);
@@ -352,7 +353,7 @@
         const seed = (endBucket - (count - 1 - i)) * 31 + j;
         const dot = node("span", null, "dot"); const size = 1.5 + noise(seed + .3) * 3;
         dot.style.left = `${(i + noise(seed)) / count * 100}%`;
-        dot.style.bottom = `${Math.max(0, totals[i] * unit + (noise(seed + .7) - .3) * 36)}px`;
+        dot.style.bottom = `max(0px, calc(${totals[i] * unit}% + ${(noise(seed + .7) - .3) * 36}px))`;
         dot.style.width = dot.style.height = `${size}px`;
         dot.style.background = noise(seed + .9) > .3 && top ? state.colors.get(top.key) : "#e6e9ef";
         dot.style.opacity = String(.4 + noise(seed + .5) * .6);
@@ -464,7 +465,7 @@
     button.setAttribute("aria-current", String(state.selected === run.run_id));
     button.setAttribute("aria-expanded", String(state.selected === run.run_id));
     const statusCell = node("span", `${state.selected === run.run_id ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status g-${status.key}`);
-    const agent = node("span", null, "cell");
+    const agent = node("span", null, "cell agent");
     agent.append(node("span", prefix, "tree"), node("span", nameOf(run), "agent-name"));
     if (orphan) agent.append(node("span", "parent not yet available", "note"));
     if (context) agent.append(node("span", "context", "note"));
@@ -736,13 +737,22 @@
   $("window-filter").addEventListener("change", () => { if (state.snapshot) renderTable(); });
   $("search").addEventListener("input", () => { if (state.snapshot) renderTable(); });
   $("refresh").addEventListener("click", refresh);
+  // On narrow screens the header actions and the shortcut list fold behind a button each.
+  const fold = (button, host, open) => { button.setAttribute("aria-expanded", String(open)); host.classList.toggle("open", open); };
+  const foldMenu = (open) => fold($("more"), $("top-actions"), open);
+  const foldKeys = (open) => fold($("keys-toggle"), $("keys"), open);
+  $("more").addEventListener("click", () => foldMenu($("more").getAttribute("aria-expanded") !== "true"));
+  $("top-actions").addEventListener("click", (event) => { if (event.target?.closest?.("button")) foldMenu(false); });
+  $("keys-toggle").addEventListener("click", () => foldKeys($("keys-toggle").getAttribute("aria-expanded") !== "true"));
+  document.addEventListener("click", (event) => { if (!event.target?.closest?.("#more, #top-actions")) foldMenu(false); });
   document.addEventListener("keydown", (event) => {
     if (document.querySelector?.("dialog[open]")) return;
     const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(event.target?.tagName);
-    if (event.key === "Escape") { if (typing) event.target.blur(); else selectRun(null); return; }
+    if (event.key === "Escape") { foldMenu(false); if (typing) event.target.blur(); else selectRun(null); return; }
     if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
     const actions = { "/": () => $("search").focus(), j: () => move(1), ArrowDown: () => move(1), k: () => move(-1), ArrowUp: () => move(-1),
-      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed"), l: backToLive, L: backToLive };
+      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed"), l: backToLive, L: backToLive,
+      "?": () => foldKeys($("keys-toggle").getAttribute("aria-expanded") !== "true") };
     if (actions[event.key]) { event.preventDefault(); actions[event.key](); }
   });
   renderViews();
