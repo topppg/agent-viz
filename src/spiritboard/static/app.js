@@ -6,6 +6,7 @@
   const PALETTE = ["#8fa8ff", "#c4b5fd", "#f0abfc", "#fda4af", "#7dd3fc", "#fdba74", "#a7f3d0", "#e9d5ff"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   const MAX_ROWS = 300;
+  const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
   const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0 };
   // Chart windows in seconds: heading, then the left and middle axis labels.
   const ZOOMS = { 600: ["last 10 minutes", "-10m", "-5m"], 3600: ["last hour", "-1h", "-30m"], 86400: ["last 24 hours", "-24h", "-12h"],
@@ -54,7 +55,9 @@
   function profileLabel(profile) {
     const same = (state.snapshot?.profiles || []).filter((p) => p.kind === profile.kind && p.label === profile.label).length > 1;
     // Discovered labels often already name the tool ("Claude · work"); do not repeat it.
-    const name = profile.label.toLowerCase().startsWith(profile.kind.toLowerCase()) ? profile.label : `${profile.kind} · ${profile.label}`;
+    const tool = KIND_NAMES[profile.kind] || profile.kind;
+    const named = [profile.kind, tool].some((x) => profile.label.toLowerCase().startsWith(x.toLowerCase()));
+    const name = named ? profile.label : `${tool} · ${profile.label}`;
     return `${name}${same ? ` · ${profile.id}` : ""}`;
   }
   function healthOf(run) {
