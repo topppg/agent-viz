@@ -29,7 +29,16 @@ class StaticTests(unittest.TestCase):
     def test_assets_are_local_and_required_controls_exist(self):
         parser = Assets()
         parser.feed((STATIC / "index.html").read_text())
-        self.assertEqual(set(parser.references), {"/favicon.svg", "/style.css", "/app.js"})
+        self.assertEqual(
+            set(parser.references),
+            {
+                "/favicon.svg",
+                "/style.css",
+                "/app.js",
+                "/summary-settings.css",
+                "/summary-settings.js",
+            },
+        )
         self.assertTrue(
             {
                 "runs",
@@ -135,7 +144,7 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(harnessButtons.find(b => b.textContent.includes('codex · work')).textContent.includes('▲ noisy'));
  assert.ok(ids.flux.children.some(x => x.className === 'col'));
  assert.ok(ids.flux.attrs['aria-label'].includes('codex · work'));
- assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 calls'));
+ assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 API calls'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
  // Harness filter.
  harnessButtons.find(b => b.textContent.includes('claude · personal')).listeners.click();
@@ -276,17 +285,20 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(detail().textContent.includes('no running process owns this session'));
  // A Claude desktop session is tagged; an archived one is never active; resume says terminal.
  const mine = {session_id:'claude-personal:observed',source:'claude',account:'personal',app:'Claude desktop'};
- const desk = run('desk', null, 'Desk', mine);
+ const desk = run('desk', null, 'Desktop title', {...mine,ai_summary:{title:'Old generated title',text:'Investigating retries'}});
  const shelved = run('shelved', null, 'Shelved', {...mine, archived:true, state:'idle'});
  targets.desk = {available:true,kind:'resume',label:'resume',command:'claude --resume invented-1111'};
  stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, desk, shelved]})}); await tick();
  const deskRow = rows().find(r => r.dataset.runId === 'desk');
+ assert.ok(deskRow.textContent.includes('Desktop title'));
+ assert.ok(!deskRow.textContent.includes('Old generated title'));
  assert.ok(flatten(deskRow).some(x => x.className === 'note' && x.textContent === 'Claude desktop'));
  assert.equal(flatten(deskRow).find(x => (x.className || '').includes('harness-cell')).title, 'claude · personal · Claude desktop');
  assert.equal(rows().find(r => r.dataset.runId === 'shelved'), undefined);
  assert.ok(ids.counts.textContent.includes('1 needs you'));
  deskRow.listeners.click(); await tick();
  assert.ok(detail().textContent.includes('Claude desktop'));
+ assert.ok(detail().textContent.includes('Desktop title'));
  assert.equal(control('copy-resume').textContent, '⧉ copy terminal resume command');
  assert.ok(control('copy-resume').title.startsWith('Resumes in a terminal, not in Claude desktop'));
  ids.views.children[2].listeners.click();

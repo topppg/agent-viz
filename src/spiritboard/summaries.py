@@ -19,10 +19,14 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .harnesses import HARNESSES, Goal
 from .sources import SourceProfile
 from .transcripts import redact
+
+if TYPE_CHECKING:
+    from .summary_providers import SummaryProviders
 
 MODEL = "deepseek/deepseek-v4-flash"
 HOST = "openrouter.ai"
@@ -32,7 +36,8 @@ REFRESH_SECONDS = 10 * 60
 MAX_RESPONSE_BYTES = 256 * 1024
 INSERT_SUMMARY = (
     "INSERT OR REPLACE INTO summaries"
-    "(run_id,fingerprint,text,generated_at,request_id,cost,title,origin) VALUES(?,?,?,?,?,?,?,?)"
+    "(run_id,fingerprint,text,generated_at,request_id,cost,title,origin,model,provider) "
+    "VALUES(?,?,?,?,?,?,?,?,?,?)"
 )
 INSTRUCTION_MARKERS = (
     "<environment_context",
@@ -166,14 +171,19 @@ class Summarizer:
         self,
         profiles_provider: Callable[[], list[SourceProfile]],
         store,
-        api_key: str,
+        api_key: str | None = None,
         *,
+        providers: SummaryProviders | None = None,
         interval: float = 120,
         timeout: float = 20,
         state_path: str | Path | None = None,
     ):
-        if not isinstance(api_key, str) or not api_key or any(ord(c) < 33 for c in api_key):
+        if providers is None and (
+            not isinstance(api_key, str) or not api_key or any(ord(c) < 33 for c in api_key)
+        ):
             raise ValueError("A nonempty API key is required")
+        if providers is not None and api_key is not None:
+            raise ValueError("Choose a provider manager or an explicit API key")
         if (
             not math.isfinite(interval)
             or interval < 120
@@ -182,6 +192,7 @@ class Summarizer:
         ):
             raise ValueError("interval must be at least 120 seconds; timeout must be 1–60 seconds")
         self.profiles_provider, self.store, self._api_key = profiles_provider, store, api_key
+        self.providers = providers
         self.interval, self.timeout = interval, timeout
         self.lock, self.tick_lock = threading.RLock(), threading.Lock()
         self.stop_event, self.thread = threading.Event(), None
@@ -202,9 +213,17 @@ class Summarizer:
                 generated_at TEXT NOT NULL, request_id TEXT, cost REAL);
         """)
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(summaries)")}
-        for column in ("title", "origin"):
+        for column in ("title", "origin", "model", "provider"):
             if column not in columns:
                 self.db.execute(f"ALTER TABLE summaries ADD COLUMN {column} TEXT")
+        call_columns = {row[1] for row in self.db.execute("PRAGMA table_info(calls)")}
+        for column, default in (
+            ("provider", "openrouter"),
+            ("model", MODEL),
+            ("billing_kind", "api"),
+        ):
+            if column not in call_columns:
+                self.db.execute(f"ALTER TABLE calls ADD COLUMN {column} TEXT DEFAULT '{default}'")
         # A crash after request dispatch leaves a pending row. Never silently
         # assume that unobserved request was free.
         self.db.execute("UPDATE calls SET outcome='unknown' WHERE outcome='pending'")
@@ -214,7 +233,8 @@ class Summarizer:
 
     def _accounting(self) -> tuple[int, float, int, float]:
         row = self.db.execute(
-            "SELECT COUNT(*),COALESCE(SUM(cost),0),SUM(cost IS NULL),COALESCE(MAX(started),0) "
+            "SELECT COUNT(*),COALESCE(SUM(CASE WHEN billing_kind='api' THEN cost END),0),"
+            "SUM(cost IS NULL AND billing_kind='api'),COALESCE(MAX(started),0) "
             "FROM calls"
         ).fetchone()
         return int(row[0]), float(row[1]), int(row[2] or 0), float(row[3])
@@ -256,18 +276,25 @@ class Summarizer:
         _, _, _, last = self._accounting()
         return not (self.stop_event.is_set() or time.time() - last < self.interval)
 
-    def _reserve(self) -> int | None:
+    def _reserve(self, provider: str = "openrouter", *, fallback: bool = False) -> int | None:
         # The transaction also protects a shared state file from two local
         # server processes racing after the initial eligibility check.
         with self.lock:
             self.db.execute("BEGIN IMMEDIATE")
             try:
-                if not self._can_dispatch():
+                if self.stop_event.is_set() or (not fallback and not self._can_dispatch()):
                     self.db.execute("COMMIT")
                     self._refresh_status()
                     return None
                 call = self.db.execute(
-                    "INSERT INTO calls(started,outcome) VALUES(?,'pending')", (time.time(),)
+                    "INSERT INTO calls(started,outcome,provider,model,billing_kind) "
+                    "VALUES(?,'pending',?,?,?)",
+                    (
+                        time.time(),
+                        provider,
+                        self.providers.model(provider) if self.providers else MODEL,
+                        self.providers.billing_kind(provider) if self.providers else "api",
+                    ),
                 ).lastrowid
                 self.db.execute("COMMIT")
                 self.status, self.error, self._inflight = "running", None, True
@@ -291,6 +318,7 @@ class Summarizer:
             run
             for run in self.store.snapshot(limit=10000)["runs"]
             if (run.get("state") in ACTIVE or run.get("state") == "idle")
+            and not run.get("archived")
             and (not run.get("parent_run_id") or run.get("state") == "waiting_user")
             and 0 <= current - _stamp(run.get("last_seen")) <= RECENT_SECONDS
         ]
@@ -321,6 +349,9 @@ class Summarizer:
                             # Titles go to the provider, so they are redacted like other text.
                             native_title = titles.get(observation.get("native_id", ""), "")
                             goal["title"] = redact(native_title, 120) or goal["title"]
+                            run = native[observation["run_id"]]
+                            if run.get("app") == "Claude desktop" and not run.get("parent_run_id"):
+                                goal["title"] = redact(run.get("name"), 120) or goal["title"]
                             goal["free"] = (
                                 harness.free_recaps
                                 and bool(goal["recap"])
@@ -364,6 +395,8 @@ class Summarizer:
                         0.0,
                         title,
                         f"{run['source']}-recap",
+                        None,
+                        None,
                     )
                 )
                 continue
@@ -392,6 +425,10 @@ class Summarizer:
             return
         try:
             if self.stop_event.is_set():
+                return
+            if self.providers and not self.providers.public_state()["enabled"]:
+                with self.lock:
+                    self.status, self.error = "disabled", None
                 return
             try:
                 candidates = self._candidates()
@@ -432,27 +469,57 @@ class Summarizer:
                     {"role": "user", "content": json.dumps(entries)},
                 ],
             }
-            call = self._reserve()
-            if call is None:
+            routes = self.providers.routes() if self.providers else ["openrouter"]
+            revision = self.providers.revision if self.providers else None
+            if not routes:
+                with self.lock:
+                    self.status, self.error = "not_connected", None
                 return
-            try:
-                response = _request(self._api_key, payload, self.timeout)
-            except Exception:
+            for index, provider in enumerate(routes):
+                if self.providers and not self.providers.allowed(provider, revision):
+                    return
+                call = self._reserve(provider, fallback=index > 0)
+                if call is None:
+                    return
+                try:
+                    response = (
+                        self.providers.request(provider, payload, self.timeout)
+                        if self.providers
+                        else _request(self._api_key, payload, self.timeout)
+                    )
+                except Exception:
+                    with self.lock:
+                        self._inflight = False
+                        self.db.execute("UPDATE calls SET outcome='unknown' WHERE id=?", (call,))
+                        self._failed.update(
+                            {candidate["run_id"]: time.time() for candidate in candidates}
+                        )
+                        self.status, self.error = (
+                            "error",
+                            "Summary request failed; it will retry or use a connected fallback.",
+                        )
+                    continue
                 with self.lock:
                     self._inflight = False
-                    self.db.execute("UPDATE calls SET outcome='unknown' WHERE id=?", (call,))
-                    self._failed.update(
-                        {candidate["run_id"]: time.time() for candidate in candidates}
-                    )
-                    self.status, self.error = "error", "Summary request failed; it will be retried."
-                return
-            with self.lock:
-                self._inflight = False
-            self._consume(call, response, candidates)
+                apply = not self.providers or self.providers.allowed(provider, revision)
+                if self._consume(call, response, candidates, provider=provider, apply=apply):
+                    if self.providers:
+                        self.providers.record_success(provider)
+                    return
+                if not apply:
+                    return
         finally:
             self.tick_lock.release()
 
-    def _consume(self, call: int, response: dict, candidates: list[dict]):
+    def _consume(
+        self,
+        call: int,
+        response: dict,
+        candidates: list[dict],
+        *,
+        provider: str = "openrouter",
+        apply: bool = True,
+    ) -> bool:
         usage = response.get("usage", {})
         raw_cost = usage.get("cost") if isinstance(usage, dict) else None
         cost = (
@@ -463,6 +530,9 @@ class Summarizer:
             and raw_cost >= 0
             else None
         )
+        subscription = self.providers and self.providers.billing_kind(provider) == "subscription"
+        if subscription:
+            cost = None
         raw_id = response.get("id")
         request_id = (
             raw_id
@@ -474,8 +544,15 @@ class Summarizer:
         with self.lock:
             self.db.execute(
                 "UPDATE calls SET outcome=?,cost=?,request_id=? WHERE id=?",
-                ("received" if cost is not None else "unknown", cost, request_id, call),
+                (
+                    "received" if cost is not None or subscription else "unknown",
+                    cost,
+                    request_id,
+                    call,
+                ),
             )
+        if not apply:
+            return False
         try:
             content = response["choices"][0]["message"]["content"]
             if not isinstance(content, str) or len(content) > 8000:
@@ -512,6 +589,8 @@ class Summarizer:
                         cost,
                         candidate["title"],
                         "model",
+                        self.providers.model(provider) if self.providers else MODEL,
+                        provider,
                     )
                 )
             with self.lock:
@@ -529,6 +608,7 @@ class Summarizer:
                 )
                 self.status, self.error = "ready", None
                 self._refresh_status()
+            return True
         except (ValueError, KeyError, IndexError, TypeError, RecursionError):
             with self.lock:
                 self._failed.update({candidate["run_id"]: time.time() for candidate in candidates})
@@ -537,20 +617,34 @@ class Summarizer:
                     "The provider returned an invalid summary; no summary was applied.",
                 )
                 self._refresh_status()
+            return False
 
     def public_state(self) -> dict:
         # Cheap metadata/SDK-text comparison only; rendering never scans native
         # transcript files or makes network requests.
         runs = {run["run_id"]: run for run in self.store.snapshot(limit=10000)["runs"]}
+        connections = self.providers.public_state() if self.providers else None
         with self.lock:
             self._refresh_status()
             calls, known_cost, unknown, _ = self._accounting()
             rows = self.db.execute(
-                "SELECT run_id,text,generated_at,request_id,cost,fingerprint,title,origin "
+                "SELECT run_id,text,generated_at,request_id,cost,fingerprint,title,origin,"
+                "model,provider "
                 "FROM summaries ORDER BY generated_at DESC"
             ).fetchall()
             result = []
-            for run_id, text, stamp, request_id, cost, fingerprint, title, origin in rows:
+            for (
+                run_id,
+                text,
+                stamp,
+                request_id,
+                cost,
+                fingerprint,
+                title,
+                origin,
+                model,
+                provider,
+            ) in rows:
                 run = runs.get(run_id)
                 # Stale means the goal context changed and a refresh is still due.
                 stale = run is None or run_id in self._pending
@@ -563,20 +657,30 @@ class Summarizer:
                         "title": title or "",
                         "origin": origin or "model",
                         "generated_at": stamp,
-                        "model": MODEL if (origin or "model") == "model" else None,
+                        "model": (model or MODEL) if (origin or "model") == "model" else None,
+                        "provider": (provider or "openrouter")
+                        if (origin or "model") == "model"
+                        else None,
                         "stale": stale,
                         "request_id": request_id,
                         "actual_cost_usd": cost,
                     }
                 )
+            subscription_calls = self.db.execute(
+                "SELECT COUNT(*) FROM calls WHERE billing_kind='subscription'"
+            ).fetchone()[0]
+            active = connections["active_provider"] if connections else "openrouter"
             return {
-                "enabled": True,
-                "model": MODEL,
+                "enabled": connections["enabled"] if connections else True,
+                "provider": active,
+                "model": self.providers.model(active) if self.providers and active else MODEL,
                 "status": self.status,
                 "calls": calls,
-                "actual_cost_usd": None if unknown else known_cost,
+                "actual_cost_usd": None if unknown or subscription_calls else known_cost,
                 "known_cost_usd": known_cost,
                 "unknown_cost_calls": unknown,
+                "api_calls": calls - subscription_calls,
+                "subscription_calls": subscription_calls,
                 "summaries": result,
                 "error": self.error,
             }
