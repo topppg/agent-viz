@@ -19,6 +19,15 @@ from . import focus
 from .model import MAX_EVENT_BYTES, parse_json
 
 STATIC = Path(__file__).parent / "static"
+ASSETS = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/style.css": ("style.css", "text/css; charset=utf-8"),
+    "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+    "/fonts/space-grotesk.woff2": ("fonts/space-grotesk.woff2", "font/woff2"),
+    "/fonts/space-mono-400.woff2": ("fonts/space-mono-400.woff2", "font/woff2"),
+    "/fonts/space-mono-700.woff2": ("fonts/space-mono-700.woff2", "font/woff2"),
+}
 FOCUS_ROUTE = re.compile(r"/api/runs/([^/]{1,768})/focus")
 
 
@@ -273,21 +282,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "invalid event query"})
                 return
             self._json(200, data)
-        elif path in {"/", "/app.js", "/style.css", "/favicon.svg"}:
-            name = "index.html" if path == "/" else path[1:]
-            content_types = {
-                "index.html": "text/html; charset=utf-8",
-                "app.js": "text/javascript; charset=utf-8",
-                "style.css": "text/css; charset=utf-8",
-                "favicon.svg": "image/svg+xml",
-            }
+        elif path in ASSETS:
+            name, content_type = ASSETS[path]
             try:
                 data = (STATIC / name).read_bytes()
             except OSError:
                 self._json(503, {"error": "dashboard assets unavailable"})
                 return
             self.send_response(200)
-            self._headers(content_types[name], len(data))
+            self._headers(content_type, len(data))
             self.end_headers()
             self.wfile.write(data)
         else:

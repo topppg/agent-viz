@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from spiritboard import focus
 from spiritboard.cli import main, token_for, write_private
-from spiritboard.server import Collector
+from spiritboard.server import ASSETS, Collector
 from spiritboard.store import Store
 
 TOKEN = "x" * 40
@@ -60,7 +60,7 @@ class ServerTests(unittest.TestCase):
         )
 
     def test_health_assets_and_empty_snapshot(self):
-        for path in ("/", "/app.js", "/style.css", "/favicon.svg", "/api/health", "/api/snapshot"):
+        for path in (*ASSETS, "/api/health", "/api/snapshot"):
             status, headers, data = self.request("GET", path)
             self.assertEqual(status, 200, path)
             self.assertEqual(headers["Cache-Control"], "no-store")
