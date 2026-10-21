@@ -53,8 +53,8 @@ using it. No old folders are silently moved or deleted. Uninstalling the tool wi
 
 The workflows prepare publishing, but do not mean that the `spiritboard` name has been reserved,
 that a package is available on PyPI, or that a release has happened. A maintainer must verify the
-name, choose the project's license, configure the account and publishing permissions, and
-explicitly approve the first upload. No license is invented in the package metadata.
+name, configure the account and publishing permissions, and explicitly approve the first
+upload. The package is MIT-licensed (`LICENSE`, `license = "MIT"` in `pyproject.toml`).
 
 Only after a successful, verified PyPI release should the default installation become:
 
@@ -97,8 +97,8 @@ checkout for each release build rather than mixing versions in an old output fol
 
 One-time actions, performed by the repository/package owner:
 
-1. Decide the license and verify that the PyPI project name can be used. Update metadata and docs
-   if the final package name differs from `spiritboard`.
+1. Verify that the PyPI project name can be used. Update metadata and docs if the final package
+   name differs from `spiritboard`.
 2. Create a GitHub environment named `pypi`. Restrict deployment branches to `main`, require a
    release reviewer where available, and disable self-review where appropriate.
 3. Add a PyPI trusted publisher (or pending publisher for the first release) with owner `topppg`,
