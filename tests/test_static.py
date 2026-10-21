@@ -47,10 +47,6 @@ class StaticTests(unittest.TestCase):
                 "error",
                 "hidden-note",
                 "overview",
-                "usage",
-                "heatmap",
-                "usage-summary",
-                "usage-legend",
             }
             <= parser.ids
         )
@@ -71,7 +67,7 @@ const fs = require('fs'), vm = require('vm'), assert = require('assert');
 let document;
 class Element {
   constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.value = ''; this.hidden = false; this._text = ''; this.options = []; this.style = { setProperty(k, v) { this[k] = v; } }; this.attrs = {};
-    this.classList = { toggle: (c) => { const on = !(this.className || '').includes(c); this.className = on ? c : ''; return on; } }; }
+    this.classList = { toggle: (c) => { this.className = (this.className || '').includes(c) ? '' : c; } }; }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(c => typeof c === 'string' ? c : c.textContent).join(''); }
   append(...items) { this.children.push(...items); }
@@ -83,22 +79,13 @@ class Element {
   querySelectorAll(selector) { const key = (selector.match(/^\[data-([a-z-]+)\]$/) || [])[1]; const prop = key ? key.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) : 'focusKey'; return flatten(this).filter(x => x.dataset[prop] !== undefined); }
 }
 function flatten(el) { return el.children.filter(c => typeof c !== 'string').flatMap(c => [c, ...flatten(c)]); }
-const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','usage','heatmap','usage-summary','usage-legend','views','harness-filter','window-filter','window-label','search','hidden-note','runs'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
+const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
 ids['window-filter'].value = '604800000';
 ['active','waiting','all'].forEach(v => { const b = new Element('button'); b.dataset.view = v; ids.views.children.push(b); });
 const docListeners = {};
 document = { getElementById: id => ids[id], createElement: tag => new Element(tag), activeElement: null, addEventListener: (k, fn) => { docListeners[k] = fn; } };
 const now = new Date().toISOString();
 const old = '2020-01-01T00:00:00Z';
-const pad2 = (n) => String(n).padStart(2, '0');
-const ago = (n) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - n); return d; };
-const dk = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const spoken = (d) => `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]} ${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]} ${d.getFullYear()}`;
-const usage = { window_days: 365, limited: false, days: [
-  { date: dk(ago(400)), requests: 99, sessions: 9, by_harness: { 'profile:codex-work': 99 }, sessions_by_harness: { 'profile:codex-work': 9 } },
-  { date: dk(ago(6)), requests: 23, sessions: 4, by_harness: { 'profile:codex-work': 20, 'profile:claude-personal': 2, '<img src=x onerror=alert(1)>:demo': 1 }, sessions_by_harness: { 'profile:codex-work': 2, 'profile:claude-personal': 1, '<img src=x onerror=alert(1)>:demo': 1 } },
-  { date: dk(ago(1)), requests: 0, sessions: 1, by_harness: {}, sessions_by_harness: { 'profile:codex-work': 1 } },
-  { date: dk(ago(0)), requests: 2, sessions: 1, by_harness: { 'profile:codex-work': 2 }, sessions_by_harness: { 'profile:codex-work': 1 } }] };
 const run = (id, parent, name, extra = {}) => ({run_id:id,parent_run_id:parent,name,session_id:'codex-work:observed',source:'codex',account:'work',state:'working',health:'observed',inferred:true,task:'Original task',activity:'<img src=x onerror=alert(1)>',last_seen:now,started_at:now,demo:true,operations:[],...extra});
 const runs = [run('child','root','Child'), run('root',null,'Root'), run('ask','root','Asker',{state:'waiting_user',ai_summary:{text:'Tuning retry limits',title:'Retry tuning',origin:'claude-recap',stale:false}}),
   run('orphan','missing','Orphan',{session_id:'claude-personal:observed',source:'claude',account:'personal'}),
@@ -107,7 +94,7 @@ const runs = [run('child','root','Child'), run('root',null,'Root'), run('ask','r
 const snapshot = { stream_id:'journal-a', cursor:1, runs, server_time:now, stale_after_seconds:15,
   profiles:[{id:'codex-work',kind:'codex',label:'work'},{id:'claude-personal',kind:'claude',label:'personal'},{id:'codex-empty',kind:'codex',label:'Empty profile'}],
   source_errors:{unavailable:'Source unavailable'}, ai:{enabled:true,status:'ready',calls:2,actual_cost_usd:.0021,known_cost_usd:.0021,unknown_cost_calls:0,summaries:[]},
-  activity:{bucket_seconds:10,buckets:60,end:now,runs:{root:[...new Array(59).fill(0),40],'sdk-run':[...new Array(54).fill(0),1,1,1,1,1,2]}}, usage };
+  activity:{bucket_seconds:10,buckets:60,end:now,runs:{root:[...new Array(59).fill(0),40],'sdk-run':[...new Array(54).fill(0),1,1,1,1,1,2]}} };
 let stream;
 class EventSource { constructor() { this.listeners = {}; stream = this; } addEventListener(name, fn) { this.listeners[name] = fn; } }
 class Option extends Element { constructor(text,value) { super('option'); this.textContent = text; this.value = value; } }
@@ -150,39 +137,10 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(ids.flux.attrs['aria-label'].includes('codex · work'));
  assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 calls'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
- // Usage heatmap: one labelled cell per day in the 365-day window, text-only labels.
- const cells = () => flatten(ids.heatmap).filter(x => x.dataset.date);
- const cell = (n) => cells().find(x => x.dataset.date === dk(ago(n)));
- assert.equal(cells().length, 365);
- assert.equal(cell(400), undefined);
- assert.equal(cell(6).attrs['aria-label'], `${spoken(ago(6))} · 23 requests · 4 sessions`);
- assert.ok(cell(6).title.includes('codex · work: 20 requests'));
- assert.ok(cell(6).title.includes('<img src=x onerror=alert(1)>:demo: 1 request'));
- assert.ok(cell(6).className.includes('l4'));
- assert.ok(cell(1).className.includes('l0') && cell(1).className.includes('seen'));
- assert.equal(cell(2).attrs['aria-label'], `${spoken(ago(2))} · no activity`);
- assert.ok(!cell(2).className.includes('seen'));
- assert.ok(!flatten(ids.heatmap).some(x => ['img', 'script'].includes(x.tagName)));
- assert.ok(ids['usage-summary'].textContent.startsWith('25 requests · 2 active days'));
- assert.ok(flatten(ids.heatmap).some(x => x.className === 'wd' && x.textContent === 'Wed'));
- assert.ok(ids['usage-legend'].textContent.includes('less') && ids['usage-legend'].textContent.includes('more'));
- // Unchanged usage does not rebuild the grid on a live tick.
- const stableCell = cell(6);
- stream.listeners.snapshot({data:JSON.stringify(snapshot)});
- assert.equal(cell(6), stableCell);
- // Harness filter, including the heatmap counts.
+ // Harness filter.
  harnessButtons.find(b => b.textContent.includes('claude · personal')).listeners.click();
  assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan']);
- assert.equal(cell(6).attrs['aria-label'], `${spoken(ago(6))} · 2 requests · 1 session`);
- assert.equal(cell(0).attrs['aria-label'], `${spoken(ago(0))} · no activity`);
- assert.ok(ids['usage-summary'].textContent.includes('claude · personal'));
  ids['harness-filter'].value = ''; ids['harness-filter'].listeners.change();
- assert.equal(cell(6).attrs['aria-label'], `${spoken(ago(6))} · 23 requests · 4 sessions`);
- // v hides both charts and brings them back.
- docListeners.keydown({key:'v', target:{tagName:'BODY'}, preventDefault(){}});
- assert.equal(ids.usage.hidden, true); assert.ok(ids.overview.className.includes('collapsed'));
- docListeners.keydown({key:'v', target:{tagName:'BODY'}, preventDefault(){}});
- assert.equal(ids.usage.hidden, false);
  // Views.
  ids.views.children[1].listeners.click();
  assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask']);
