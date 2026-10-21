@@ -69,11 +69,17 @@ class CredentialStore:
     """Keep bounded credentials in an explicitly selected secure native backend."""
 
     def __init__(self, data_root: Path) -> None:
-        self._root = Path(data_root).absolute()
-        canonical = os.path.normcase(str(self._root.resolve()))
-        self._namespace = hashlib.sha256(os.fsencode(canonical)).hexdigest()
-        self._directory = self._root / "auth" / "credentials"
         self._lock = _STORE_LOCK
+        self._initialization_failed = True
+        try:
+            self._root = Path(data_root).absolute()
+            canonical = os.path.normcase(str(self._root.resolve()))
+            self._namespace = hashlib.sha256(os.fsencode(canonical)).hexdigest()
+            self._directory = self._root / "auth" / "credentials"
+        except Exception:
+            # Optional credentials must not prevent the local monitor from being constructed.
+            return
+        self._initialization_failed = False
 
     def load(self, name: str) -> str | None:
         try:
@@ -207,6 +213,8 @@ class CredentialStore:
         return True
 
     def _read(self, name: str) -> dict | None:
+        if self._initialization_failed:
+            raise ValueError
         self._name(name)
         if not self._directories():
             return None

@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,32 @@ from spiritboard import credentials
 from spiritboard.credentials import CredentialStore, CredentialStoreError
 
 _NATIVE_FACTORY = credentials._native_backend
+
+
+@pytest.mark.parametrize("operation", ["absolute", "resolve", "fsencode"])
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError, ValueError])
+def test_path_errors_are_deferred_safe_errors_without_backend_access(
+    tmp_path, native_credentials, monkeypatch, operation, error_type
+) -> None:
+    def broken(*args, **kwargs):
+        raise error_type("synthetic-private-path /private/user-data")
+
+    if operation == "fsencode":
+        monkeypatch.setattr(credentials.os, operation, broken)
+    else:
+        monkeypatch.setattr(Path, operation, broken)
+    store = CredentialStore(tmp_path)
+    for attempt in (
+        lambda: store.load("codex"),
+        lambda: store.save("codex", "synthetic"),
+        lambda: store.delete("codex"),
+    ):
+        with pytest.raises(CredentialStoreError) as error:
+            attempt()
+        assert str(error.value) == credentials._MESSAGE
+        assert "private" not in str(error.value)
+        assert error.value.__suppress_context__
+    assert not native_credentials.calls
 
 
 def test_new_store_and_missing_manifest_never_select_keychain(tmp_path, monkeypatch) -> None:
