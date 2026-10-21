@@ -86,8 +86,19 @@ class ClaudeResolutionTests(unittest.TestCase):
             json.dumps({"pid": 999, "sessionId": CLAUDE_ID})
         )
         with patch.object(focus, "_run", FakeSystem({111: proc(111), 999: proc(999)})):
-            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (True, None))
+            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
             self.assertEqual(focus.claude_pid(self.root / "absent", CLAUDE_ID), (False, None))
+
+    def test_unreadable_or_unattributable_session_metadata_is_unknown(self):
+        write_session(self.root, 111, CLAUDE_ID)
+        path = self.root / "sessions" / "111.json"
+        for raw in ("not json", "{}", '{"pid": 111}', '{"pid": 111, "sessionId": 5}'):
+            with self.subTest(raw=raw):
+                path.write_text(raw)
+                with patch.object(focus, "_run", FakeSystem({111: proc(111)})):
+                    self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
+        with patch.object(focus, "_small_json", return_value=None):
+            self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
 
     def test_missing_proc_start_and_ps_failure_are_not_trusted(self):
         write_session(self.root, 111, CLAUDE_ID, proc_start=None)
@@ -95,6 +106,12 @@ class ClaudeResolutionTests(unittest.TestCase):
             self.assertEqual(focus.claude_pid(self.root, CLAUDE_ID), (False, None))
         write_session(self.root, 111, CLAUDE_ID)
         with patch.object(focus, "_run", FakeSystem({111: proc(111)}, ps_ok=False)):
+            with self.assertRaises(OSError):
+                focus.claude_pid(self.root, CLAUDE_ID)
+
+    def test_process_lookup_error_is_not_confirmed_absence(self):
+        write_session(self.root, 111, CLAUDE_ID)
+        with patch.object(focus, "_run", return_value=(2, "")):
             with self.assertRaises(OSError):
                 focus.claude_pid(self.root, CLAUDE_ID)
 
@@ -392,6 +409,36 @@ class ResumeAndResolveTests(unittest.TestCase):
                         focus.UNSUPPORTED,
                     )
                 adapter.assert_not_called()
+
+    def test_claude_untrusted_session_metadata_never_offers_resume(self):
+        profile = self.profile("claude", ".claude")
+        root = Path(profile.root)
+        write_session(root, 111, CLAUDE_ID)
+        path = root / "sessions" / "111.json"
+        for raw in (
+            json.dumps({"pid": 999, "sessionId": CLAUDE_ID, "procStart": START}),
+            "not json",
+            "{}",
+        ):
+            with self.subTest(raw=raw):
+                path.write_text(raw)
+                with patch.object(focus, "_run", FakeSystem({111: proc(111)})):
+                    self.assertEqual(
+                        focus.resolve(self.run_for(profile, CLAUDE_ID), [profile]),
+                        focus.UNSUPPORTED,
+                    )
+        with patch.object(focus, "_small_json", return_value=None):
+            self.assertEqual(
+                focus.resolve(self.run_for(profile, CLAUDE_ID), [profile]), focus.UNSUPPORTED
+            )
+
+    def test_claude_process_lookup_error_never_offers_resume(self):
+        profile = self.profile("claude", ".claude")
+        write_session(Path(profile.root), 111, CLAUDE_ID)
+        with patch.object(focus, "_run", return_value=(2, "")):
+            self.assertEqual(
+                focus.resolve(self.run_for(profile, CLAUDE_ID), [profile]), focus.UNSUPPORTED
+            )
 
     def test_codex_stopped_resume_and_unknown(self):
         profile = self.profile("codex", ".codex")

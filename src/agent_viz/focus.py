@@ -171,7 +171,7 @@ def _process(pid: int) -> Process | None:
     if result is None:
         raise OSError("process lookup failed")
     lines = [line for line in result[1].splitlines() if line.strip()]
-    if result[0] != 0 and not lines:
+    if result[0] == 1 and not lines:
         return None
     match = PS_LINE.fullmatch(lines[0]) if lines else None
     if result[0] != 0 or not match:
@@ -280,10 +280,20 @@ def claude_pid(root: Path, session_id: str) -> tuple[bool, int | None]:
     for name in sorted(names):
         path = root / "sessions" / name
         if path.is_symlink():
+            known = False
             continue
         data = _small_json(path)
         pid = int(name.removesuffix(".json"))
-        if not data or data.get("sessionId") != session_id or data.get("pid") != pid:
+        session = data.get("sessionId") if data else None
+        if (
+            not data
+            or data.get("pid") != pid
+            or not isinstance(session, str)
+            or not SESSION_ID.fullmatch(session)
+        ):
+            known = False
+            continue
+        if session != session_id:
             continue
         process = _process(pid)
         if process is None:
