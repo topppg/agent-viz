@@ -11,12 +11,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
-from agent_viz.sources import SourceProfile
+from agent_viz.sources import SourceProfile, codex_titles
 from agent_viz.summaries import (
     MODEL,
     Summarizer,
     _clean,
-    _codex_titles,
     _goal,
     _goal_text,
     _request,
@@ -83,8 +82,8 @@ class SummariesTests(unittest.TestCase):
         os.mkfifo(path)
         code = (
             "import sys; from agent_viz.sources import SourceProfile; "
-            "from agent_viz.summaries import _codex_titles; "
-            "assert _codex_titles(SourceProfile('one', 'codex', 'Test', sys.argv[1])) == {}"
+            "from pathlib import Path; from agent_viz.sources import codex_titles; "
+            "assert codex_titles(Path(sys.argv[1])) == {}"
         )
         result = subprocess.run(
             [sys.executable, "-c", code, str(self.root)],
@@ -116,14 +115,14 @@ class SummariesTests(unittest.TestCase):
         opened = MagicMock()
         opened.__enter__.return_value = stream
         with (
-            patch("agent_viz.summaries.os.open", return_value=123) as open_file,
-            patch("agent_viz.summaries.os.fdopen", return_value=opened),
+            patch("agent_viz.sources.os.open", return_value=123) as open_file,
+            patch("agent_viz.sources.os.fdopen", return_value=opened),
             patch(
-                "agent_viz.summaries.os.fstat",
+                "agent_viz.sources.os.fstat",
                 return_value=SimpleNamespace(st_mode=stat.S_IFIFO, st_size=100),
             ),
         ):
-            self.assertEqual(_codex_titles(profile), {})
+            self.assertEqual(codex_titles(Path(profile.root)), {})
         self.assertTrue(open_file.call_args.args[1] & os.O_NONBLOCK)
         stream.read.assert_not_called()
         stream.seek.assert_not_called()
@@ -132,12 +131,12 @@ class SummariesTests(unittest.TestCase):
         profile = SourceProfile("one", "codex", "Test", str(self.root))
         path = self.root / "session_index.jsonl"
         path.mkdir()
-        self.assertEqual(_codex_titles(profile), {})
+        self.assertEqual(codex_titles(Path(profile.root)), {})
         path.rmdir()
         target = self.root / "target.jsonl"
         target.write_text('{"id":"synthetic","thread_name":"Linked title"}\n')
         path.symlink_to(target)
-        self.assertEqual(_codex_titles(profile), {})
+        self.assertEqual(codex_titles(Path(profile.root)), {})
 
     def test_success_actual_cost_and_opaque_ids(self):
         instance = self.summarizer()

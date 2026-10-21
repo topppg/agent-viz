@@ -12,17 +12,15 @@ import hashlib
 import http.client
 import json
 import math
-import os
 import re
 import sqlite3
-import stat
 import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .sources import SourceProfile, _claude, _codex, _recent_files, _records
+from .sources import SourceProfile, _claude, _codex, _recent_files, _records, codex_titles
 
 MODEL = "deepseek/deepseek-v4-flash"
 HOST = "openrouter.ai"
@@ -187,34 +185,6 @@ def _goal_text(goal: dict) -> str:
 def _goal_key(goal: dict) -> str:
     # Assistant progress never triggers a refresh; new requests, titles or recaps do.
     return "\n".join([goal["title"], goal["recap"], *goal["users"]])
-
-
-def _codex_titles(profile: SourceProfile) -> dict[str, str]:
-    """Codex thread names from session_index.jsonl; bounded, read-only."""
-    path = Path(profile.root).expanduser().resolve() / "session_index.jsonl"
-    titles: dict[str, str] = {}
-    try:
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-        with os.fdopen(os.open(path, flags), "rb") as stream:
-            info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                return titles
-            stream.seek(max(0, info.st_size - 2_000_000))
-            data = stream.read(2_000_000)
-    except OSError:
-        return titles
-    for line in data.splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if (
-            isinstance(row, dict)
-            and isinstance(row.get("id"), str)
-            and isinstance(row.get("thread_name"), str)
-        ):
-            titles[row["id"]] = _clean(row["thread_name"], 120)
-    return titles
 
 
 def _stamp(value: object) -> float:
@@ -409,7 +379,11 @@ class Summarizer:
                 wanted = {key for key in native if key.startswith(profile.id + ":")}
                 if not wanted:
                     continue
-                titles = _codex_titles(profile) if profile.kind == "codex" else {}
+                titles = (
+                    codex_titles(Path(profile.root).expanduser().resolve())
+                    if profile.kind == "codex"
+                    else {}
+                )
                 found = set()
                 root = Path(profile.root).expanduser().resolve() / (
                     "sessions" if profile.kind == "codex" else "projects"
@@ -423,9 +397,9 @@ class Summarizer:
                         if observation and observation["run_id"] in native:
                             found.add(observation["run_id"])
                             goal = _goal(records, profile.kind)
-                            goal["title"] = (
-                                titles.get(observation.get("native_id", ""), "") or goal["title"]
-                            )
+                            # Titles go to the provider, so they are redacted like other text.
+                            native_title = titles.get(observation.get("native_id", ""), "")
+                            goal["title"] = _clean(native_title, 120) or goal["title"]
                             goal["free"] = (
                                 profile.kind == "claude"
                                 and bool(goal["recap"])

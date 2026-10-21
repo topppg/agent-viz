@@ -461,12 +461,17 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
     last_state_time = None
     prompt_seen = False
     last_reply = ""
+    custom_title = ai_title = ""
     for row in records:
         stamp = _time(row.get("timestamp"))
         if stamp and (out["last_seen"] is None or stamp > out["last_seen"]):
             out["last_seen"] = stamp
         kind, message = row.get("type"), row.get("message", {})
         state, activity, evidence = None, None, None
+        if kind == "custom-title":
+            custom_title = _safe(row.get("customTitle"), 120) or custom_title
+        elif kind == "ai-title":
+            ai_title = _safe(row.get("aiTitle"), 120) or ai_title
         if kind == "user" and isinstance(message, dict):
             content = message.get("content", [])
             result = isinstance(content, list) and any(
@@ -513,6 +518,9 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
                 evidence=f"Claude transcript: {evidence}; inferred session state",
             )
             last_state_time = stamp or last_state_time
+    # A /rename beats Claude's generated title; subagents keep their parent-given name.
+    if profile.include_text and not agent and (custom_title or ai_title):
+        out["name"] = custom_title or ai_title
     out["last_seen"] = out["last_seen"] or datetime.fromtimestamp(mtime, UTC).isoformat()
     return out
 
@@ -576,6 +584,40 @@ def _last_request(path: Path, kind: str) -> str:
     return ""
 
 
+_TITLES: dict[str, tuple[tuple[int, int], dict[str, str]]] = {}
+
+
+def codex_titles(root: Path) -> dict[str, str]:
+    """Codex thread names from ``session_index.jsonl``; bounded, cached by size and mtime."""
+    path = root / "session_index.jsonl"
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                return {}
+            signature = (info.st_size, info.st_mtime_ns)
+            cached = _TITLES.get(str(path))
+            if cached and cached[0] == signature:
+                return cached[1]
+            stream.seek(max(0, info.st_size - 2_000_000))
+            data = stream.read(2_000_000)
+    except OSError:
+        return {}
+    titles: dict[str, str] = {}
+    for line in data.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and isinstance(row.get("id"), str):
+            name = _safe(row.get("thread_name"), 120)
+            if name:
+                titles[row["id"]] = name
+    _TITLES[str(path)] = (signature, titles)
+    return titles
+
+
 def _subagent_description(path: Path) -> str:
     """The short description the parent gave a Claude subagent, from agent-<id>.meta.json."""
     meta = path.with_name(path.stem + ".meta.json")
@@ -619,6 +661,8 @@ def scan_profile(
     result = []
     active_keys = set()
     prefix = f"{profile.id}:{profile.include_text}:{profile.label}"
+    root = Path(profile.root).expanduser()
+    titles = codex_titles(root) if profile.kind == "codex" and profile.include_text else {}
     for path in selected:
         try:
             info = path.stat(follow_symlinks=False)
@@ -644,6 +688,8 @@ def scan_profile(
                 _CACHE[key] = (signature, value)
             if value:
                 result.append(dict(value))
+                if titles and value.get("native_id") in titles:
+                    result[-1]["name"] = titles[value["native_id"]]
             else:
                 coverage["unsupported_files"] += 1
         except (OSError, ValueError, TypeError, RecursionError):
