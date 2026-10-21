@@ -379,7 +379,7 @@ class ResumeAndResolveTests(unittest.TestCase):
         ):
             run = self.run_for(profile, f"{CLAUDE_ID}:agent:abc123", parent_run_id="p")
             self.assertEqual(focus.resolve(run, [profile]), live)
-            adapter.assert_called_once_with(111)
+            adapter.assert_called_once_with(111, [proc(111)])
             target = focus.resolve(self.run_for(profile, OTHER_ID), [profile])
             stopped_sub = self.run_for(profile, f"{OTHER_ID}:agent:abc123", parent_run_id="p")
             self.assertEqual(focus.resolve(stopped_sub, [profile]), focus.UNSUPPORTED)

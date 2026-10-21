@@ -114,6 +114,10 @@ class Collector(ThreadingHTTPServer):
             # A subagent can run inside its parent's process (Claude).
             owner = HARNESSES[kinds[profile_id]].owner(native)
             run["live"] = None if owners is None else owner in owners
+            # Unconfirmed whether the desktop app writes sessions/<pid>.json: never claim
+            # a desktop session closed from a missing record, only from a positive check.
+            if run["live"] is False and run.get("app"):
+                run["live"] = None
         # Every SSE client asks once a second; one aggregate per second is enough.
         now_second = int(time.time())
         if self._activity is None or self._activity[0] != now_second:

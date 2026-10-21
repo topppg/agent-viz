@@ -182,6 +182,8 @@ def scan_profile(
         except (OSError, ValueError, TypeError, RecursionError):
             coverage["read_errors"] += 1
             continue
+    if harness.enrich:
+        harness.enrich(profile, result)
     # Bound cache lifetime/memory when transcripts rotate; no raw content cached.
     for key in list(_CACHE):
         if key[0].startswith(profile.id + ":") and key not in active_keys:

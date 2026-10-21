@@ -121,6 +121,22 @@ opencode excerpts come only from non-synthetic `text` parts (at most 4,000
 characters each); reasoning parts, tool titles, inputs and outputs are never
 selected, and tool names appear only with text enabled.
 
+Sessions the **Claude desktop app** runs are ordinary Claude Code transcripts in
+the configured profile (`~/.claude` unless the app sets `CLAUDE_CONFIG_DIR`);
+an `entrypoint` starting with `claude-desktop` marks them `app: "Claude desktop"`.
+On macOS the app's own session records are joined on `cliSessionId`: only files
+named `local_<id>.json` exactly two folders below
+`~/Library/Application Support/Claude/claude-code-sessions/` (account, then
+organization) are opened, at most 5,000, each bounded to 64 KiB, regular files
+only, without following links, and re-read only when their size or mtime
+changes. Nothing else in the app's folder (cookies, tokens, other session or
+task files) is opened. From a record only `sessionId`, `cliSessionId`, `title`
+and `isArchived` are used: a joined session is marked desktop, an archived one
+gets `archived: true` and never counts as active, and the title names it when
+text is shown, after a `/rename` but before the generated `ai-title`. Without
+that folder, or for records without a `cliSessionId`, nothing is joined.
+Remote (cloud VM) and Cowork sessions are not observed.
+
 Claude subagents are named by the short description their parent gave them,
 read from the sibling `agent-<id>.meta.json` (bounded regular files only, symlinks not followed),
 and their goal is the first prompt the parent sent. Both are text, so a profile
@@ -231,6 +247,17 @@ look for the live process that owns it; SDK runs are never eligible.
   process without usable start-time metadata leaves liveness unknown; it cannot
   enable resume or establish that the session is closed. Subagents use their
   parent session's process.
+- **Claude desktop:** a live session marked desktop, or whose process chain runs
+  from `Claude.app` or the Claude Code build it bundles under
+  `~/Library/Application Support/Claude/claude-code/`, is opened in the app,
+  never through the bundled CLI's own `.app`. With a joined, unarchived record
+  the argv is `/usr/bin/open claude://code/continue?session=<local id>`, the id
+  matching the app's own `local_[A-Za-z0-9-]{1,64}` validator; otherwise
+  `/usr/bin/open -b com.anthropic.claudefordesktop` only brings the app forward.
+  `claude://resume?session=<id>` is deliberately not used: the app imports the
+  CLI session as a new desktop session rather than showing it. A closed desktop
+  session gets the ordinary CLI resume command, labelled as resuming in a
+  terminal.
 - **Codex:** the session's rollout transcript is located by native ID under the
   profile's `sessions/` and `archived_sessions/` trees, and `lsof -t` reports the
   Codex process holding it open. Archived transcripts are treated as stopped; a
@@ -317,6 +344,8 @@ registered kind and call only these fields:
 | `latest_request(session)`, `titles(root)` | Deep request search when the bounded read missed it; optional native-ID → title index. |
 | `live_sessions(root)`, `owner(native_id)` | Native IDs a live process owns (`None` when unknown) and the native ID whose process owns a (sub)agent. |
 | `session_pid(root, session_id)`, `resume(root, session_id)` | `(known, pid)` for focus and the resume command (or `None`); IDs always match `SESSION_ID` (letters, digits, `-`, `_`). |
+| `enrich(profile, rows)` | Optional: adjusts one scan's observations in place from metadata kept outside the transcripts (applied after the per-file cache, so it may change without the transcript changing). |
+| `open_app(session_id, app, chain)` | Optional: `(label, argv)` opening a live session in its own app, from the run's `app` marker and the owning process chain; `None` leaves it to the generic terminal/app adapter. |
 | `goal(session)`, `free_recaps` | Summary context (`Goal`: redacted title and recap, raw user/assistant messages that summaries filters and redacts) and whether a recap is itself a summary. |
 
 Build on `transcripts.py` (bounded no-follow readers, `walk_jsonl`, `safe`,

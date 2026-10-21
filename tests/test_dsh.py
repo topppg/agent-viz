@@ -363,7 +363,8 @@ class LivenessTests(unittest.TestCase):
             patch.object(focus, "adapter", return_value=focus.Target("focus", "DeepSeek")) as hit,
         ):
             self.assertEqual(focus.resolve(run, [profile]).kind, "focus")
-        hit.assert_called_once_with(501)
+        hit.assert_called_once()
+        self.assertEqual(hit.call_args.args[0], 501)
 
 
 @unittest.skipUnless(zstd_compress(b"x\n"), "no zstd encoder in this runtime")

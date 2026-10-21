@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..processes import Process
 from ..transcripts import Session
 
 if TYPE_CHECKING:
@@ -57,6 +58,11 @@ class Harness:
     goal: Callable[[Session], Goal]
     # True when a recorded recap can be shown as the summary with no provider call.
     free_recaps: bool = False
+    # Adjusts one scan's observations in place from metadata kept outside the transcripts.
+    enrich: Callable[[SourceProfile, list[dict]], None] | None = None
+    # (label, argv) opening a live session in its own app, from the native session ID, the
+    # run's ``app`` marker and the owning process chain; None leaves it to the generic adapter.
+    open_app: Callable[[str, str, list[Process]], tuple[str, tuple[str, ...]] | None] | None = None
 
 
 def shell_resume(env: str, root: Path, command: str, cwd: str) -> str:
