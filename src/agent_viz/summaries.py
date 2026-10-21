@@ -15,6 +15,7 @@ import math
 import os
 import re
 import sqlite3
+import stat
 import threading
 import time
 from collections.abc import Callable
@@ -193,9 +194,12 @@ def _codex_titles(profile: SourceProfile) -> dict[str, str]:
     path = Path(profile.root).expanduser().resolve() / "session_index.jsonl"
     titles: dict[str, str] = {}
     try:
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         with os.fdopen(os.open(path, flags), "rb") as stream:
-            stream.seek(max(0, os.fstat(stream.fileno()).st_size - 2_000_000))
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                return titles
+            stream.seek(max(0, info.st_size - 2_000_000))
             data = stream.read(2_000_000)
     except OSError:
         return titles

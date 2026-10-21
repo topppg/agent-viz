@@ -545,9 +545,14 @@ def _last_request(path: Path, kind: str) -> str:
     marker = b'"role":"user"' if kind == "codex" else b'"type":"user"'
     chunk = 1024 * 1024
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
         with os.fdopen(fd, "rb") as stream:
-            end = os.fstat(stream.fileno()).st_size
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                return ""
+            end = info.st_size
             floor, carry = max(0, end - REQUEST_SEARCH_BYTES), b""
             while end > floor:
                 start = max(floor, end - chunk)
@@ -575,8 +580,12 @@ def _subagent_description(path: Path) -> str:
     """The short description the parent gave a Claude subagent, from agent-<id>.meta.json."""
     meta = path.with_name(path.stem + ".meta.json")
     try:
-        fd = os.open(meta, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(
+            meta, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
         with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                return ""
             data = stream.read(65_537)
         if len(data) > 65_536:
             return ""

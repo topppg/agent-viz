@@ -1,13 +1,26 @@
 import json
+import os
+import stat
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from datetime import UTC
 from pathlib import Path
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock, patch
 
 from agent_viz.sources import SourceProfile
-from agent_viz.summaries import MODEL, Summarizer, _clean, _goal, _goal_text, _request
+from agent_viz.summaries import (
+    MODEL,
+    Summarizer,
+    _clean,
+    _codex_titles,
+    _goal,
+    _goal_text,
+    _request,
+)
 
 
 class SummariesTests(unittest.TestCase):
@@ -63,6 +76,68 @@ class SummariesTests(unittest.TestCase):
 
     def age_calls(self, instance):
         instance.db.execute("UPDATE calls SET started=?", (time.time() - 125,))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "Requires named pipes")
+    def test_codex_title_reader_does_not_block_on_fifo(self):
+        path = self.root / "session_index.jsonl"
+        os.mkfifo(path)
+        code = (
+            "import sys; from agent_viz.sources import SourceProfile; "
+            "from agent_viz.summaries import _codex_titles; "
+            "assert _codex_titles(SourceProfile('one', 'codex', 'Test', sys.argv[1])) == {}"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(self.root)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        writer = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+        try:
+            os.write(writer, b'{"id":"synthetic","thread_name":"Pipe title"}\n')
+            result = subprocess.run(
+                [sys.executable, "-c", code, str(self.root)],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+        finally:
+            os.close(writer)
+
+    def test_codex_title_reader_checks_descriptor_type_before_reading(self):
+        profile = SourceProfile("one", "codex", "Test", str(self.root))
+        stream = MagicMock()
+        stream.read.side_effect = AssertionError("Non-regular file must not be read")
+        stream.seek.side_effect = AssertionError("Non-regular file must not be sought")
+        opened = MagicMock()
+        opened.__enter__.return_value = stream
+        with (
+            patch("agent_viz.summaries.os.open", return_value=123) as open_file,
+            patch("agent_viz.summaries.os.fdopen", return_value=opened),
+            patch(
+                "agent_viz.summaries.os.fstat",
+                return_value=SimpleNamespace(st_mode=stat.S_IFIFO, st_size=100),
+            ),
+        ):
+            self.assertEqual(_codex_titles(profile), {})
+        self.assertTrue(open_file.call_args.args[1] & os.O_NONBLOCK)
+        stream.read.assert_not_called()
+        stream.seek.assert_not_called()
+
+    def test_codex_title_reader_rejects_directories_and_symlinks(self):
+        profile = SourceProfile("one", "codex", "Test", str(self.root))
+        path = self.root / "session_index.jsonl"
+        path.mkdir()
+        self.assertEqual(_codex_titles(profile), {})
+        path.rmdir()
+        target = self.root / "target.jsonl"
+        target.write_text('{"id":"synthetic","thread_name":"Linked title"}\n')
+        path.symlink_to(target)
+        self.assertEqual(_codex_titles(profile), {})
 
     def test_success_actual_cost_and_opaque_ids(self):
         instance = self.summarizer()

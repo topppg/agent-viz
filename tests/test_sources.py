@@ -1,9 +1,13 @@
 import json
 import os
+import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from agent_viz import sources as sources_module
 from agent_viz.monitor import Monitor
@@ -279,6 +283,98 @@ class SourcesTests(unittest.TestCase):
         (self.root / "elsewhere.json").write_text(json.dumps({"description": "Followed a link"}))
         path.write_text(path.read_text() + "\n")
         self.assertTrue(scan_profile(profile)[0]["name"].startswith("Claude subagent"))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "Requires named pipes")
+    def test_metadata_readers_do_not_block_on_fifo(self):
+        for reader, filename in [
+            ("_subagent_description", "agent-synthetic.meta.json"),
+            ("_last_request", "request.jsonl"),
+        ]:
+            with self.subTest(reader=reader):
+                path = self.root / filename
+                os.mkfifo(path)
+                code = (
+                    "from pathlib import Path; import sys; "
+                    f"from agent_viz.sources import {reader}; "
+                    "path = Path(sys.argv[1]); "
+                    + (
+                        "assert _subagent_description("
+                        "path.with_name(path.name.replace('.meta.json', '.jsonl'))) == ''"
+                        if reader == "_subagent_description"
+                        else "assert _last_request(path, 'claude') == ''"
+                    )
+                )
+                # A separate process bounds both a blocking open and a blocking read.
+                result = subprocess.run(
+                    [sys.executable, "-c", code, str(path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                writer = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+                try:
+                    os.write(writer, b'{"description":"Pipe content"}\n')
+                    result = subprocess.run(
+                        [sys.executable, "-c", code, str(path)],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                finally:
+                    os.close(writer)
+
+    def test_metadata_readers_check_descriptor_type_before_reading(self):
+        for reader, args in [
+            (sources_module._subagent_description, (self.root / "agent-synthetic.jsonl",)),
+            (sources_module._last_request, (self.root / "request.jsonl", "claude")),
+        ]:
+            with self.subTest(reader=reader.__name__):
+                stream = MagicMock()
+                stream.read.side_effect = AssertionError("Non-regular file must not be read")
+                stream.seek.side_effect = AssertionError("Non-regular file must not be sought")
+                opened = MagicMock()
+                opened.__enter__.return_value = stream
+                with (
+                    patch("agent_viz.sources.os.open", return_value=123) as open_file,
+                    patch("agent_viz.sources.os.fdopen", return_value=opened),
+                    patch(
+                        "agent_viz.sources.os.fstat",
+                        return_value=SimpleNamespace(st_mode=stat.S_IFIFO, st_size=100),
+                    ),
+                ):
+                    self.assertEqual(reader(*args), "")
+                self.assertTrue(open_file.call_args.args[1] & os.O_NONBLOCK)
+                stream.read.assert_not_called()
+                stream.seek.assert_not_called()
+
+    def test_subagent_metadata_regular_file_size_and_type_boundaries(self):
+        path = self.root / "agent-synthetic.jsonl"
+        meta = path.with_suffix(".meta.json")
+        meta.write_text(json.dumps({"description": "Valid description"}))
+        self.assertEqual(sources_module._subagent_description(path), "Valid description")
+        meta.write_bytes(b" " * 65_537)
+        self.assertEqual(sources_module._subagent_description(path), "")
+        meta.unlink()
+        meta.mkdir()
+        self.assertEqual(sources_module._subagent_description(path), "")
+        meta.rmdir()
+        target = self.root / "target.json"
+        target.write_text(json.dumps({"description": "Linked description"}))
+        meta.symlink_to(target)
+        self.assertEqual(sources_module._subagent_description(path), "")
+
+    def test_last_request_rejects_directories_and_symlinks(self):
+        target = self.root / "request.jsonl"
+        target.write_text(json.dumps({"type": "user", "message": {"content": "Valid"}}) + "\n")
+        self.assertEqual(sources_module._last_request(target, "claude"), "Valid")
+        link = self.root / "linked.jsonl"
+        link.symlink_to(target)
+        self.assertEqual(sources_module._last_request(link, "claude"), "")
+        self.assertEqual(sources_module._last_request(self.root, "claude"), "")
 
     def test_idle_activity_is_the_last_reply(self):
         claude = self.profile("claude", "claude-reply", text=True)
