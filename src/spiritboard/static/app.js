@@ -437,12 +437,12 @@
     main.append(fields);
     const side = node("aside", null, "detail-side"); side.setAttribute("aria-label", "Session");
     const facts = node("dl", null, "side-facts");
-    const fact = (title, ...content) => { const dd = node("dd"); dd.append(...content); facts.append(node("dt", title), dd); };
+    const fact = (title, ...content) => { const dd = node("dd"); dd.append(...content); facts.append(node("dt", title), dd); return dd; };
     const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(harness.key);
     fact("harness", swatch, harness.label);
     if (run.project) fact("project", run.project);
     fact(terminal.has(run.state) || status.key === "closed" ? "ran for" : "running for", age(run.started_at, time(run.ended_at) || serverNow()));
-    fact("last seen", seenText(run.last_seen));
+    fact("last seen", seenText(run.last_seen)).dataset.seen = run.last_seen || "";
     const actions = node("div", null, "detail-actions");
     actions.append(...targetControls(run));
     const links = node("div", null, "side-links");
