@@ -512,6 +512,30 @@ class SourcesTests(unittest.TestCase):
             self.assertEqual(scan_profile(profile)[0]["task"], "Deep request")
         self.assertEqual(search.call_count, 1)
 
+    def test_native_titles_name_sessions_without_summaries(self):
+        claude = self.profile("claude", "claude-titled", text=True)
+        rows = self.claude() + [
+            {"type": "ai-title", "aiTitle": "Generated title", "sessionId": "same"},
+            {"type": "custom-title", "customTitle": "My rename", "sessionId": "same"},
+            {"type": "ai-title", "aiTitle": "Later generated title", "sessionId": "same"},
+        ]
+        self.log(claude, "p/session.jsonl", rows)
+        self.assertEqual(scan_profile(claude)[0]["name"], "My rename")
+        hidden = SourceProfile(
+            claude.id + "-h", "claude", "Hidden", claude.root, include_text=False
+        )
+        self.assertNotEqual(scan_profile(hidden)[0]["name"], "My rename")
+        codex = self.profile("codex", "codex-titled", text=True)
+        self.log(codex, "run.jsonl", self.codex("thread-1"))
+        index = Path(codex.root) / "session_index.jsonl"
+        index.write_text(json.dumps({"id": "thread-1", "thread_name": "Fix retries"}) + "\n")
+        self.assertEqual(scan_profile(codex)[0]["name"], "Fix retries")
+        index.write_text(
+            json.dumps({"id": "thread-1", "thread_name": "Fix retries for good"}) + "\n"
+        )
+        os.utime(index, (1, 1))
+        self.assertEqual(scan_profile(codex)[0]["name"], "Fix retries for good")
+
     def test_malformed_partial_tails_and_symlink_skipped(self):
         profile = self.profile()
         self.log(profile, "good.jsonl", self.codex(), b'{bad}\n{"type":"event_msg"')

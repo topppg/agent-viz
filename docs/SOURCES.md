@@ -87,6 +87,11 @@ information, are not redacted, and become part of local dashboard storage. Tool 
 these adapters. Turning text off prevents future capture; it does not erase
 existing local history.
 
+Sessions are named by their own titles when text is shown: a Claude `/rename`
+(`custom-title`), else Claude's generated `ai-title`, and the Codex thread name
+from the profile's `session_index.jsonl` (cached by size and mtime). This needs
+no summaries and makes no provider call.
+
 Claude subagents are named by the short description their parent gave them,
 read from the sibling `agent-<id>.meta.json` (bounded regular files only, symlinks not followed),
 and their goal is the first prompt the parent sent. Both are text, so a profile
