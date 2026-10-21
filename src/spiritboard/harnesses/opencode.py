@@ -21,9 +21,9 @@ from ..transcripts import (
     ns,
     observation,
     redact,
+    reply_text,
     request_text,
     safe,
-    text,
     valid_cwd,
 )
 from .harness import Goal, Harness, shell_resume
@@ -290,7 +290,7 @@ def observe(profile: SourceProfile, session: Session) -> dict | None:
         for message in messages:
             if message[1] == "user":
                 break
-            reply = reply or text(_body(parts.get(message[0], [])))
+            reply = reply or reply_text(_body(parts.get(message[0], [])))
     if active:
         tool = safe(active[-1], 40) if profile.include_text else ""
         state, evidence = "working", "tool part running"

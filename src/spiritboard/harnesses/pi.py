@@ -22,9 +22,9 @@ from ..transcripts import (
     observation,
     records,
     redact,
+    reply_text,
     request_text,
     safe,
-    text,
     utc_time,
     valid_cwd,
     walk_jsonl,
@@ -112,7 +112,7 @@ def _message(entry: dict) -> dict:
 
 def _reply(message: dict) -> str:
     # Only text blocks: thinking and tool calls never become a reply.
-    return text(message.get("content")) if message.get("role") == "assistant" else ""
+    return reply_text(message.get("content")) if message.get("role") == "assistant" else ""
 
 
 def _title(rows: list[dict], clean: Callable[[object, int], str]) -> str:

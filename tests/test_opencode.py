@@ -152,6 +152,14 @@ class OpencodeTests(unittest.TestCase):
         sessions, _ = opencode.inventory(self.root, 50)
         return {s.key: opencode.observe(self.profile(text), s) for s in sessions}
 
+    def test_markup_is_not_a_reply(self):
+        self.db.session("ses_markup0001", at=40)
+        self.db.message("ses_markup0001", "user", 41, [text_part("Draft the page")])
+        self.db.message("ses_markup0001", "assistant", 42, [text_part("Writing the page")])
+        self.db.message("ses_markup0001", "assistant", 43, [text_part("<!doctype html>")])
+        self.db.commit()
+        self.assertEqual(self.observed()["ses_markup0001"]["activity"], "Writing the page")
+
     def test_inventory_excludes_archived_sessions_and_keys_rows_by_session(self):
         sessions, coverage = opencode.inventory(self.root, 50)
         self.assertEqual(

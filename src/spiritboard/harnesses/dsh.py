@@ -20,18 +20,20 @@ from ..transcripts import (
     HEAD_BYTES,
     MAX_ENTRIES,
     READ_FLAGS,
+    READ_GAP,
     REQUEST_SEARCH_BYTES,
     TAIL_BYTES,
+    TEXT_HIDDEN,
     Session,
     mtime_iso,
     native_id,
     ns,
     observation,
     redact,
+    reply_text,
     request_text,
     safe,
     small_json,
-    text,
     utc_time,
     valid_cwd,
 )
@@ -180,9 +182,11 @@ def records(path: Path) -> list[dict] | None:
     if total <= HEAD_BYTES + TAIL_BYTES:
         return _parse_lines(bytes(head + tail))
     # Drop incomplete boundaries, not just malformed JSON fragments.
-    return _parse_lines(bytes(head).rsplit(b"\n", 1)[0] + b"\n") + _parse_lines(
-        bytes(tail).split(b"\n", 1)[-1]
-    )
+    return [
+        *_parse_lines(bytes(head).rsplit(b"\n", 1)[0] + b"\n"),
+        {"type": READ_GAP},
+        *_parse_lines(bytes(tail).split(b"\n", 1)[-1]),
+    ]
 
 
 def home_roots(home: Path) -> list[tuple[str, Path]]:
@@ -335,6 +339,13 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
         if stamp and (out["last_seen"] is None or stamp > out["last_seen"]):
             out["last_seen"] = stamp
         kind, data = row.get("type"), _data(row)
+        if kind == READ_GAP:
+            # The header's request and reply predate the unread middle; the scan searches back.
+            # A subagent keeps its first prompt, which is the task its parent gave it.
+            last_reply = ""
+            if not agent:
+                out["task"] = TEXT_HIDDEN
+            continue
         state, activity, evidence = None, None, str(kind)
         if kind == "turn/start":
             state, activity = "working", "Turn started"
@@ -359,7 +370,7 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
         elif kind == "assistant/message":
             content = _content(row)
             if profile.include_text:
-                last_reply = text(content) or last_reply
+                last_reply = reply_text(content) or last_reply
             if any(isinstance(x, dict) and x.get("type") == "tool-call" for x in content):
                 state, activity = "waiting_tool", last_reply or "Tool call recorded"
             else:
