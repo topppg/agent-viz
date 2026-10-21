@@ -67,6 +67,7 @@ class CodexConnection:
         self._record: dict = {}
         self._pending: dict | None = None
         self._error: str | None = None
+        self._revocation_unconfirmed = False
         self._closed = False
         self._validated = False
         self._discovery: dict = {}
@@ -97,6 +98,7 @@ class CodexConnection:
                 "connected": bool(self._record.get("access_token")) and not self._closed,
                 "pending": pending,
                 "error": self._error,
+                "revocation_unconfirmed": self._revocation_unconfirmed,
                 "model": MODEL,
                 "effort": EFFORT,
             }
@@ -235,6 +237,7 @@ class CodexConnection:
                     self._save_record(record)
                     self._record = record
                     self._validated = True
+                    self._revocation_unconfirmed = False
                     self._error = None
             except (
                 OSError,
@@ -337,9 +340,13 @@ class CodexConnection:
                     generation,
                     empty=True,
                 )
+                with self._lock:
+                    if generation == self._generation:
+                        self._revocation_unconfirmed = False
             except (OSError, ValueError, TypeError, http.client.HTTPException):
                 with self._lock:
                     if generation == self._generation:
+                        self._revocation_unconfirmed = True
                         self._error = (
                             "Signed out locally. Remote revocation was not confirmed; "
                             "disconnect Spiritboard in ChatGPT settings."

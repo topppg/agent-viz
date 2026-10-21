@@ -358,8 +358,16 @@ class CodexConnectionTests(unittest.TestCase):
         self.assertIn(
             "Remote revocation was not confirmed", self.connection.public_state()["error"]
         )
+        self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
         self.assertNotIn("synthetic-secret", json.dumps(self.connection.public_state()))
         self.assertNotIn("access_token", self.connection._path.read_text())
+        self.connection.disconnect()
+        self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
+        self.login()
+        self.assertFalse(self.connection.public_state()["revocation_unconfirmed"])
+        with patch.object(self.connection, "_json", side_effect=self.network):
+            self.connection.disconnect()
+        self.assertFalse(self.connection.public_state()["revocation_unconfirmed"])
 
     def test_disconnect_during_exchange_prevents_late_credentials(self):
         self.connection.begin_login(CALLBACK)
