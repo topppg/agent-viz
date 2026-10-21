@@ -194,3 +194,7 @@ This is an observer, not an agent framework, task scheduler or remote control.
 It never kills, steers or approves actions; opening a session's app only brings
 an existing window forward. A clear board must never hide lost events or claim
 that an unresponsive agent has failed.
+
+## License
+
+[MIT](LICENSE).
