@@ -14,7 +14,7 @@ waiting for you or gone, and a button that takes you straight to it.
 It only reads what the agents already write to disk. It never starts, steers or
 stops an agent, and nothing leaves your machine unless you turn on summaries.
 
-![Spiritboard showing sixteen agents across Claude Code, Codex, opencode and Pi](docs/dashboard.png)
+![Spiritboard showing sixteen agents across Claude Code, Codex, opencode and Pi](https://raw.githubusercontent.com/topppg/spiritboard/9e586f4e56a640c59285907a56e8fe4ab7c42975/docs/dashboard.png)
 
 <sub>Synthetic data: invented sessions, projects and activity.</sub>
 
@@ -36,7 +36,7 @@ desktop marker, Pi and DeepSeek Harness are built from each app's own code and
 documentation and covered by tests, but have seen little or no real data yet.
 Grok Bot is read from the app's local cache, whose undocumented format was observed
 on one machine and may change; unrecognized versions are skipped with a warning.
-New harnesses plug in as one module each (see [the source guide](docs/SOURCES.md#adding-a-harness)).
+New harnesses plug in as one module each (see [the source guide](https://github.com/topppg/spiritboard/blob/main/docs/SOURCES.md#adding-a-harness)).
 
 ## What you see
 
@@ -68,7 +68,7 @@ New harnesses plug in as one module each (see [the source guide](docs/SOURCES.md
   iTerm2, Terminal, VS Code, the ChatGPT, Claude or DeepSeek Harness app), or copy a
   resume command when it is closed.
 
-![An open session with its summary, latest request and an open in Ghostty button beside the title](docs/session-open.png)
+![An open session with its summary, latest request and an open in Ghostty button beside the title](https://raw.githubusercontent.com/topppg/spiritboard/9e586f4e56a640c59285907a56e8fe4ab7c42975/docs/session-open.png)
 
 <sub>Synthetic data: invented sessions, projects and activity.</sub>
 
@@ -90,6 +90,27 @@ Spiritboard from anywhere. No repo checkout or API key is needed; uv manages
 the isolated Python environment (Python 3.12+), including the small JWT and
 cryptography dependencies used to verify ChatGPT sign-in, plus `keyring` for
 your system's credential store.
+
+### Versioned releases
+
+Check [PyPI](https://pypi.org/project/spiritboard/#history) for available versions.
+To run a published release:
+
+```sh
+uvx spiritboard
+```
+
+Or install a permanent command:
+
+```sh
+uv tool install spiritboard
+spiritboard
+```
+
+For a specific release, use `uvx spiritboard@0.1.0`. Try synthetic sessions with
+`uvx spiritboard --demo`. If no release is listed yet, use the GitHub preview below.
+
+### GitHub development preview
 
 See your own agents. Supported Codex, Claude, opencode, Pi, DeepSeek Harness and Grok Bot storage
 is discovered automatically, without opening authentication files or tables:
@@ -119,8 +140,9 @@ uv tool install git+https://github.com/topppg/spiritboard.git@main
 spiritboard
 ```
 
-A PyPI release is not published yet; do not substitute `uvx spiritboard` until it is. See the
-[distribution guide](docs/DISTRIBUTION.md) for upgrades, removal and publishing.
+The GitHub `main` branch is a development channel, not a fixed release. See the
+[distribution guide](https://github.com/topppg/spiritboard/blob/main/docs/DISTRIBUTION.md)
+for upgrades, removal and publishing.
 
 ## Sources and privacy
 
@@ -158,7 +180,7 @@ A PyPI release is not published yet; do not substitute `uvx spiritboard` until i
   marked closed when the relevant check can run. Grok Bot agents run in the cloud,
   so their liveness is unknown.
 
-What is read, and the bounds on it, are in the [source guide](docs/SOURCES.md).
+What is read, and the bounds on it, are in the [source guide](https://github.com/topppg/spiritboard/blob/main/docs/SOURCES.md).
 
 ## Open a session in its app
 
@@ -200,7 +222,7 @@ API-key connections use separate API billing; ChatGPT sign-in uses your plan
 allowance and its limits. The header separates known API charges, API calls
 with unknown cost, and ChatGPT plan calls rather than treating usage as free.
 Excerpts are redacted on a best-effort basis,
-not guaranteed safe for confidential work. Read the [summary guide](docs/SUMMARIES.md).
+not guaranteed safe for confidential work. Read the [summary guide](https://github.com/topppg/spiritboard/blob/main/docs/SUMMARIES.md).
 
 For a terminal-only setup, `spiritboard --summaries` accepts
 `OPENROUTER_API_KEY` or `--openrouter-key-file /absolute/path/to/private.env`.
@@ -285,11 +307,13 @@ node --check src/spiritboard/static/app.js
 
 Node is optional for the Python tests but runs the browser DOM test; check for
 skips before relying on that coverage. Contribution rules, including worktrees
-and one change per PR, are in [AGENTS.md](AGENTS.md).
+and one change per PR, are in [AGENTS.md](https://github.com/topppg/spiritboard/blob/main/AGENTS.md).
 
-More detail: [sources](docs/SOURCES.md), [summaries](docs/SUMMARIES.md),
-[historical validation record](docs/VALIDATION.md), [archived functional plan](docs/FUNCTIONAL_SPEC.md)
-and [reference projects](docs/REFERENCES.md). The `references/` folder holds
+More detail: [sources](https://github.com/topppg/spiritboard/blob/main/docs/SOURCES.md),
+[summaries](https://github.com/topppg/spiritboard/blob/main/docs/SUMMARIES.md),
+[historical validation record](https://github.com/topppg/spiritboard/blob/main/docs/VALIDATION.md),
+[archived functional plan](https://github.com/topppg/spiritboard/blob/main/docs/FUNCTIONAL_SPEC.md)
+and [reference projects](https://github.com/topppg/spiritboard/blob/main/docs/REFERENCES.md). The `references/` folder holds
 shallow research checkouts of other projects, excluded from Git history and never
 installed, executed or copied.
 
@@ -318,6 +342,6 @@ that an unresponsive agent has failed.
 
 ## License
 
-[MIT](LICENSE). The bundled Space Grotesk and Space Mono fonts are under the
+[MIT](https://github.com/topppg/spiritboard/blob/main/LICENSE). The bundled Space Grotesk and Space Mono fonts are under the
 SIL Open Font License 1.1; their licences ship next to them in
 `src/spiritboard/static/fonts/`.

@@ -132,10 +132,38 @@ identity token; the build and test jobs do not have that permission. See the off
 4. Inspect that run and its artifacts. When ready to upload, manually run the same workflow
    against the reviewed `main` commit with **publish** checked. Ensure `main` has not advanced
    since review. Approve the `pypi` deployment only after inspecting that run's source and outputs.
-5. Verify the resulting PyPI project, version, README, and installation in a clean environment.
-   Only then update public installation instructions and announce the release.
+5. The publishing job rejects an existing `vVERSION` tag that resolves to another commit,
+   including annotated tags, or conflicting existing GitHub release metadata or assets.
+   After PyPI accepts the upload, a separate GitHub release job checks
+   PyPI's SHA-256 receipts against both files from that run's validated build artifact. It then
+   creates `vVERSION` at the run's exact `main` commit SHA, not the latest moving `main` branch,
+   and a matching GitHub Release. The release links PyPI and the source commit and attaches the
+   same wheel, source archive, and a `SHA256SUMS` file. Existing tags and assets are never moved
+   or overwritten.
+6. Verify the resulting PyPI project, version, README, GitHub tag/release, and installation in
+   a clean environment. Only then update public installation instructions and announce the release.
 
 The workflow is manual-only, refuses non-`main` refs, and checks the requested version against
 both package and source metadata. Pushes, pull requests, tags, and GitHub release events do not
 publish packages. Uploads are permanent versioned releases; fixing a bad release normally means
 shipping a new version rather than overwriting it.
+
+Public versions currently use `X.Y.Z` (for example, `0.1.0`). Every successful public release is
+paired with its matching `vX.Y.Z` GitHub tag and release; a dry run never creates either. Only
+the PyPI job has identity-token permission. Only the separate GitHub release job has repository
+write permission; it cannot upload to PyPI.
+
+### Recovering a partial release
+
+PyPI and GitHub are separate services, so this is not an atomic transaction: PyPI can succeed
+while GitHub pairing fails. The workflow then fails and reports the partial release. Do not
+announce completion until both sides have been verified.
+
+If publishing succeeded but the GitHub job failed, inspect its error and select **Re-run failed
+jobs** on the same run, within the build artifact's seven-day retention period. Do not start
+another publishing run, rerun all jobs, republish the version, move a tag, or delete existing
+assets. The pairing job checks PyPI again, verifies any existing release assets byte-for-byte,
+and uploads only missing assets. A conflicting tag, release, or file is an error requiring
+inspection, not permission to overwrite it. If the run's validated artifact has expired, stop
+and recover the exact original files with independent hash verification before any manual
+recovery; rebuilding the same version is not a substitute for the original artifact.
