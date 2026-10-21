@@ -18,6 +18,56 @@ stops an agent, and nothing leaves your machine unless you turn on summaries.
 
 <sub>Synthetic data: invented sessions, projects and activity.</sub>
 
+## Quick start
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
+
+```sh
+uvx spiritboard
+```
+
+This runs the published [PyPI package](https://pypi.org/project/spiritboard/) and opens
+your local dashboard in the browser. No repo checkout or API key is needed. Supported
+Codex, Claude, opencode, Pi, DeepSeek Harness and Grok Bot storage is discovered
+automatically, without opening authentication files or tables.
+
+Leave the terminal running. Ctrl-C stops only Spiritboard, never an agent. Running
+the same command again reopens the existing board instead of starting a second
+collector. The terminal prints the local URL; if port 8766 is busy, a free port is chosen.
+
+Want to look around before reading your own sessions? Use the synthetic demo:
+
+```sh
+uvx spiritboard --demo
+```
+
+The demo has separate local history and never discovers real profiles or calls a
+model. Add `--no-open` to either command to print the URL without launching a browser.
+AI summaries are optional and stay off unless you enable them.
+
+For a permanent command:
+
+```sh
+uv tool install spiritboard
+spiritboard
+```
+
+Python 3.12+ is required; uv manages the isolated environment and installs the needed
+dependencies. Pin a release with `uvx spiritboard@0.1.0`. Each release has a matching
+[GitHub tag and release](https://github.com/topppg/spiritboard/releases).
+
+### GitHub development preview
+
+To try unreleased changes instead of the PyPI release:
+
+```sh
+uvx --from git+https://github.com/topppg/spiritboard.git@main spiritboard
+```
+
+The moving `main` branch is a development channel, not a fixed release. See the
+[distribution guide](https://github.com/topppg/spiritboard/blob/main/docs/DISTRIBUTION.md)
+for upgrades, removal and publishing.
+
 ## Supported harnesses
 
 | Harness | Reads | Live or closed | Open | Resume |
@@ -82,67 +132,6 @@ bar to see the board as it was at that moment, rebuilt from the recorded
 events; `L`, "back to live" or the newest bar returns to now. Liveness was
 never recorded, so the past board never calls a session closed, and its open
 and resume buttons are off.
-
-## Quick start
-
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run
-Spiritboard from anywhere. No repo checkout or API key is needed; uv manages
-the isolated Python environment (Python 3.12+), including the small JWT and
-cryptography dependencies used to verify ChatGPT sign-in, plus `keyring` for
-your system's credential store.
-
-### Versioned releases
-
-Check [PyPI](https://pypi.org/project/spiritboard/#history) for available versions.
-To run a published release:
-
-```sh
-uvx spiritboard
-```
-
-Or install a permanent command:
-
-```sh
-uv tool install spiritboard
-spiritboard
-```
-
-For a specific release, use `uvx spiritboard@0.1.0`. Try synthetic sessions with
-`uvx spiritboard --demo`. If no release is listed yet, use the GitHub preview below.
-
-### GitHub development preview
-
-See your own agents. Supported Codex, Claude, opencode, Pi, DeepSeek Harness and Grok Bot storage
-is discovered automatically, without opening authentication files or tables:
-
-```sh
-uvx --from git+https://github.com/topppg/spiritboard.git@main spiritboard
-```
-
-Your browser opens automatically. The terminal prints the loopback-only URL;
-if port 8766 is busy, a free port is chosen. Leave that terminal running.
-Ctrl-C stops only Spiritboard, never an agent. Running the same command again
-reopens the existing board instead of starting a second collector.
-
-Or try an invented scenario with no real agents, tools or models:
-
-```sh
-uvx --from git+https://github.com/topppg/spiritboard.git@main spiritboard --demo
-```
-
-The demo has separate local history and never discovers real profiles or calls
-a model. Add `--no-open` to print the URL without launching a browser.
-
-For a permanent command:
-
-```sh
-uv tool install git+https://github.com/topppg/spiritboard.git@main
-spiritboard
-```
-
-The GitHub `main` branch is a development channel, not a fixed release. See the
-[distribution guide](https://github.com/topppg/spiritboard/blob/main/docs/DISTRIBUTION.md)
-for upgrades, removal and publishing.
 
 ## Sources and privacy
 
