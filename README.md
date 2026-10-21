@@ -45,6 +45,16 @@ The demo has separate local history and never discovers real profiles or calls a
 model. Add `--no-open` to either command to print the URL without launching a browser.
 AI summaries are optional and stay off unless you enable them.
 
+<details>
+<summary>Watch a 10-second tour: attention filters, subagents and task search</summary>
+
+![A synthetic Spiritboard demo filtering agents that need attention, opening a subagent's details, and searching tasks](https://raw.githubusercontent.com/topppg/spiritboard/820e9a80d6f03ad10729e23fc24a5cd91910c93e/docs/media/demo.gif)
+
+Invented SDK sessions only: no real profiles, tools, credentials or model calls.
+This is an interaction demo, not a performance measurement.
+
+</details>
+
 For a permanent command:
 
 ```sh
@@ -132,6 +142,31 @@ bar to see the board as it was at that moment, rebuilt from the recorded
 events; `L`, "back to live" or the newest bar returns to now. Liveness was
 never recorded, so the past board never calls a session closed, and its open
 and resume buttons are off.
+
+## How it works
+
+![Local harness files and optional SDK events feed a local collector and SQLite history, which serve the browser over loopback. Only explicitly enabled summaries contact an external provider.](https://raw.githubusercontent.com/topppg/spiritboard/820e9a80d6f03ad10729e23fc24a5cd91910c93e/docs/architecture.svg)
+
+The collector reads supported harness files without changing them and keeps its
+own local history. Your browser connects to that collector on your machine.
+Summary providers receive selected context only after you connect and enable them;
+the dashboard and synthetic demo work without one.
+
+### Measured local baseline
+
+Spiritboard 0.1.0, Apple M4 Pro, Python 3.13.11; seven fresh collector launches
+with synthetic demo data and native discovery disabled, measured October 21, 2026:
+
+| Collector-only metric | Median across seven launches |
+| --- | ---: |
+| Process start to healthy local endpoint | ~76 ms |
+| Observed resident memory (RAM) after startup | ~34 MiB |
+
+These figures exclude first-time installation/downloads, browser memory and rendering,
+native-profile scanning, and model calls. System file caches were not cleared; RAM is
+observed usage, not peak memory or a long-running guarantee. Real workloads will differ.
+See the [method, ranges and individual samples](https://github.com/topppg/spiritboard/blob/820e9a80d6f03ad10729e23fc24a5cd91910c93e/docs/BENCHMARKS.md)
+and rerun `uv run python scripts/benchmark_startup.py --samples 7` from a checkout.
 
 ## Sources and privacy
 
@@ -323,6 +358,9 @@ Next: more harnesses and framework adapters, exact tab focus for Ghostty once a
 released version exposes it, and a longer scripted demo scenario for recording.
 
 ## Boundaries
+
+Spiritboard is an independent, unofficial project. It is not affiliated with or
+endorsed by Anthropic (Claude), OpenAI (Codex), or the makers of the other tools it reads.
 
 This is an observer, not an agent framework, task scheduler or remote control.
 It never kills, steers or approves actions; opening a session's app only brings
