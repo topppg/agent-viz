@@ -13,6 +13,11 @@ from pathlib import Path
 from .harnesses import HARNESSES
 from .model import STATES, TERMINAL, canonical, now, text, timestamp, validate_event
 
+# Native observations are journaled when a scan sees a change; time them by transcript
+# time so a startup scan of old files is not a fake burst.
+EVENT_TIME = """CASE WHEN producer_id LIKE 'observation:%'
+    THEN json_extract(data, '$.occurred_at') ELSE received_at END"""
+
 
 class Store:
     def __init__(self, path: str | Path = ":memory:", stale_after: float = 15):
@@ -321,53 +326,106 @@ class Store:
         with self.lock:
             return self._get(run_id)
 
+    def _public(self, rows: list[dict], current: float, started_at: float, limit: int) -> dict:
+        rows.sort(key=lambda r: r.get("last_seen", ""), reverse=True)
+        for run in rows:
+            seen = timestamp(run["last_seen"])
+            if run["mode"] == "observation":
+                run["health"] = "observed" if current - seen <= 60 else "stale"
+            elif run["state"] in TERMINAL:
+                run["health"] = "unknown"
+            elif seen < started_at:
+                run["health"] = "unknown"
+            else:
+                run["health"] = "fresh" if current - seen <= self.stale_after else "stale"
+            for private in ("producer_id", "last_sequence", "native_id"):
+                run.pop(private, None)
+        cursor = self.db.execute("SELECT COALESCE(MAX(cursor),0) FROM events").fetchone()[0]
+        return {
+            "cursor": cursor,
+            "stream_id": self.stream_id,
+            "runs": rows[:limit],
+            "truncated": len(rows) > limit,
+            "total_runs": len(rows),
+            "server_time": datetime.fromtimestamp(current, UTC).isoformat(),
+        }
+
     def snapshot(self, limit: int = 500) -> dict:
         with self.lock:
             rows = [json.loads(r[0]) for r in self.db.execute("SELECT data FROM runs")]
-            rows.sort(key=lambda r: r.get("last_seen", ""), reverse=True)
-            current = time.time()
-            for run in rows:
-                seen = timestamp(run["last_seen"])
-                if run["mode"] == "observation":
-                    run["health"] = "observed" if current - seen <= 60 else "stale"
-                elif run["state"] in TERMINAL:
-                    run["health"] = "unknown"
-                elif seen < self.started_at:
-                    run["health"] = "unknown"
-                else:
-                    run["health"] = "fresh" if current - seen <= self.stale_after else "stale"
-                for private in ("producer_id", "last_sequence", "native_id"):
-                    run.pop(private, None)
-            cursor = self.db.execute("SELECT COALESCE(MAX(cursor),0) FROM events").fetchone()[0]
-            return {
-                "cursor": cursor,
-                "stream_id": self.stream_id,
-                "runs": rows[:limit],
-                "truncated": len(rows) > limit,
-                "total_runs": len(rows),
-                "server_time": now(),
-            }
+            return self._public(rows, time.time(), self.started_at, limit)
 
-    def activity(self, window: int = 600, bucket: int = 10) -> dict:
-        """Per-run event counts in fixed buckets, oldest first, ending now."""
+    def snapshot_at(self, at: float, limit: int = 500) -> dict:
+        """The board as journaled at `at`; liveness and archiving were never recorded."""
+        at_iso = datetime.fromtimestamp(at, UTC).isoformat()
+        # Observation runs need only their newest event; SDK runs replay every applied one.
+        query = f"""
+            SELECT run_id, data, seen, observed FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY run_id ORDER BY julianday(seen) DESC, cursor DESC) AS newest
+                FROM (SELECT run_id, cursor, data, producer_id LIKE 'observation:%' AS observed,
+                             {EVENT_TIME} AS seen
+                      FROM events WHERE applied=1)
+                WHERE julianday(seen) <= julianday(?))
+            WHERE NOT observed OR newest = 1 ORDER BY cursor"""
+        with self.lock:
+            records = {
+                run["run_id"]: run
+                for run in (json.loads(r[0]) for r in self.db.execute("SELECT data FROM runs"))
+            }
+            past: dict[str, dict] = {}
+            for run_id, data, seen, observed in self.db.execute(query, (at_iso,)):
+                record = records.get(run_id)
+                if record is None:
+                    continue
+                event, run = json.loads(data), past.get(run_id)
+                payload, kind = event["payload"], event["type"]
+                if run is None:
+                    run = {**record, "activity": "", "summary": "", "ended_at": None}
+                    run.update(operations=[], warnings=[], state="working")
+                    run.pop("archived", None)
+                if observed:
+                    run.update(state=payload["state"], activity=payload["text"])
+                    run["evidence"] = payload["evidence"]
+                elif run["state"] not in TERMINAL:
+                    if kind == "run.activity":
+                        run["activity"] = payload["text"]
+                    elif kind == "run.state_changed":
+                        run["state"] = payload["state"]
+                        run["activity"] = payload.get("reason", run["activity"])
+                    elif kind == "run.finished":
+                        run["state"] = payload["state"]
+                        run["summary"] = payload.get("summary", "")
+                        run["ended_at"] = event["occurred_at"]
+                run["last_seen"] = run["updated_at"] = seen
+                past[run_id] = run
+            rows = [
+                run
+                for run in past.values()
+                if run["mode"] == "sdk"
+                or not run.get("started_at")
+                or timestamp(run["started_at"]) <= at
+            ]
+            return {**self._public(rows, at, 0, limit), "at": at_iso}
+
+    def activity(self, window: int = 600, bucket: int = 10, end: float | None = None) -> dict:
+        """Per-run event counts in fixed buckets, oldest first, ending now or at `end`."""
         count = window // bucket
-        end = time.time()
+        end = time.time() if end is None else end
         end_iso = datetime.fromtimestamp(end, UTC).isoformat()
         start_iso = datetime.fromtimestamp(end - window, UTC).isoformat()
-        # Native observations are journaled when a scan sees a change; bucket them
-        # by transcript time so a startup scan of old files is not a fake burst.
-        query = """
-            SELECT run_id, CAST((julianday(?) - julianday(
-                CASE WHEN producer_id LIKE 'observation:%' THEN json_extract(data, '$.occurred_at')
-                     ELSE received_at END)) * 86400 / ? AS INTEGER) AS age, COUNT(*)
-            FROM events WHERE received_at >= ? GROUP BY run_id, age"""
+        query = f"""
+            SELECT run_id, CAST(age / ? AS INTEGER) AS slot, COUNT(*) FROM (
+                SELECT run_id, (julianday(?) - julianday({EVENT_TIME})) * 86400 AS age
+                FROM events WHERE received_at >= ?)
+            WHERE age >= 0 GROUP BY run_id, slot"""
         runs: dict[str, list[int]] = {}
         with self.lock:
-            rows = self.db.execute(query, (end_iso, bucket, start_iso)).fetchall()
-        for run_id, age, total in rows:
-            if age is None or not 0 <= age < count:
+            rows = self.db.execute(query, (bucket, end_iso, start_iso)).fetchall()
+        for run_id, slot, total in rows:
+            if slot is None or not 0 <= slot < count:
                 continue
-            runs.setdefault(run_id, [0] * count)[count - 1 - age] += total
+            runs.setdefault(run_id, [0] * count)[count - 1 - slot] += total
         return {"bucket_seconds": bucket, "buckets": count, "end": end_iso, "runs": runs}
 
     def events(self, run_id: str, after: int = 0, limit: int = 100) -> dict:
@@ -418,3 +476,14 @@ class Store:
                 self.db.execute("ROLLBACK")
                 raise
             return {"deleted_runs": len(candidates), "scope": "observer history only"}
+
+
+def keep_pruned(store: Store, days: float, stopping: threading.Event, every: float = 3600) -> None:
+    """Prune history older than `days` now, then every `every` seconds until stopped."""
+    while True:
+        try:
+            store.prune(days)
+        except sqlite3.Error:
+            pass
+        if stopping.wait(every):
+            return

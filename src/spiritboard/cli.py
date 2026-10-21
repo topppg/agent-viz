@@ -22,7 +22,7 @@ from .harnesses import HARNESSES
 from .launcher import Instance, LaunchError, default_data_dir, running_url
 from .server import Collector
 from .sources import discover_profiles, load_profiles
-from .store import Store
+from .store import Store, keep_pruned
 
 
 def write_private(path: Path, value: str):
@@ -104,6 +104,7 @@ def serve_dashboard(args: argparse.Namespace) -> int:
         "demo_delay": args.demo_delay,
         "limit_per_profile": args.limit_per_profile,
         "max_age_days": args.max_age_days,
+        "retention_days": args.retention_days,
         # Discovery selectors only matter when discovery runs.
         **{h.env.lower(): os.environ.get(h.env) if discovery else None for h in HARNESSES.values()},
     }
@@ -125,12 +126,15 @@ def serve_dashboard(args: argparse.Namespace) -> int:
         resources.callback(store.close)
         # Bind before scanning any native sources or starting optional API calls.
         token = token_for(args.data_dir)
+        retention = {"retention_days": args.retention_days}
         try:
-            server = Collector(store, token, port=8766 if args.port is None else args.port)
+            server = Collector(
+                store, token, port=8766 if args.port is None else args.port, **retention
+            )
         except OSError as error:
             if args.port is not None or error.errno != errno.EADDRINUSE:
                 raise
-            server = Collector(store, token, port=0)
+            server = Collector(store, token, port=0, **retention)
         resources.callback(server.server_close)
         resources.callback(server.stopping.set)
         from .summary_providers import SummaryProviders
@@ -177,6 +181,13 @@ def serve_dashboard(args: argparse.Namespace) -> int:
         if monitor:
             monitor.start()
         summarizer.start()
+        if args.retention_days:
+            threading.Thread(
+                target=keep_pruned,
+                args=(store, args.retention_days, server.stopping),
+                name="spiritboard-retention",
+                daemon=True,
+            ).start()
         print(f"Spiritboard local dashboard: {server.url}", flush=True)
         print("Read-only native observation; Ctrl-C stops only this dashboard.", flush=True)
         if monitor:
@@ -253,6 +264,12 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=7,
         help="skip native transcripts not modified within N days; 0 reads all",
+    )
+    serve.add_argument(
+        "--retention-days",
+        type=float,
+        default=30,
+        help="hourly delete observer history older than N days; 0 keeps everything",
     )
     serve.add_argument(
         "--summaries",
@@ -352,6 +369,8 @@ def main(argv: list[str] | None = None) -> int:
             or not 1 <= args.limit_per_profile <= 5000
             or not math.isfinite(args.max_age_days)
             or args.max_age_days < 0
+            or not math.isfinite(args.retention_days)
+            or args.retention_days < 0
         ):
             raise ValueError("invalid port, freshness threshold, or profile limit")
         if args.demo and (args.watch or args.config or args.summaries):
