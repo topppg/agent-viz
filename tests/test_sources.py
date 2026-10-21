@@ -356,6 +356,24 @@ class SourcesTests(unittest.TestCase):
                 },
             },
             {**item, "payload": {"type": "reasoning", "summary": []}},
+            {
+                **item,
+                "payload": {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": "SECRET developer notice"}],
+                },
+            },
+            {
+                **item,
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "<turn_aborted>SECRET</turn_aborted>"}
+                    ],
+                },
+            },
             {**item, "payload": {"type": "function_call", "arguments": "SECRET args"}},
         ]
         self.log(profile, "run.jsonl", rows)

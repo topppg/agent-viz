@@ -422,10 +422,14 @@ def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | 
                     # A new request starts a new turn; the previous reply no longer describes it.
                     out["task"], last_reply = text, ""
                     state, activity, evidence = "working", "Turn started", "user message"
-            elif event in {"message", "reasoning", "agent_message"} and p.get("role") != "user":
+            elif event in {"reasoning", "agent_message"} or (
+                event == "message" and p.get("role") == "assistant"
+            ):
                 state, evidence = "working", str(event)
                 if profile.include_text and event in {"message", "agent_message"}:
-                    last_reply = _text(p.get("content")) or last_reply
+                    # Only the agent's own prose; wrapped system notices are not replies.
+                    reply = _text(p.get("content"))
+                    last_reply = reply if reply and not reply.startswith("<") else last_reply
                 activity = last_reply or "Model activity recorded"
         if state and (stamp is None or last_state_time is None or stamp >= last_state_time):
             out.update(
