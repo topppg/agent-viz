@@ -56,7 +56,9 @@ class SummaryProviders:
         self._lock = threading.RLock()
         self._revision = 0
         self._pending: dict[str, int] = {}
+        self._completing: set[str] = set()
         self._blocked: set[str] = set()
+        self._disconnect_errors: set[str] = set()
         self._closed = False
         self._active: str | None = None
         self._codex: _CodexProvider | None = None
@@ -88,13 +90,20 @@ class SummaryProviders:
                 or type(saved.get("enabled")) is not bool
             ):
                 raise ValueError
+            blocked = saved.get("blocked", [])
+            if not isinstance(blocked, list) or any(
+                not isinstance(name, str) or name not in _MODELS for name in blocked
+            ):
+                raise ValueError
+            self._blocked = set(blocked)
             return saved["enabled"]
         except (LaunchError, OSError, ValueError, UnicodeError, RecursionError):
             self._preference_error = True
             return False
 
-    def _save_enabled(self, enabled: bool) -> None:
+    def _save_enabled(self, enabled: bool, *, unblock: str | None = None) -> None:
         temporary: str | None = None
+        blocked = self._blocked - {unblock} if unblock is not None else self._blocked.copy()
         try:
             _private_directory(self._directory)
             if self._preferences.exists() or self._preferences.is_symlink():
@@ -103,14 +112,20 @@ class SummaryProviders:
                 prefix=".summary-settings-", dir=self._directory
             )
             with os.fdopen(descriptor, "wb") as output:
-                output.write(json.dumps({"version": 1, "enabled": enabled}).encode("ascii"))
+                output.write(
+                    json.dumps(
+                        {"version": 1, "enabled": enabled, "blocked": sorted(blocked)}
+                    ).encode("ascii")
+                )
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, self._preferences)
             temporary = None
+            self._blocked = blocked
             self._preference_error = False
         except (LaunchError, OSError):
             self._preference_error = True
+            self._enabled = False
             raise ProviderAuthError(_PREFERENCE_ERROR) from None
         finally:
             if temporary is not None:
@@ -132,6 +147,7 @@ class SummaryProviders:
     def _changed(self) -> None:
         self._revision += 1
         self._pending.clear()
+        self._completing.clear()
         self._active = None
 
     def start(self) -> None:
@@ -139,9 +155,10 @@ class SummaryProviders:
             if self._demo or self._closed or self._codex_started:
                 return
             self._codex_started = True
+            blocked = "codex" in self._blocked
         try:
             codex = _codex_connection(self._directory)
-            if codex is not None:
+            if codex is not None and not blocked:
                 codex.start()
             with self._lock:
                 if not self._closed:
@@ -171,10 +188,13 @@ class SummaryProviders:
         error = None
         if state.get("error") or (name == "codex" and self._codex_error):
             error = f"{name.title()} connection needs attention."
+        if name in self._disconnect_errors:
+            error = "Provider disabled in Spiritboard, but saved credentials could not be removed."
         return {
             "available": available,
             "connected": connected and name not in self._blocked,
-            "pending": name in self._pending and state.get("pending") is True,
+            "pending": name in self._pending
+            and (state.get("pending") is True or name in self._completing),
             "error": error,
             "model": _MODELS[name],
             **({"effort": "medium"} if name == "codex" else {}),
@@ -239,10 +259,16 @@ class SummaryProviders:
 
     def begin(self, name: str, callback_url: str) -> dict[str, object]:
         self._name(name)
+        with self._lock:
+            self._mutating()
+            if self._pending:
+                raise ProviderAuthError("Finish or cancel current sign-in first.")
         if name == "codex":
             self.start()
         with self._lock:
             self._mutating()
+            if self._pending:
+                raise ProviderAuthError("Finish or cancel current sign-in first.")
             if not self._status(name)["available"]:
                 raise ProviderAuthError("This summary provider is unavailable.")
             self._changed()
@@ -270,31 +296,39 @@ class SummaryProviders:
         self._name(name)
         with self._lock:
             self._mutating()
-            revision = self._pending.pop(name, None)
-            if revision is None or revision != self._revision:
+            revision = self._pending.get(name)
+            if revision is None or revision != self._revision or name in self._completing:
                 raise ProviderAuthError(_CONSENT_ERROR)
+            self._completing.add(name)
             provider = self._openrouter if name == "openrouter" else self._codex
-        if name == "openrouter" and provider is not None:
-            provider.complete(state, code)
-        elif name == "codex" and provider is not None:
-            client_id, error = extra.get("client_id"), extra.get("error")
-            provider.complete(
-                state,
-                code,
-                client_id=client_id if isinstance(client_id, str) else None,
-                error=error if isinstance(error, str) else None,
-            )
-        else:
-            raise ProviderAuthError("This summary provider is unavailable.")
-        with self._lock:
-            if revision != self._revision or self._closed:
-                raise ProviderAuthError(_CONSENT_ERROR)
-            if provider.public_state().get("connected") is not True:
-                raise ProviderAuthError("Summary provider sign-in did not complete.")
-            self._save_enabled(True)
-            self._blocked.discard(name)
-            self._enabled = True
-            self._changed()
+        try:
+            if name == "openrouter" and provider is not None:
+                provider.complete(state, code)
+            elif name == "codex" and provider is not None:
+                client_id, error = extra.get("client_id"), extra.get("error")
+                provider.complete(
+                    state,
+                    code,
+                    client_id=client_id if isinstance(client_id, str) else None,
+                    error=error if isinstance(error, str) else None,
+                )
+            else:
+                raise ProviderAuthError("This summary provider is unavailable.")
+            with self._lock:
+                if revision != self._revision or self._closed:
+                    raise ProviderAuthError(_CONSENT_ERROR)
+                if provider.public_state().get("connected") is not True:
+                    raise ProviderAuthError("Summary provider sign-in did not complete.")
+                self._save_enabled(True, unblock=name)
+                self._disconnect_errors.discard(name)
+                self._enabled = True
+                self._changed()
+        finally:
+            with self._lock:
+                if revision == self._revision:
+                    self._completing.discard(name)
+                    if provider is None or provider.public_state().get("pending") is not True:
+                        self._pending.pop(name, None)
 
     def set_key(self, key: str) -> None:
         with self._lock:
@@ -304,8 +338,8 @@ class SummaryProviders:
                 raise ProviderAuthError("This summary provider is unavailable.")
             self._openrouter.set_key(key)
             self._session_key = None
-            self._save_enabled(True)
-            self._blocked.discard("openrouter")
+            self._save_enabled(True, unblock="openrouter")
+            self._disconnect_errors.discard("openrouter")
             self._enabled = True
 
     def set_enabled(self, enabled: bool) -> None:
@@ -330,14 +364,18 @@ class SummaryProviders:
             provider = self._openrouter if name == "openrouter" else self._codex
             if name == "openrouter":
                 self._session_key = None
+            enabled = self._enabled and any(self._status(item)["connected"] for item in _MODELS)
+            self._save_enabled(enabled)
+            self._enabled = enabled
         try:
             if provider is not None:
                 provider.disconnect()
-        finally:
+        except Exception:
             with self._lock:
-                if not any(self._status(item)["connected"] for item in _MODELS):
-                    self._enabled = False
-                    self._save_enabled(False)
+                self._disconnect_errors.add(name)
+            raise ProviderAuthError(
+                "Provider disabled in Spiritboard, but saved credentials could not be removed."
+            ) from None
 
     def close(self) -> None:
         with self._lock:

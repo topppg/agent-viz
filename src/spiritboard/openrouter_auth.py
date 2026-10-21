@@ -219,16 +219,18 @@ class OpenRouterConnection:
     def complete(self, state: str, code: str) -> None:
         with self._lock:
             pending = self._pending
-            self._pending = None
+            if pending is None or time.monotonic() >= pending[3]:
+                self._pending = None
+                self._error = _PENDING_ERROR
+                raise ProviderAuthError(_PENDING_ERROR)
             if (
-                pending is None
-                or time.monotonic() >= pending[3]
-                or not isinstance(state, str)
+                not isinstance(state, str)
                 or re.fullmatch(r"[A-Za-z0-9_-]{43}", state) is None
                 or not secrets.compare_digest(state, pending[0])
-                or not isinstance(code, str)
-                or re.fullmatch(r"[A-Za-z0-9._~-]{1,2048}", code) is None
             ):
+                raise ProviderAuthError(_PENDING_ERROR)
+            self._pending = None
+            if not isinstance(code, str) or re.fullmatch(r"[A-Za-z0-9._~-]{1,2048}", code) is None:
                 self._error = _PENDING_ERROR
                 raise ProviderAuthError(_PENDING_ERROR)
             generation = pending[4]

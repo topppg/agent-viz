@@ -94,7 +94,9 @@ class ProviderTests(unittest.TestCase):
         self.providers.set_key(_KEY)
         self.assertEqual(self.providers.routes(), ["openrouter"])
         preferences = self.directory / "summary-settings.json"
-        self.assertEqual(json.loads(preferences.read_text()), {"version": 1, "enabled": True})
+        self.assertEqual(
+            json.loads(preferences.read_text()), {"version": 1, "enabled": True, "blocked": []}
+        )
         self.assertNotIn(_KEY, preferences.read_text())
         if os.name == "posix":
             self.assertEqual(stat.S_IMODE(preferences.stat().st_mode), 0o600)
@@ -176,6 +178,87 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(self.providers.routes(), ["openrouter"])
         self.assertEqual(SummaryProviders(self.directory).routes(), ["openrouter"])
 
+    def test_second_signin_does_not_replace_first_pending_consent(self) -> None:
+        result = self.providers.begin("openrouter", _CALLBACK)
+        revision = self.providers.revision
+        state = parse_qs(urlsplit(result["auth_url"]).query)["state"][0]
+        with self.assertRaisesRegex(ProviderAuthError, "Finish or cancel"):
+            self.providers.begin("codex", "http://localhost:8767/callback")
+        self.factory.assert_not_called()
+        self.assertEqual(self.providers.revision, revision)
+        with patch("spiritboard.openrouter_auth._exchange", return_value=_KEY):
+            self.providers.complete("openrouter", state, "synthetic-code")
+        self.assertEqual(self.providers.routes(), ["openrouter"])
+
+    def test_wrong_state_cannot_cancel_real_pending_authorization(self) -> None:
+        result = self.providers.begin("openrouter", _CALLBACK)
+        state = parse_qs(urlsplit(result["auth_url"]).query)["state"][0]
+        with patch("spiritboard.openrouter_auth._exchange", return_value=_KEY) as exchange:
+            with self.assertRaises(ProviderAuthError):
+                self.providers.complete("openrouter", "wrong-state", "synthetic-code")
+            exchange.assert_not_called()
+            self.assertTrue(self.providers.public_state()["providers"]["openrouter"]["pending"])
+            self.providers.complete("openrouter", state, "synthetic-code")
+            exchange.assert_called_once()
+        self.assertEqual(self.providers.routes(), ["openrouter"])
+
+    def test_failed_disconnect_is_tombstoned_before_teardown_and_survives_restart(self) -> None:
+        self.codex.connected = True
+        self.providers.start()
+        self.providers.set_key(_KEY)
+
+        def fail_disconnect() -> None:
+            preferences = json.loads((self.directory / "summary-settings.json").read_text())
+            self.assertEqual(preferences["blocked"], ["openrouter"])
+            self.assertTrue(preferences["enabled"])
+            raise OSError("private credential location")
+
+        with patch.object(self.providers._openrouter, "disconnect", side_effect=fail_disconnect):
+            with self.assertRaisesRegex(ProviderAuthError, "credentials could not be removed"):
+                self.providers.disconnect("openrouter")
+        self.assertEqual(self.providers.routes(), ["codex"])
+        self.assertEqual(OpenRouterConnection(self.directory).key(), _KEY)
+        restored = SummaryProviders(self.directory)
+        restored.start()
+        self.assertEqual(restored.routes(), ["codex"])
+        self.assertNotIn("private credential", json.dumps(restored.public_state()))
+        restored.set_key(_KEY)
+        self.assertEqual(restored.routes(), ["openrouter", "codex"])
+        self.assertEqual(
+            json.loads((self.directory / "summary-settings.json").read_text())["blocked"], []
+        )
+
+    def test_disconnect_persistence_failure_pauses_every_provider_and_reports_failure(self) -> None:
+        self.codex.connected = True
+        self.providers.start()
+        self.providers.set_key(_KEY)
+        with patch("spiritboard.summary_providers.os.replace", side_effect=OSError("private path")):
+            with patch.object(self.providers._openrouter, "disconnect") as disconnect:
+                with self.assertRaisesRegex(ProviderAuthError, "preferences.*safely"):
+                    self.providers.disconnect("openrouter")
+                disconnect.assert_not_called()
+        self.assertEqual(self.providers.routes(), [])
+        self.assertFalse(self.providers.public_state()["enabled"])
+        self.assertIsNotNone(self.providers.public_state()["error"])
+
+    def test_old_preferences_migrate_and_new_codex_authorization_unblocks_saved_tombstone(
+        self,
+    ) -> None:
+        self.providers.set_key(_KEY)
+        preferences = self.directory / "summary-settings.json"
+        preferences.write_text(json.dumps({"version": 1, "enabled": True}))
+        restored = SummaryProviders(self.directory)
+        self.assertEqual(restored.routes(), ["openrouter"])
+        restored.start()
+        restored.disconnect("codex")
+        self.assertEqual(json.loads(preferences.read_text())["blocked"], ["codex"])
+        restored.begin("codex", "http://localhost:8767/callback")
+        restored.complete("codex", "synthetic-state", "synthetic-code")
+        self.assertEqual(json.loads(preferences.read_text())["blocked"], [])
+        restarted = SummaryProviders(self.directory)
+        restarted.start()
+        self.assertEqual(restarted.routes(), ["openrouter", "codex"])
+
     def test_pausing_before_callback_prevents_exchange(self) -> None:
         self.providers.begin("codex", "http://localhost:8767/callback")
         self.providers.set_enabled(False)
@@ -205,6 +288,9 @@ class ProviderTests(unittest.TestCase):
             thread = threading.Thread(target=callback)
             thread.start()
             self.assertTrue(ready.wait(1))
+            self.assertTrue(self.providers.public_state()["providers"]["codex"]["pending"])
+            with self.assertRaisesRegex(ProviderAuthError, "Finish or cancel"):
+                self.providers.begin("openrouter", _CALLBACK)
             self.providers.set_enabled(False)
             self.assertFalse(self.providers.public_state()["enabled"])
             release.set()
@@ -279,6 +365,19 @@ class ProviderTests(unittest.TestCase):
         self.assertFalse(self.providers.public_state()["providers"]["codex"]["available"])
         with self.assertRaisesRegex(ProviderAuthError, "unavailable"):
             self.providers.begin("codex", "http://localhost:8767/callback")
+
+    def test_saved_codex_tombstone_prevents_automatic_restore_requests(self) -> None:
+        self.codex.connected = True
+        self.providers.start()
+        self.providers.set_enabled(True)
+        self.providers.disconnect("codex")
+        reloaded_codex = FakeCodex(connected=True)
+        with patch("spiritboard.summary_providers._codex_connection", return_value=reloaded_codex):
+            restored = SummaryProviders(self.directory)
+            restored.start()
+        self.assertEqual(reloaded_codex.started, 0)
+        self.assertEqual(restored.routes(), [])
+        self.assertFalse(restored.public_state()["providers"]["codex"]["connected"])
 
     def test_failed_codex_start_is_not_reflected(self) -> None:
         with patch.object(self.codex, "start", side_effect=RuntimeError("private credential")):

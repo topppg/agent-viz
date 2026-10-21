@@ -127,6 +127,17 @@ class OpenRouterTests(unittest.TestCase):
                     self.connection.complete(state, "synthetic-code")
                 exchange.assert_not_called()
 
+    def test_wrong_state_does_not_consume_original_authorization(self) -> None:
+        query = self.begin()
+        with patch("spiritboard.openrouter_auth._exchange", return_value=_KEY) as exchange:
+            with self.assertRaises(ProviderAuthError):
+                self.connection.complete("wrong-state", "synthetic-code")
+            exchange.assert_not_called()
+            self.assertTrue(self.connection.public_state()["pending"])
+            self.connection.complete(query["state"][0], "synthetic-code")
+            exchange.assert_called_once()
+        self.assertEqual(self.connection.key(), _KEY)
+
     def test_public_state_expires_pending_and_restart_cancels_it(self) -> None:
         with patch("spiritboard.openrouter_auth.time.monotonic", return_value=100):
             self.begin()
