@@ -230,6 +230,15 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.equal(expanded(), 'ask');
  docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
  assert.equal(detail(), undefined);
+ // An open session keeps the list order still; closing it restores live sorting.
+ const order = rows().map(r => r.dataset.runId);
+ rows().find(r => r.dataset.runId === 'sdk-run').listeners.click(); await tick();
+ const later = new Date(Date.parse(now) + 1000).toISOString();
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:runs.map(r => r.run_id === 'sdk-run' ? {...r, state:'waiting_user', last_seen:later} : r)})}); await tick();
+ assert.deepEqual(rows().map(r => r.dataset.runId), order);
+ docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
+ assert.equal(rows()[0].dataset.runId, 'sdk-run');
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
  // Connection status and history reset.
  rows()[0].listeners.click(); await tick();
  const rootLoads = () => requests.filter(x => x === '/api/runs/root/events?after=0&limit=100').length;
