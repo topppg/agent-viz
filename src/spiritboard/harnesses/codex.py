@@ -27,6 +27,7 @@ from ..transcripts import (
     reply_text,
     request_text,
     safe,
+    text,
     utc_time,
     valid_cwd,
     walk_jsonl,
@@ -98,6 +99,15 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
     out = observation(profile, "Codex", native, project, started)
     if parent and parent != native:
         out["parent_run_id"] = ns(profile, parent)
+    # A spawned agent's transcript starts with a copy of its parent's history, and the task its
+    # parent sends it is encrypted: its task name is the only readable description.
+    agent_path = meta.get("agent_path") or (
+        spawn.get("agent_path") if isinstance(spawn, dict) else None
+    )
+    forked = bool(parent) and isinstance(agent_path, str) and bool(agent_path)
+    if forked and profile.include_text:
+        out["name"] = safe(re.sub(r"[_-]+", " ", agent_path.rstrip("/").rsplit("/", 1)[-1]), 80)
+        out["name"] = out["name"] or f"Codex {native[:8]}"
     last_state_time = None
     last_reply = ""
     for row in rows:
@@ -123,7 +133,7 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 reply = reply or last_reply
                 state, evidence = "idle", str(event)
                 activity = reply or "Turn ended · session may resume"
-            if profile.include_text and event == "user_message":
+            if profile.include_text and event == "user_message" and not forked:
                 request = request_text(p.get("message"))
                 if request:
                     out["task"], last_reply = request, ""
@@ -141,7 +151,7 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 activity = last_reply or "Tool result recorded"
             elif event == "message" and p.get("role") == "user":
                 request = request_text(p.get("content")) if profile.include_text else ""
-                if request:
+                if request and not forked:
                     # A new request starts a new turn; the previous reply no longer describes it.
                     out["task"], last_reply = request, ""
                     state, activity, evidence = "working", "Turn started", "user message"
@@ -153,6 +163,9 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                     # Only the agent's own prose: agent_message items are routed between agents
                     # and wrapped system notices are not replies.
                     last_reply = reply_text(p.get("content")) or last_reply
+                elif forked and text(p.get("content")).startswith("Message Type: NEW_TASK"):
+                    # The parent's replies copied into this transcript end at its own assignment.
+                    last_reply = ""
                 activity = last_reply or "Model activity recorded"
         if state and (stamp is None or last_state_time is None or stamp >= last_state_time):
             out.update(
@@ -161,6 +174,8 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 evidence=f"Codex transcript: {evidence}; inferred session state",
             )
             last_state_time = stamp or last_state_time
+    if forked and profile.include_text:
+        out["task"] = ""
     out["last_seen"] = out["last_seen"] or mtime_iso(mtime)
     return out
 
