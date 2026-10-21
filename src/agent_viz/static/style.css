@@ -71,7 +71,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 20px 24px; display: flex; fle
 #hidden-note { margin-left: auto; font-size: 12px; }
 .table-wrap { overflow-x: auto; }
 .table { min-width: 1040px; }
-.row { display: grid; grid-template-columns: 140px minmax(0, 1.4fr) 200px minmax(0, 2.4fr) 112px 80px; gap: 14px; align-items: center; padding: 7px 10px; }
+.row { display: grid; grid-template-columns: 10px 140px minmax(0, 1.4fr) minmax(0, 2.6fr) 112px 80px; gap: 14px; align-items: center; padding: 7px 10px; }
 .row.head { background: var(--head); color: #c9ced8; font-weight: 700; font-size: 12px; }
 .run-row { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; min-height: 0; }
 .run-row:hover { background: #0f1218; }
@@ -92,7 +92,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 20px 24px; display: flex; fle
 .tree { color: var(--dim); font-style: normal; white-space: pre; }
 .agent-name { font-weight: 700; }
 .note { color: var(--wait); font-size: 11px; margin-left: 8px; font-style: normal; }
-.harness-cell { display: flex; align-items: center; gap: 8px; }
+.harness-cell { display: flex; align-items: center; }
 .mark { font-style: normal; color: var(--dim); }
 .mark.ai { color: var(--ai); }
 .doing.needs { color: var(--wait); }
