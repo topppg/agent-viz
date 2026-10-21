@@ -44,6 +44,7 @@ p { margin: 0; }
 .ai-status { border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; font-size: 13px; }
 #connection { color: var(--muted); font-size: 13px; }
 #connection.connected { color: var(--run); }
+#connection.past, .counts-at { color: var(--wait); }
 
 main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; flex-direction: column; gap: 16px; }
 .banner { border: 1px solid #3b2d63; background: #15102a; color: #c9b8ff; padding: 5px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 500; letter-spacing: .04em; }
@@ -67,15 +68,26 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 
 .flux-panel { flex: 999 1 560px; gap: 6px; }
 .panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.head-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.zoom { display: flex; gap: 2px; }
+.zoom button { min-height: 0; padding: 0 6px; border: 0; border-radius: 4px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.zoom button[aria-pressed="true"] { background: var(--run); color: var(--bg); font-weight: 700; }
 .flux { position: relative; height: 150px; overflow: hidden; border-bottom: 1px solid var(--border); display: flex; align-items: flex-end; gap: 2px; }
 .flux .col { flex: 1; display: flex; flex-direction: column; min-width: 0; opacity: .92; }
+.flux .col { align-self: stretch; justify-content: flex-end; cursor: pointer; }
+.flux .col:hover { opacity: 1; background: #ffffff0d; }
+.flux .dot, .flux .ymax, .flux .marker { pointer-events: none; }
 .flux .dot { position: absolute; border-radius: 50%; }
+.flux .marker { position: absolute; top: 0; bottom: 0; z-index: 1; width: 2px; margin-left: -1px; background: var(--wait); }
 .flux .ymax { position: absolute; left: 4px; top: 2px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .flux .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
 .axis { display: flex; justify-content: space-between; color: var(--muted); font-family: var(--mono); font-size: 12px; }
 .axis .now { color: var(--run); }
 
 .agents { display: flex; flex-direction: column; gap: 10px; }
+.past-bar { margin: -4px 0; color: var(--wait); font-size: 12.5px; }
+.past-bar button { min-height: 0; padding: 0; border: 0; color: var(--wait); text-decoration: underline; text-underline-offset: 3px; }
+.detail-actions .app-link:disabled { opacity: .45; cursor: not-allowed; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .views { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--bar); }
 .views button { border: 0; border-radius: 6px; padding: 2px 14px; min-height: 26px; }

@@ -2,7 +2,9 @@ import http.client
 import json
 import tempfile
 import threading
+import time
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -142,6 +144,57 @@ class ServerTests(unittest.TestCase):
         response.close()
         connection.close()
 
+    def json_get(self, path):
+        status, _, body = self.request("GET", path, headers={"Host": self.host})
+        return status, json.loads(body)
+
+    @property
+    def host(self):
+        return f"127.0.0.1:{self.server.server_port}"
+
+    def test_activity_windows_are_bounded(self):
+        for window, bucket, count in (
+            (600, 10, 60),
+            (3600, 60, 60),
+            (86400, 1200, 72),
+            (604800, 7200, 84),
+            (2592000, 28800, 90),
+        ):
+            status, data = self.json_get(f"/api/activity?window={window}")
+            self.assertEqual(status, 200)
+            self.assertEqual((data["bucket_seconds"], data["buckets"]), (bucket, count))
+        status, data = self.json_get("/api/activity")
+        self.assertEqual((status, data["buckets"]), (200, 60))
+        for query in ("window=59", "window=2592001", "window=abc", "window=600&x=1", "window=1e3"):
+            self.assertEqual(self.json_get(f"/api/activity?{query}")[0], 400, query)
+
+    def test_past_snapshot_validates_the_moment(self):
+        self.assertEqual(self.post(json.dumps(self.event()))[0], 200)
+        current = time.time()
+        status, data = self.json_get(f"/api/snapshot?at={current - 60}")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["runs"], [])
+        self.assertIn("at", data)
+        self.assertEqual(data["activity"]["buckets"], 60)
+        status, data = self.json_get(f"/api/snapshot?at={current + 0.5}")
+        self.assertEqual(status, 200)
+        self.assertEqual([r["run_id"] for r in data["runs"]], ["run"])
+        iso = datetime.fromtimestamp(current - 3600, UTC).isoformat().replace("+00:00", "Z")
+        self.assertEqual(self.json_get(f"/api/snapshot?at={iso}")[0], 200)
+        for at in (
+            current + 120,
+            current - 31 * 86400,
+            "nan",
+            "inf",
+            "yesterday",
+            "2026-10-20T10:00:00",
+            "1" * 80,
+        ):
+            self.assertEqual(self.json_get(f"/api/snapshot?at={at}")[0], 400, at)
+        self.assertEqual(self.json_get("/api/snapshot?at=1&at=2")[0], 400)
+        self.server.retention_days = 0
+        self.assertEqual(self.json_get(f"/api/snapshot?at={current - 31 * 86400}")[0], 200)
+
     def focus_post(self, headers=None, body=None):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         return self.request(
@@ -249,6 +302,7 @@ class LocalConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             self.assertEqual(main(["serve", "--port", "-1", "--data-dir", folder]), 1)
             self.assertEqual(main(["serve", "--stale-after", "nan", "--data-dir", folder]), 1)
+            self.assertEqual(main(["serve", "--retention-days", "-1", "--data-dir", folder]), 1)
 
     def test_discover_label_selection_writes_only_selected_profiles(self):
         from spiritboard.sources import SourceProfile
@@ -332,3 +386,5 @@ class LivenessSnapshotTests(unittest.TestCase):
                 "cu:t3": None,
             },
         )
+        past = server.snapshot(time.time())
+        self.assertEqual({run.get("live", "absent") for run in past["runs"]}, {None})

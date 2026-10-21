@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import math
 import re
 import socket
 import sys
@@ -17,7 +18,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import focus
 from .harnesses import HARNESSES
-from .model import MAX_EVENT_BYTES, parse_json
+from .model import MAX_EVENT_BYTES, parse_json, timestamp
 
 STATIC = Path(__file__).parent / "static"
 ASSETS = {
@@ -32,6 +33,10 @@ ASSETS = {
     "/fonts/space-mono-700.woff2": ("fonts/space-mono-700.woff2", "font/woff2"),
 }
 FOCUS_ROUTE = re.compile(r"/api/runs/([^/]{1,768})/focus")
+DEFAULT_WINDOW = 600
+MAX_WINDOW = 30 * 86400
+# The smallest of these that keeps a chart window within 90 bars.
+BUCKETS = (10, 15, 30, 60, 120, 300, 600, 900, 1200, 1800, 3600, 7200, 10800, 21600, 28800)
 
 
 class Collector(ThreadingHTTPServer):
@@ -48,6 +53,7 @@ class Collector(ThreadingHTTPServer):
         monitor=None,
         summarizer=None,
         summary_providers=None,
+        retention_days: float = 30,
     ):
         if host != "127.0.0.1":
             raise ValueError("only IPv4 loopback is supported")
@@ -58,8 +64,9 @@ class Collector(ThreadingHTTPServer):
         self.monitor = monitor
         self.summarizer = summarizer
         self.summary_providers = summary_providers
+        self.retention_days = retention_days
         self.stopping = threading.Event()
-        self._activity: tuple[int, dict] | None = None
+        self._activity: dict[int, tuple[float, dict]] = {}
         self.focus_lock = threading.Lock()
         self.instance_id = uuid.uuid4().hex
         super().__init__((host, port), Handler)
@@ -75,8 +82,38 @@ class Collector(ThreadingHTTPServer):
     def url(self):
         return f"http://127.0.0.1:{self.server_port}"
 
-    def snapshot(self):
-        data = self.store.snapshot(limit=5000)
+    def activity(self, window: int = DEFAULT_WINDOW) -> dict:
+        if not 60 <= window <= MAX_WINDOW:
+            raise ValueError("window out of range")
+        # Every SSE client asks once a second; one aggregate per second is enough.
+        ttl = 1 if window == DEFAULT_WINDOW else 10
+        current = time.time()
+        cached = self._activity.get(window)
+        if cached is None or current - cached[0] >= ttl:
+            if len(self._activity) > 8:
+                self._activity = {}
+            bucket = next(b for b in BUCKETS if window // b <= 90)
+            cached = (current, self.store.activity(window, bucket))
+            self._activity[window] = cached
+        return cached[1]
+
+    def moment(self, value: str) -> float:
+        """A past instant within retention, as epoch seconds or ISO 8601."""
+        try:
+            at = float(value)
+        except ValueError:
+            at = timestamp(value)
+        current = time.time()
+        oldest = current - self.retention_days * 86400 if self.retention_days else 0
+        if not math.isfinite(at) or not oldest <= at <= current + 1:
+            raise ValueError("moment outside history")
+        return min(at, current)
+
+    def snapshot(self, at: float | None = None):
+        if at is None:
+            data = self.store.snapshot(limit=5000)
+        else:
+            data = self.store.snapshot_at(at, limit=5000)
         observed = (
             self.monitor.public_state()
             if self.monitor
@@ -106,12 +143,17 @@ class Collector(ThreadingHTTPServer):
         summaries = {item["run_id"]: item for item in data["ai"].get("summaries", [])}
         for run in data["runs"]:
             if run["run_id"] in summaries:
-                run["ai_summary"] = summaries[run["run_id"]]
+                summary = summaries[run["run_id"]]
+                # Today's summary text would misdescribe the past; keep only the title.
+                run["ai_summary"] = summary if at is None else {"title": summary.get("title", "")}
         kinds = {p["id"]: p["kind"] for p in profiles}
         live = observed.get("live", {})
         for run in data["runs"]:
             profile_id = run["session_id"].removesuffix(":observed")
             if run.get("mode") != "observation" or profile_id not in kinds:
+                continue
+            if at is not None:
+                run["live"] = None
                 continue
             owners = live.get(profile_id)
             native = run["run_id"].removeprefix(profile_id + ":")
@@ -122,11 +164,7 @@ class Collector(ThreadingHTTPServer):
             # a desktop session closed from a missing record, only from a positive check.
             if run["live"] is False and run.get("app"):
                 run["live"] = None
-        # Every SSE client asks once a second; one aggregate per second is enough.
-        now_second = int(time.time())
-        if self._activity is None or self._activity[0] != now_second:
-            self._activity = (now_second, self.store.activity())
-        data["activity"] = self._activity[1]
+        data["activity"] = self.activity() if at is None else self.store.activity(end=at)
         data["stale_after_seconds"] = self.store.stale_after
         data["mode"] = "local-observer"
         return data
@@ -385,7 +423,21 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
         elif path == "/api/snapshot":
-            self._json(200, self.server.snapshot())
+            try:
+                at = self._query(parsed.query, "at")
+                data = self.server.snapshot(None if at is None else self.server.moment(at))
+            except ValueError:
+                self._json(400, {"error": "at must be a past moment within retention"})
+                return
+            self._json(200, data)
+        elif path == "/api/activity":
+            try:
+                window = self._query(parsed.query, "window")
+                data = self.server.activity(DEFAULT_WINDOW if window is None else int(window))
+            except ValueError:
+                self._json(400, {"error": f"window must be 60 to {MAX_WINDOW} seconds"})
+                return
+            self._json(200, data)
         elif path == "/api/summaries/settings":
             manager = self.server.summary_providers
             if manager is None:
@@ -422,6 +474,12 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
         else:
             self._json(404, {"error": "not found"})
+
+    def _query(self, query_string: str, key: str) -> str | None:
+        query = parse_qs(query_string, keep_blank_values=True, max_num_fields=2)
+        if set(query) - {key} or any(len(v) != 1 or len(v[0]) > 64 for v in query.values()):
+            raise ValueError("invalid query")
+        return query[key][0] if key in query else None
 
     def _stream(self, query_string):
         query = parse_qs(query_string)

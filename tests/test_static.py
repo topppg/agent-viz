@@ -56,6 +56,9 @@ class StaticTests(unittest.TestCase):
                 "error",
                 "hidden-note",
                 "overview",
+                "past-bar",
+                "zoom",
+                "axis",
             }
             <= parser.ids
         )
@@ -88,10 +91,11 @@ class Element {
   querySelectorAll(selector) { const key = (selector.match(/^\[data-([a-z-]+)\]$/) || [])[1]; const prop = key ? key.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) : 'focusKey'; return flatten(this).filter(x => x.dataset[prop] !== undefined); }
 }
 function flatten(el) { return el.children.filter(c => typeof c !== 'string').flatMap(c => [c, ...flatten(c)]); }
-const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
+const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs','past-bar','zoom','flux-window','flux-note','axis'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
 const headers = Object.fromEntries(['harness','status','agent','doing','rate','seen'].map(key => { const button = new Element('button'); button.dataset.sort = key; button.textContent = key; return [key, button]; }));
 ids['window-filter'].value = '604800000';
 ['active','waiting','all'].forEach(v => { const b = new Element('button'); b.dataset.view = v; ids.views.children.push(b); });
+['600','3600'].forEach(v => { const b = new Element('button'); b.dataset.zoom = v; ids.zoom.children.push(b); });
 const docListeners = {};
 document = { getElementById: id => ids[id], createElement: tag => new Element(tag), querySelectorAll: selector => selector === '[data-sort]' ? Object.values(headers) : [], activeElement: null, addEventListener: (k, fn) => { docListeners[k] = fn; } };
 const now = new Date().toISOString();
@@ -105,6 +109,8 @@ const snapshot = { stream_id:'journal-a', cursor:1, runs, server_time:now, stale
   profiles:[{id:'codex-work',kind:'codex',label:'work'},{id:'claude-personal',kind:'claude',label:'personal'},{id:'codex-empty',kind:'codex',label:'Empty profile'}],
   source_errors:{unavailable:'Source unavailable'}, ai:{enabled:true,status:'ready',calls:2,actual_cost_usd:.0021,known_cost_usd:.0021,unknown_cost_calls:0,summaries:[]},
   activity:{bucket_seconds:10,buckets:60,end:now,runs:{root:[...new Array(59).fill(0),40],'sdk-run':[...new Array(54).fill(0),1,1,1,1,1,2]}} };
+const pastIso = new Date(Date.parse(now) - 290000).toISOString();
+const past = {...snapshot, at:pastIso, server_time:pastIso, runs:[run('orphan','missing','Orphan',{session_id:'claude-personal:observed',source:'claude',account:'personal',last_seen:pastIso,live:null,activity:'Earlier step'})]};
 let stream;
 class EventSource { constructor() { this.listeners = {}; stream = this; } addEventListener(name, fn) { this.listeners[name] = fn; } }
 class Option extends Element { constructor(text,value) { super('option'); this.textContent = text; this.value = value; } }
@@ -117,6 +123,8 @@ const context = {document,Option,EventSource,navigator,setInterval:() => {},cons
   if (url.endsWith('/focus')) {
     return {ok:true,json:async()=>targets[decodeURIComponent(url.split('/')[3])] || {available:false,kind:'unsupported',label:''}};
   }
+  if (url.startsWith('/api/snapshot?at=')) return {ok:true,json:async()=>past};
+  if (url.startsWith('/api/activity?window=')) return {ok:true,json:async()=>({bucket_seconds:60,buckets:60,end:now,runs:{root:[...new Array(59).fill(0),5]}})};
   return {ok:true,json:async()=>url.startsWith('/api/runs/') ? {events:[{type:'run.activity',payload:{text:'<script>not executable</script>'},received_at:now}],next_cursor:1,has_more:false} : snapshot}; }};
 vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),context);
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -335,6 +343,53 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  shelvedRow.listeners.click(); await tick();
  assert.ok(detail().textContent.includes('archived in Claude desktop'));
  ids.views.children[0].listeners.click();
+ // Zoom asks the server for a wider window; the chart keeps its place.
+ ids.zoom.children[1].listeners.click(); await tick();
+ assert.ok(requests.includes('/api/activity?window=3600'));
+ assert.equal(ids['flux-window'].textContent, 'last hour');
+ assert.equal(ids.zoom.children[1].attrs['aria-pressed'], 'true');
+ assert.ok(ids.axis.textContent.includes('-1h'));
+ ids.zoom.children[0].listeners.click(); await tick();
+ assert.equal(ids['flux-window'].textContent, 'last 10 min');
+ // Clicking a bar shows the board at that moment, paused, with open buttons disabled.
+ rows().find(r => r.dataset.runId === 'orphan').listeners.click(); await tick();
+ assert.equal(control('open-app').disabled, undefined);
+ assert.equal(ids['past-bar'].hidden, true);
+ const cols = () => ids.flux.children.filter(x => x.className === 'col');
+ cols()[30].listeners.click(); await tick();
+ const asked = requests.find(x => x.startsWith('/api/snapshot?at='));
+ assert.ok(Math.abs(Number(asked.split('=')[1]) * 1000 - (Date.parse(now) - 290000)) < 1000);
+ assert.equal(ids['past-bar'].hidden, false);
+ assert.ok(ids['past-bar'].textContent.startsWith('Viewing '));
+ assert.ok(ids['past-bar'].textContent.includes('4m ago'));
+ assert.ok(ids['past-bar'].textContent.includes('⟲ back to live'));
+ assert.equal(ids.connection.textContent, 'past · not live');
+ assert.ok(ids.counts.textContent.includes('at '));
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan']);
+ assert.ok(rows()[0].textContent.includes('Earlier step'));
+ assert.equal(control('open-app').disabled, true);
+ assert.ok(ids.flux.children.some(x => x.className === 'marker'));
+ control('open-app').listeners.click(); await tick();
+ assert.equal(posts.length, 1);
+ // Live updates keep the chart current but leave the past table alone.
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan']);
+ assert.equal(ids['past-bar'].hidden, false);
+ flatten(ids['past-bar']).find(x => x.tagName === 'button').listeners.click(); await tick();
+ assert.equal(ids['past-bar'].hidden, true);
+ assert.ok(rows().length > 1);
+ assert.equal(ids.connection.textContent, 'live');
+ assert.ok(!ids.counts.textContent.includes('at '));
+ assert.equal(control('open-app').disabled, undefined);
+ // L returns to live, and so does the newest bar.
+ cols()[10].listeners.click(); await tick();
+ assert.equal(ids['past-bar'].hidden, false);
+ docListeners.keydown({key:'L', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.equal(ids['past-bar'].hidden, true);
+ cols()[10].listeners.click(); await tick();
+ cols()[59].listeners.click(); await tick();
+ assert.equal(ids['past-bar'].hidden, true);
+ assert.ok(rows().length > 1);
  // Summaries off and empty chart.
  stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:false},activity:{bucket_seconds:10,buckets:60,end:now,runs:{}}})});
  assert.ok(ids['ai-status'].textContent.includes('summaries off'));

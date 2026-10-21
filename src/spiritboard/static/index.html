@@ -32,9 +32,9 @@
         <div id="harnesses"></div>
       </div>
       <div class="flux-panel">
-        <div class="panel-head"><h2>EVENT RATE · last 10 min · stacked by harness</h2><span class="muted">height = events/min · dots = latest events</span></div>
-        <div id="flux" class="flux" role="img" aria-label="Event rate chart"></div>
-        <div class="axis"><span>-10m</span><span>-5m</span><span class="now">now</span></div>
+        <div class="panel-head"><h2>EVENT RATE · <span id="flux-window">last 10 min</span> · stacked by harness</h2><span class="head-tools"><span id="flux-note" class="muted">height = events/min · dots = latest events</span><span id="zoom" class="zoom" role="group" aria-label="Chart window"><button type="button" data-zoom="600" aria-pressed="true">10m</button><button type="button" data-zoom="3600">1h</button><button type="button" data-zoom="86400">24h</button><button type="button" data-zoom="604800">7d</button><button type="button" data-zoom="2592000">30d</button></span></span></div>
+        <div id="flux" class="flux" role="img" aria-label="Event rate chart" title="Click a bar to view the board at that moment"></div>
+        <div id="axis" class="axis"><span>-10m</span><span>-5m</span><span class="now">now</span></div>
       </div>
     </section>
 
@@ -51,6 +51,7 @@
         <label class="find">/ <input id="search" type="search" placeholder="find agent, task, activity" autocomplete="off"></label>
         <span id="hidden-note" class="muted"></span>
       </div>
+      <p id="past-bar" class="past-bar" role="status" hidden></p>
       <div class="table-wrap">
         <div class="table">
           <div class="row head" role="group" aria-label="Sort agents">
@@ -69,7 +70,7 @@
   </main>
   <footer class="keys">
     <span><kbd>/</kbd>Find</span><span><kbd>j k</kbd>Move</span><span><kbd>⏎</kbd>Open</span><span><kbd>Esc</kbd>Close</span>
-    <span><kbd>a</kbd>Active</span><span><kbd>w</kbd>Needs you</span><span><kbd>e</kbd>All</span><span><kbd>v</kbd>Chart</span>
+    <span><kbd>a</kbd>Active</span><span><kbd>w</kbd>Needs you</span><span><kbd>e</kbd>All</span><span><kbd>v</kbd>Chart</span><span><kbd>L</kbd>Live</span>
     <span class="legend">› raw activity · ~ inferred from transcript · quiet ≠ failed · observer only</span>
   </footer>
 </body>

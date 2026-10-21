@@ -1,12 +1,13 @@
 import copy
 import tempfile
+import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from spiritboard.model import now
-from spiritboard.store import Store
+from spiritboard.store import Store, keep_pruned
 
 
 def event(
@@ -284,3 +285,118 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(sum(activity["runs"]["run-b"]), 1)
         self.assertEqual(sum(activity["runs"]["new-native"]), 1)
         self.assertNotIn("old-native", activity["runs"])
+
+
+def iso(seconds: float) -> str:
+    return datetime.fromtimestamp(seconds, UTC).isoformat()
+
+
+class TimeTravelTests(unittest.TestCase):
+    def setUp(self):
+        self.store = Store()
+        self.base = time.time() - 3600
+
+    def tearDown(self):
+        self.store.close()
+
+    def ingest_at(self, offset, value):
+        with patch("spiritboard.store.now", return_value=iso(self.base + offset)):
+            self.store.ingest(value)
+
+    def board(self, offset):
+        return {r["run_id"]: r for r in self.store.snapshot_at(self.base + offset)["runs"]}
+
+    def test_sdk_runs_replay_their_journal_up_to_the_moment(self):
+        self.ingest_at(0, event())
+        self.ingest_at(100, event(2, "run.activity", {"text": "Reading files"}))
+        self.ingest_at(200, event(3, "run.state_changed", {"state": "waiting_user"}))
+        self.ingest_at(250, event(1, run="run-b", producer="producer-b"))
+        self.ingest_at(300, event(4, "run.finished", {"state": "completed", "summary": "Done"}))
+        before = self.store.snapshot_at(self.base - 1)
+        self.assertEqual(before["runs"], [])
+        self.assertEqual(before["at"], iso(self.base - 1))
+        early = self.board(5)
+        self.assertEqual((early["run-a"]["state"], early["run-a"]["activity"]), ("working", ""))
+        self.assertEqual(early["run-a"]["health"], "fresh")
+        self.assertEqual(self.board(90)["run-a"]["health"], "stale")
+        middle = self.board(150)
+        self.assertEqual(middle["run-a"]["activity"], "Reading files")
+        self.assertEqual(middle["run-a"]["last_seen"], iso(self.base + 100))
+        self.assertNotIn("run-b", middle)
+        waiting = self.board(260)
+        self.assertEqual(waiting["run-a"]["state"], "waiting_user")
+        self.assertIn("run-b", waiting)
+        done = self.board(310)["run-a"]
+        self.assertEqual((done["state"], done["summary"]), ("completed", "Done"))
+        self.assertNotIn("producer_id", done)
+
+    def test_observations_show_their_latest_recorded_state(self):
+        def seen(offset, **changes):
+            last = iso(self.base + offset)
+            changes.setdefault("started_at", iso(self.base))
+            self.store.observe(observation(last_seen=last, **changes))
+
+        seen(10, state="working", activity="Running tests", archived=True)
+        seen(500, state="idle", activity="Turn ended", archived=True)
+        seen(700, run="observed-late", started_at=iso(self.base + 600))
+        self.assertEqual(self.board(5), {})
+        first = self.board(100)["observed-a"]
+        self.assertEqual((first["state"], first["activity"]), ("working", "Running tests"))
+        self.assertEqual(first["last_seen"], iso(self.base + 10))
+        self.assertEqual(first["health"], "stale")
+        self.assertNotIn("archived", first)
+        later = self.board(550)
+        self.assertEqual(later["observed-a"]["state"], "idle")
+        self.assertEqual(later["observed-a"]["health"], "observed")
+        self.assertNotIn("observed-late", later)
+        self.assertIn("observed-late", self.board(800))
+
+    def test_activity_window_and_end(self):
+        self.ingest_at(-7200, event())
+        self.ingest_at(-60, event(2, "run.activity", {"text": "Earlier"}))
+        self.ingest_at(0, event(3, "run.activity", {"text": "Later"}))
+        with patch("spiritboard.store.time.time", return_value=self.base + 30):
+            day = self.store.activity(86400, 1200)
+            hour = self.store.activity(3600, 60, end=self.base - 30)
+        self.assertEqual((day["buckets"], day["bucket_seconds"]), (72, 1200))
+        self.assertEqual(sum(day["runs"]["run-a"]), 3)
+        self.assertEqual(day["runs"]["run-a"][-1], 2)
+        self.assertEqual(hour["end"], iso(self.base - 30))
+        self.assertEqual(sum(hour["runs"]["run-a"]), 1)
+        self.assertEqual(hour["runs"]["run-a"][-1], 1)
+
+    def test_retention_prunes_on_a_schedule(self):
+        clock = [time.time()]
+        month = 30 * 86400
+        self.store.observe(observation(run="ancient", last_seen=iso(clock[0] - 40 * 86400)))
+        self.store.observe(observation(run="aging", last_seen=iso(clock[0] - month + 5400)))
+        self.store.observe(observation(run="fresh"))
+        with patch("spiritboard.store.now", return_value=iso(clock[0] - 40 * 86400)):
+            self.store.ingest(event(run="active-sdk"))
+        kept = []
+
+        class Hourly:
+            def __init__(self):
+                self.waits = []
+
+            def wait(self, seconds):
+                kept.append({r["run_id"] for r in store.snapshot()["runs"]})
+                self.waits.append(seconds)
+                clock[0] += seconds
+                return len(self.waits) == 3
+
+        store, stopping = self.store, Hourly()
+        with patch("spiritboard.store.time.time", side_effect=lambda: clock[0]):
+            keep_pruned(self.store, 30, stopping)
+        self.assertEqual(stopping.waits, [3600, 3600, 3600])
+        self.assertEqual(kept[0], {"aging", "fresh", "active-sdk"})
+        self.assertEqual(kept[1], {"aging", "fresh", "active-sdk"})
+        self.assertEqual(kept[2], {"fresh", "active-sdk"})
+
+    def test_retention_stops_quietly_after_close(self):
+        self.store.close()
+        stopping = Mock()
+        stopping.wait.return_value = True
+        keep_pruned(self.store, 30, stopping)
+        stopping.wait.assert_called_once_with(3600)
+        self.store = Store()
