@@ -1,6 +1,6 @@
 import unittest
 
-from agent_viz.model import now, parse_json, timestamp, validate_event
+from spiritboard.model import now, parse_json, timestamp, validate_event
 
 
 def event(kind="run.started", payload=None, **changes):

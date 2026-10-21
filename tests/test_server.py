@@ -6,10 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_viz import focus
-from agent_viz.cli import main, token_for, write_private
-from agent_viz.server import Collector
-from agent_viz.store import Store
+from spiritboard import focus
+from spiritboard.cli import main, token_for, write_private
+from spiritboard.server import Collector
+from spiritboard.store import Store
 
 TOKEN = "x" * 40
 
@@ -139,7 +139,7 @@ class ServerTests(unittest.TestCase):
             "POST",
             "/api/runs/run/focus",
             body,
-            {"Origin": origin, "X-Agent-Viz": "focus", **(headers or {})},
+            {"Origin": origin, "X-Spiritboard": "focus", **(headers or {})},
         )
 
     def test_focus_lookup_is_lazy_and_sdk_runs_are_unsupported(self):
@@ -154,7 +154,7 @@ class ServerTests(unittest.TestCase):
             self.request("GET", "/api/runs/run/focus", headers={"Host": "evil.invalid"})[0], 403
         )
         self.assertEqual(self.request("GET", "/api/runs/" + "x" * 300 + "/focus")[0], 400)
-        with patch("agent_viz.focus.resolve") as resolve:
+        with patch("spiritboard.focus.resolve") as resolve:
             self.request("GET", "/api/snapshot")
         resolve.assert_not_called()
 
@@ -165,7 +165,7 @@ class ServerTests(unittest.TestCase):
             command="claude --resume invented-0000",
             steps=(focus.Step(("/secret/helper",)),),
         )
-        with patch("agent_viz.focus.resolve", return_value=target):
+        with patch("spiritboard.focus.resolve", return_value=target):
             data = json.loads(self.request("GET", "/api/runs/run/focus")[2])
         self.assertEqual(
             data,
@@ -180,13 +180,14 @@ class ServerTests(unittest.TestCase):
     def test_focus_post_requires_origin_header_and_no_body(self):
         target = focus.Target("focus", "cmux", steps=(focus.Step(("/invented/cmux",)),))
         with (
-            patch("agent_viz.focus.resolve", return_value=target),
-            patch("agent_viz.focus.focus", return_value=True) as perform,
+            patch("spiritboard.focus.resolve", return_value=target),
+            patch("spiritboard.focus.focus", return_value=True) as perform,
         ):
-            self.assertEqual(self.focus_post({"X-Agent-Viz": "other"})[0], 403)
+            self.assertEqual(self.focus_post({"X-Spiritboard": "other"})[0], 403)
             self.assertEqual(self.focus_post({"Origin": "https://evil.invalid"})[0], 403)
             self.assertEqual(self.focus_post({"Sec-Fetch-Site": "cross-site"})[0], 403)
-            no_origin = self.request("POST", "/api/runs/run/focus", None, {"X-Agent-Viz": "focus"})
+            headers = {"X-Spiritboard": "focus"}
+            no_origin = self.request("POST", "/api/runs/run/focus", None, headers)
             self.assertEqual(no_origin[0], 403)
             self.assertEqual(self.focus_post(body="x")[0], 400)
             perform.assert_not_called()
@@ -194,15 +195,15 @@ class ServerTests(unittest.TestCase):
             self.assertEqual((status, json.loads(data)), (200, {"ok": True}))
             perform.assert_called_once_with(target)
         with (
-            patch("agent_viz.focus.resolve", return_value=target),
-            patch("agent_viz.focus.focus", return_value=False),
+            patch("spiritboard.focus.resolve", return_value=target),
+            patch("spiritboard.focus.focus", return_value=False),
         ):
             status, _, data = self.focus_post()
             self.assertEqual((status, json.loads(data)), (502, {"error": "could not open the app"}))
         resume = focus.Target("resume", "resume", command="codex resume x")
         with (
-            patch("agent_viz.focus.resolve", return_value=resume),
-            patch("agent_viz.focus.focus") as perform,
+            patch("spiritboard.focus.resolve", return_value=resume),
+            patch("spiritboard.focus.focus") as perform,
         ):
             self.assertEqual(self.focus_post()[0], 409)
             perform.assert_not_called()
@@ -241,7 +242,7 @@ class LocalConfigTests(unittest.TestCase):
             self.assertEqual(main(["serve", "--stale-after", "nan", "--data-dir", folder]), 1)
 
     def test_discover_label_selection_writes_only_selected_profiles(self):
-        from agent_viz.sources import SourceProfile
+        from spiritboard.sources import SourceProfile
 
         profiles = [
             SourceProfile("personal", "codex", "Personal", "/example/personal"),
@@ -249,7 +250,7 @@ class LocalConfigTests(unittest.TestCase):
         ]
         with (
             tempfile.TemporaryDirectory() as folder,
-            patch("agent_viz.cli.discover_profiles", return_value=profiles),
+            patch("spiritboard.cli.discover_profiles", return_value=profiles),
         ):
             path = Path(folder) / "profiles.json"
             self.assertEqual(main(["discover", "--label", "Work", "--write-config", str(path)]), 0)
@@ -264,7 +265,7 @@ if __name__ == "__main__":
 
 class LivenessSnapshotTests(unittest.TestCase):
     def test_runs_carry_checked_liveness(self):
-        from agent_viz.model import now
+        from spiritboard.model import now
 
         class Monitor:
             profiles = []

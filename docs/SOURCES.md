@@ -175,7 +175,7 @@ look for the live process that owns it; SDK runs are never eligible.
 The browser receives only `available`, `kind` (`focus`, `resume` or
 `unsupported`), a display label and, for resume, the command text.
 `POST /api/runs/<id>/focus` requires a same-origin `Origin` and an
-`X-Agent-Viz: focus` header, takes no body, recomputes the target and runs only
+`X-Spiritboard: focus` header, takes no body, recomputes the target and runs only
 fixed argv lists (no shell) with short timeouts: `cmux select-workspace` /
 `focus-panel`, `tmux select-window` / `select-pane` / `switch-client`, an
 AppleScript that selects a matching iTerm2 session or Terminal tab, `open -b` /

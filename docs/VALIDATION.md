@@ -47,7 +47,7 @@ account change, upstream code execution, or native hook installation.
   hostile Host/Origin, escaped text, static asset security headers, and loopback bind.
 - Browser DOM tests cover filtering with parent context, nested/orphan visibility,
   script-like text rendered literally, and history reset after a replaced journal.
-- `node --check src/agent_viz/static/app.js` passes. `uv build` produces a wheel
+- `node --check src/spiritboard/static/app.js` passes. `uv build` produces a wheel
   and source distribution; the installed wheel includes the browser assets and
   starts the command-line interface outside the checkout.
 

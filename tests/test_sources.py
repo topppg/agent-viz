@@ -9,9 +9,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from agent_viz import sources as sources_module
-from agent_viz.monitor import Monitor
-from agent_viz.sources import (
+from spiritboard import sources as sources_module
+from spiritboard.monitor import Monitor
+from spiritboard.sources import (
     SourceProfile,
     discover_profiles,
     load_profiles,
@@ -136,7 +136,7 @@ class SourcesTests(unittest.TestCase):
         self.assertEqual(later["grandchild"]["session_id"], first["session_id"])
 
     def test_old_codex_collection_stable_when_ancestors_arrive_and_window_rotates(self):
-        from agent_viz.store import Store
+        from spiritboard.store import Store
 
         profile = self.profile()
         grandchild = self.log(profile, "grandchild.jsonl", self.codex("grandchild", "child"))
@@ -295,7 +295,7 @@ class SourcesTests(unittest.TestCase):
                 os.mkfifo(path)
                 code = (
                     "from pathlib import Path; import sys; "
-                    f"from agent_viz.sources import {reader}; "
+                    f"from spiritboard.sources import {reader}; "
                     "path = Path(sys.argv[1]); "
                     + (
                         "assert _subagent_description("
@@ -339,10 +339,10 @@ class SourcesTests(unittest.TestCase):
                 opened = MagicMock()
                 opened.__enter__.return_value = stream
                 with (
-                    patch("agent_viz.sources.os.open", return_value=123) as open_file,
-                    patch("agent_viz.sources.os.fdopen", return_value=opened),
+                    patch("spiritboard.sources.os.open", return_value=123) as open_file,
+                    patch("spiritboard.sources.os.fdopen", return_value=opened),
                     patch(
-                        "agent_viz.sources.os.fstat",
+                        "spiritboard.sources.os.fstat",
                         return_value=SimpleNamespace(st_mode=stat.S_IFIFO, st_size=100),
                     ),
                 ):
@@ -505,7 +505,8 @@ class SourcesTests(unittest.TestCase):
         )
         path = self.log(profile, "run.jsonl", rows)
         self.assertGreater(path.stat().st_size, 900_000)
-        with patch("agent_viz.sources._last_request", wraps=sources_module._last_request) as search:
+        real_search = sources_module._last_request
+        with patch("spiritboard.sources._last_request", wraps=real_search) as search:
             self.assertEqual(scan_profile(profile)[0]["task"], "Deep request")
             with path.open("a") as stream:
                 stream.write(json.dumps(filler) + "\n")
@@ -577,8 +578,8 @@ class SourcesTests(unittest.TestCase):
         self.log(profile, "new.jsonl", self.codex("new"))
         coverage = {}
         with patch(
-            "agent_viz.sources._records",
-            wraps=__import__("agent_viz.sources", fromlist=["_records"])._records,
+            "spiritboard.sources._records",
+            wraps=__import__("spiritboard.sources", fromlist=["_records"])._records,
         ) as records:
             rows = scan_profile(profile, max_age_days=7, diagnostics=coverage)
         self.assertEqual({row["native_id"] for row in rows}, {"new"})
@@ -603,7 +604,7 @@ class SourcesTests(unittest.TestCase):
         self.assertEqual([p.kind for p in profiles].count("codex"), 2)
 
     def test_named_portable_profiles_and_copies_are_not_account_deduplicated(self):
-        from agent_viz.store import Store
+        from spiritboard.store import Store
 
         for name, kind in [
             (".codex", "codex"),
@@ -633,13 +634,13 @@ class SourcesTests(unittest.TestCase):
             store.close()
 
     def test_automatic_monitor_discovers_new_profiles_and_retains_missing_warning(self):
-        from agent_viz.store import Store
+        from spiritboard.store import Store
 
         store = Store()
         monitor = Monitor(None, store)
         try:
             with patch(
-                "agent_viz.monitor.discover_profiles",
+                "spiritboard.monitor.discover_profiles",
                 side_effect=lambda: discover_profiles(self.root),
             ):
                 self.assertEqual(monitor.scan_once()["counts"], {})
@@ -664,12 +665,12 @@ class SourcesTests(unittest.TestCase):
             store.close()
 
     def test_explicit_monitor_does_not_discover_other_profiles(self):
-        from agent_viz.store import Store
+        from spiritboard.store import Store
 
         store = Store()
         try:
             with patch(
-                "agent_viz.monitor.discover_profiles",
+                "spiritboard.monitor.discover_profiles",
                 side_effect=AssertionError("Must remain manual"),
             ):
                 monitor = Monitor([], store)
@@ -702,12 +703,12 @@ class SourcesTests(unittest.TestCase):
         self.assertTrue(diagnostics["truncated"])
         self.assertFalse(diagnostics["discovery_limited"])
         self.assertNotIn("root", diagnostics)
-        with patch("agent_viz.sources.MAX_ENTRIES", 1):
+        with patch("spiritboard.sources.MAX_ENTRIES", 1):
             bounded = scan_inventory(profile)
             self.assertTrue(bounded["entry_budget_hit"])
             self.assertTrue(bounded["discovery_limited"])
         self.log(profile, "nested/deep.jsonl", self.codex("deep"))
-        with patch("agent_viz.sources.MAX_DEPTH", 0):
+        with patch("spiritboard.sources.MAX_DEPTH", 0):
             bounded = scan_inventory(profile)
             self.assertTrue(bounded["depth_budget_hit"])
             self.assertTrue(bounded["truncated"])

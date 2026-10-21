@@ -1,4 +1,4 @@
-# Agent Viz: repository rules
+# Spiritboard: repository rules
 
 These rules bind every coding agent (Claude Code, Codex, …) and every human working in this repo.
 `AGENTS.md` is canonical; `CLAUDE.md` only contains `@AGENTS.md`. Before changing a file, read every `AGENTS.md`
@@ -44,10 +44,10 @@ from the repo root down to that file's directory. Closer files add to or overrid
   (`git worktree remove ../agent-viz-worktrees/<slug>`). Never use broad paths or globs.
 
 ## 4. Privacy and references
-- Agent Viz reads local agent transcripts. Never commit real transcripts, session data, profile paths, account
-  identifiers or anything from `.agent-viz/`. Tests and demos use synthetic data built in temporary directories.
+- Spiritboard reads local agent transcripts. Never commit real transcripts, session data, profile paths, account
+  identifiers or anything from `.spiritboard/`. Tests and demos use synthetic data built in temporary directories.
 - Upstream checkouts in `references/` may inform decisions; their code is never copied. Understand the idea and
-  write the Agent Viz version independently.
+  write the Spiritboard version independently.
 - Secrets live in the environment. `.env*` files are git-ignored; only `.env.example` is committed.
 - Anything that leaves the machine (posting, sending external API calls not already opted into) requires explicit
   approval per action.
@@ -73,5 +73,5 @@ from the repo root down to that file's directory. Closer files add to or overrid
 uv sync
 uv run ruff check . && uv run ruff format --check .
 uv run pytest
-uv run agent-viz serve --demo --data-dir .agent-viz/demo --port 8766
+uv run spiritboard serve --demo --data-dir .spiritboard/demo --port 8766
 ```

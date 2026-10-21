@@ -6,7 +6,7 @@ import unittest
 from html.parser import HTMLParser
 from pathlib import Path
 
-STATIC = Path(__file__).resolve().parents[1] / "src" / "agent_viz" / "static"
+STATIC = Path(__file__).resolve().parents[1] / "src" / "spiritboard" / "static"
 
 
 class Assets(HTMLParser):
@@ -179,7 +179,7 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  const control = (key) => flatten(detail()).find(x => x.dataset.focusKey === key);
  assert.equal(control('open-app').textContent, '↗ open in cmux');
  control('open-app').listeners.click(); await tick();
- assert.deepEqual(posts, [{url:'/api/runs/orphan/focus', headers:{'X-Agent-Viz':'focus'}}]);
+ assert.deepEqual(posts, [{url:'/api/runs/orphan/focus', headers:{'X-Spiritboard':'focus'}}]);
  assert.ok(detail().textContent.includes('opened'));
  stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
  assert.equal(requests.filter(x => x === '/api/runs/orphan/focus').length, 1);

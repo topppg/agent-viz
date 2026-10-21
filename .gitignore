@@ -3,6 +3,7 @@
 
 # Local runtime data and private configuration.
 /.agent-viz/
+/.spiritboard/
 /recordings/private/
 .env
 .env.*

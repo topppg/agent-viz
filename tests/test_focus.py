@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_viz import focus
-from agent_viz.focus import Process, Step, Target
-from agent_viz.sources import SourceProfile
+from spiritboard import focus
+from spiritboard.focus import Process, Step, Target
+from spiritboard.sources import SourceProfile
 
 CLAUDE_ID = "11111111-2222-4333-8444-555555555555"
 OTHER_ID = "22222222-2222-4333-8444-555555555555"

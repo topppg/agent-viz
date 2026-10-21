@@ -23,6 +23,8 @@ p { margin: 0; }
 
 .top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; padding: 16px 24px; border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+.mark { width: 20px; height: 24px; align-self: center; fill: none; stroke: var(--run); stroke-width: 3; stroke-linejoin: round; }
+.mark .eyes { stroke-linecap: round; }
 .logo { font-size: 22px; font-weight: 700; letter-spacing: .04em; color: var(--run); }
 .cursor { color: var(--run); animation: blink 1.1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }

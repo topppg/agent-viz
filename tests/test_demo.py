@@ -4,10 +4,10 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import request
 
-from agent_viz.demo import run_demo
-from agent_viz.model import validate_event
-from agent_viz.server import Collector
-from agent_viz.store import Store
+from spiritboard.demo import run_demo
+from spiritboard.model import validate_event
+from spiritboard.server import Collector
+from spiritboard.store import Store
 
 
 class DemoTests(unittest.TestCase):

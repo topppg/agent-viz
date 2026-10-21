@@ -70,7 +70,7 @@ class Client:
         self._stats = dict(delivered=0, dropped=0, failed=0, retried=0)
         self._opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
         self._thread = threading.Thread(
-            target=self._deliver, name="agent-viz-delivery", daemon=True
+            target=self._deliver, name="spiritboard-delivery", daemon=True
         )
         self._thread.start()
 
