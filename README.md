@@ -6,8 +6,8 @@ Open it and immediately know which agents need your attention, what they're
 doing, and where to continue.
 
 Spiritboard is a local dashboard for every coding agent you run. Claude Code,
-Codex, opencode and Pi sessions from your terminals, your desktop apps and each of your
-accounts appear side by side, with what each one is working on, whether it is running,
+Codex, opencode, Pi and DeepSeek Harness sessions from your terminals, your desktop apps
+and each of your accounts appear side by side, with what each one is working on, whether it is running,
 waiting for you or gone, and a button that takes you straight to it.
 
 It only reads what the agents already write to disk. It never starts, steers or
@@ -31,11 +31,12 @@ stops an agent, and nothing leaves your machine unless you turn on summaries.
   | ✓ **done** | An SDK run reported that it finished. |
 
 - **What each one is doing.** The session's own title (your `/rename`, Claude's
-  generated title, the Codex thread name, the opencode session title or a Pi `/name`), its goal, your latest request and
+  generated title, the Codex thread name, the opencode session title, a Pi `/name` or the
+  DeepSeek Harness title), its goal, your latest request and
   the agent's latest reply or commentary. Subagents sit under their parent,
   named by the task the parent gave them.
 - **Jump in.** Open a session in the terminal or app that runs it (cmux, tmux,
-  iTerm2, Terminal, VS Code, the ChatGPT or Claude desktop app), or copy a
+  iTerm2, Terminal, VS Code, the ChatGPT, Claude or DeepSeek Harness app), or copy a
   resume command when it is closed.
 
 Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w`
@@ -48,8 +49,8 @@ Spiritboard from anywhere. No repo checkout or API key is needed; uv manages
 the isolated Python environment (Python 3.12+). There are no runtime package
 dependencies.
 
-See your own agents. Supported Codex, Claude, opencode and Pi storage is discovered
-automatically, without opening authentication files or tables:
+See your own agents. Supported Codex, Claude, opencode, Pi and DeepSeek Harness storage
+is discovered automatically, without opening authentication files or tables:
 
 ```sh
 uvx --from git+https://github.com/topppg/spiritboard.git@main spiritboard
@@ -81,12 +82,15 @@ A PyPI release is not published yet; do not substitute `uvx spiritboard` until i
 
 ## Sources and privacy
 
-- **Discovery.** The standard `~/.claude`, `~/.codex` and `~/.pi/agent` folders,
-  named variants such as `~/.claude-work` or `~/.codex-switch/profiles/*`,
+- **Discovery.** The standard `~/.claude`, `~/.codex`, `~/.pi/agent` and `~/.dsh`
+  folders, named variants such as `~/.claude-work` or `~/.codex-switch/profiles/*`,
   `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `PI_CODING_AGENT_DIR` /
-  `PI_CODING_AGENT_SESSION_DIR`, and opencode's `opencode.db` (and release-channel
-  databases) in `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`, or
-  `OPENCODE_DB`. The opencode database is opened read-only. To choose sources yourself, write a private config and pass it:
+  `PI_CODING_AGENT_SESSION_DIR` / `DSH_HOME`, and opencode's `opencode.db` (and
+  release-channel databases) in `$XDG_DATA_HOME/opencode` or
+  `~/.local/share/opencode`, or `OPENCODE_DB`. The opencode database is opened
+  read-only. DeepSeek Harness logs are zstd-compressed: their text needs Python 3.14+
+  or the `zstd` command; without either, its sessions are listed with liveness but
+  no text. To choose sources yourself, write a private config and pass it:
 
   ```sh
   spiritboard discover --write-config ~/.config/spiritboard/profiles.json
@@ -103,10 +107,11 @@ A PyPI release is not published yet; do not substitute `uvx spiritboard` until i
 - **History window.** Transcripts not modified in the last 7 days are skipped
   without being read; change it with `--max-age-days N` (`0` reads everything).
 - **Liveness.** Every few seconds Spiritboard checks which sessions a live local
-  process still owns, from Claude's `sessions/<pid>.json` and the Codex thread
-  locks. opencode and Pi record no owner, so a live `opencode` or `pi` running in a
-  session's directory marks only that directory's most recent session open. A
-  session is only marked closed when that check can run.
+  process still owns, from Claude's `sessions/<pid>.json`, the Codex thread locks
+  and the DeepSeek Harness `session.lock` files. opencode and Pi record no owner, so a
+  live `opencode` or `pi` running in a session's directory marks only that
+  directory's most recent session open. A session is only marked closed when that
+  check can run.
 
 What is read, and the bounds on it, are in the [source guide](docs/SOURCES.md).
 
@@ -114,7 +119,7 @@ What is read, and the bounds on it, are in the [source guide](docs/SOURCES.md).
 
 Opening a row looks up which local process owns the session and how to show it:
 a cmux panel, a tmux pane, an iTerm2 session, an Apple Terminal tab, or the
-owning app's window (VS Code, Ghostty, ChatGPT, Claude desktop). On Linux, tmux
+owning app's window (VS Code, Ghostty, ChatGPT, Claude desktop, DeepSeek Harness). On Linux, tmux
 panes and `wmctrl` windows are supported.
 
 The button only brings a window forward. It never types into, signals or
@@ -122,7 +127,7 @@ controls an agent. The first iTerm2 or Terminal use can trigger a macOS
 automation prompt. For a closed session it offers a resume command, such as
 `claude --resume <id>` with the profile's `CLAUDE_CONFIG_DIR`, for you to copy
 and run; Spiritboard never runs it, and never offers it while the session might
-still be running elsewhere.
+still be running elsewhere. DeepSeek Harness sessions offer no resume command.
 
 ## Optional goal summaries
 
