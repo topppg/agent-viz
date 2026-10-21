@@ -22,11 +22,15 @@ class FakeCodex:
         self.connected = connected
         self.pending = False
         self.started = 0
+        self.registration_started = 0
         self.closed = 0
         self.calls: list[tuple[dict, float]] = []
 
     def start(self) -> None:
         self.started += 1
+
+    def start_registration(self) -> None:
+        self.registration_started += 1
 
     def public_state(self) -> dict[str, object]:
         return {
@@ -395,18 +399,45 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ProviderAuthError, "unavailable"):
             self.providers.begin("codex", "http://localhost:8767/callback")
 
-    def test_saved_codex_tombstone_prevents_automatic_restore_requests(self) -> None:
+    def test_saved_codex_tombstone_restores_registration_without_authorizing_requests(self) -> None:
         self.codex.connected = True
         self.providers.start()
         self.providers.set_enabled(True)
         self.providers.disconnect("codex")
         reloaded_codex = FakeCodex(connected=True)
         with patch("spiritboard.summary_providers._codex_connection", return_value=reloaded_codex):
-            restored = SummaryProviders(self.directory)
-            restored.start()
+            with patch.object(reloaded_codex, "disconnect") as disconnect:
+                restored = SummaryProviders(self.directory)
+                restored.start()
+                disconnect.assert_not_called()
         self.assertEqual(reloaded_codex.started, 0)
+        self.assertEqual(reloaded_codex.registration_started, 1)
         self.assertEqual(restored.routes(), [])
         self.assertFalse(restored.public_state()["providers"]["codex"]["connected"])
+        with self.assertRaises(ProviderAuthError):
+            restored.request("codex", {}, 1)
+        self.assertEqual(reloaded_codex.calls, [])
+
+    def test_disconnect_during_codex_start_forgets_loaded_connection(self) -> None:
+        ready, release = threading.Event(), threading.Event()
+        self.codex.connected = True
+
+        def start() -> None:
+            ready.set()
+            release.wait(2)
+
+        with patch.object(self.codex, "start", side_effect=start):
+            with patch.object(self.codex, "disconnect", wraps=self.codex.disconnect) as disconnect:
+                thread = threading.Thread(target=self.providers.start)
+                thread.start()
+                self.assertTrue(ready.wait(1))
+                self.providers.disconnect("codex")
+                release.set()
+                thread.join(2)
+                disconnect.assert_called_once()
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(self.codex.connected)
+        self.assertEqual(self.providers.routes(), [])
 
     def test_failed_codex_start_is_not_reflected(self) -> None:
         with patch.object(self.codex, "start", side_effect=RuntimeError("private credential")):

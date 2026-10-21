@@ -21,6 +21,7 @@ _DEMO_ERROR = "Provider connections are disabled in the synthetic demo."
 
 class _CodexProvider(Protocol):
     def start(self) -> None: ...
+    def start_registration(self) -> None: ...
     def begin_login(self, callback_url: str) -> dict[str, object]: ...
     def complete(
         self, state: str, code: str, *, client_id: str | None = None, error: str | None = None
@@ -158,8 +159,11 @@ class SummaryProviders:
             blocked = "codex" in self._blocked
         try:
             codex = _codex_connection(self._directory)
-            if codex is not None and not blocked:
-                codex.start()
+            if codex is not None:
+                if blocked:
+                    codex.start_registration()
+                else:
+                    codex.start()
             with self._lock:
                 if not self._closed:
                     self._codex = codex
@@ -170,7 +174,7 @@ class SummaryProviders:
                     closed = True
             if closed and codex is not None:
                 codex.close()
-            elif forget and codex is not None:
+            elif forget and not blocked and codex is not None:
                 codex.disconnect()
         except (OSError, ValueError, RuntimeError, ProviderAuthError):
             with self._lock:
