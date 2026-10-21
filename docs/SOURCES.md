@@ -1,8 +1,9 @@
-# Local Codex, Claude, opencode and Pi sources
+# Local Codex, Claude, opencode, Pi and DeepSeek Harness sources
 
 ## What works
 
-The collector can observe multiple Codex, Claude, opencode and Pi storage profiles together.
+The collector can observe multiple Codex, Claude, opencode, Pi and DeepSeek Harness
+storage profiles together.
 Each profile has its own stable ID, label and transcript directory. The same
 native session ID in two profiles creates two separate dashboard runs. Labels
 describe storage profiles; they do **not** prove which account is signed in.
@@ -17,10 +18,10 @@ without a root conversation ID. Different profiles cannot share a collection.
 
 By default discovery runs again on every background scan, without requiring a
 four-profile configuration or restarting the dashboard when another profile
-appears. It checks the standard `.codex`, `.claude` and `.pi/agent` directories, named
+appears. It checks the standard `.codex`, `.claude`, `.pi/agent` and `.dsh` directories, named
 `.codex-*` and `.claude-*` directories, `.codex-switch/profiles/*`, and the current process's
-`CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`
-selectors. Aliases pointing to the same storage
+`CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR` /
+`DSH_HOME` selectors. Aliases pointing to the same storage
 directory are deduplicated. Distinct storage directories are **not** collapsed
 because they contain identical native session IDs: copied histories and separate
 accounts stay distinct. No account, authentication, key or credential file
@@ -134,7 +135,8 @@ top-level `opencode` processes. opencode records no per-session owner, so this
 is per directory: with N such processes in a directory, its N most recently
 updated non-archived top-level sessions and their child sessions count as live.
 An older session that is still open in a second terminal in the same directory
-can therefore be reported closed. A session confirmed to have no owner shows as **closed**. When the check cannot
+can therefore be reported closed. DeepSeek Harness is checked through the `session.lock` files its writer holds (`lsof`).
+A session confirmed to have no owner shows as **closed**. When the check cannot
 run (no `sessions/` or lock directory, no `lsof`, a lookup error, or transcripts
 synced from another machine) the dashboard falls back to transcript evidence
 and never says closed.
@@ -179,6 +181,43 @@ automatic login, transcript modification, hook installation, paid model call,
 or process control. Tests use invented four-profile fixtures; testing against
 existing local profiles does not start or steer the user's agents.
 
+## DeepSeek Harness
+
+A profile root (`~/.dsh`, or `DSH_HOME`) holds one folder per session at
+`sessions/--<cwd with / as ->--/session-<uuid>/`, with a zstd-compressed JSONL
+log `session.v4.jsonl.zstd` and a `session.lock`. The project folder name is
+lossy, so the working directory comes from the log's header row; the native ID
+is the header's `session-<uuid>`.
+
+- **Decoding.** Python 3.14+ uses the standard `compression.zstd`; on 3.12/3.13
+  the `zstd` command decompresses (fixed argv, no shell, the log passed as an
+  already-opened no-follow regular file, a 5 second limit). Decompressed output
+  is capped at 32 MiB per read and only the same 256 KiB head and 512 KiB tail
+  as other transcripts are parsed. A torn final frame or a line still being
+  written is dropped; complete lines before it are kept. With no decoder,
+  sessions are still listed (ID, last modified, liveness) with no text, and
+  coverage reports `"decoder": "unavailable"` and `"text_unavailable": true`.
+- **State.** An open `turn/start` is `working` (a tool call is `waiting_tool`),
+  an `approval/asked` without its `approval/decided` is `waiting_user` (needs
+  you), and every `turn/end` (completed, blocked, interrupted, aborted, …) is
+  `idle`. `last_seen` is the latest row `time`; `started_at` the header's
+  `createdAt`.
+- **Text.** The request is the latest `user/message` whose source is the user;
+  generated-title prompts and other sources are skipped. The reply is the last
+  assistant `text` block. `reasoning` blocks, tool-call arguments and
+  `tool/result` content are never read into an observation or a summary.
+- **Titles.** `session/title` events in the log, overridden by
+  `storages/session_projcache/sessions/session-<uuid>.json` (`record.rows.title.val`).
+  `storages/workspace.json`'s `archivedSessionIds` only exclude archived
+  sessions from summaries.
+- **Subagents** are separate sessions whose header has `origin: "subagent"` and
+  `parentSession`; that is the only parent link. Their task is the first prompt
+  their parent sent (`source.kind` `parent`). Each has its own `session.lock`.
+- **Liveness.** The writer takes `flock` on `session.lock` (lazily, on its first
+  write) and records no pid. `lsof` names the holder; it counts only when it is
+  the DeepSeek Harness app or runtime. Spiritboard never takes its own lock.
+  A session never written to since it opened therefore reads as not live.
+
 ## Opening a session's app
 
 Only when a native row is opened (`GET /api/runs/<id>/focus`) does the collector
@@ -200,6 +239,10 @@ look for the live process that owns it; SDK runs are never eligible.
   session's `directory`, when the session is one of the live ones above and that
   directory has exactly one such process. An older session in a directory with a
   live process leaves liveness unknown (no focus, no resume).
+- **DeepSeek Harness:** `lsof` on the session's `session.lock`; a holder that is
+  the DeepSeek Harness app or its runtime is focused by activating the app
+  (`open -b com.deepseek.dsh` or `open -a`). No resume command is offered: the
+  app ships no `tui` profile, so `dsh tui --resume <session>` is unverified.
 - **Process details:** `ps` supplies the parent chain, terminal device, start
   time and executable path (to find an enclosing `.app` bundle). The environment
   is read with `ps eww` after stripping the process arguments (or
