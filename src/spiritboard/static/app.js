@@ -6,7 +6,10 @@
   const PALETTE = ["#8fa8ff", "#c4b5fd", "#f0abfc", "#fda4af", "#7dd3fc", "#fdba74", "#a7f3d0", "#e9d5ff"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   const MAX_ROWS = 300;
-  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false };
+  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0 };
+  // Chart windows in seconds: heading, then the left and middle axis labels.
+  const ZOOMS = { 600: ["last 10 minutes", "-10m", "-5m"], 3600: ["last hour", "-1h", "-30m"], 86400: ["last 24 hours", "-24h", "-12h"],
+    604800: ["last 7 days", "-7d", "-3.5d"], 2592000: ["last 30 days", "-30d", "-15d"] };
   const node = (tag, text, className) => {
     const el = document.createElement(tag);
     if (text !== undefined && text !== null) el.textContent = String(text);
@@ -19,7 +22,10 @@
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? parsed : null;
   };
-  const serverNow = () => (time(state.snapshot?.server_time) || state.lastSnapshotAt || Date.now()) + Math.max(0, Date.now() - state.lastSnapshotAt);
+  const liveNow = () => (time(state.latest?.server_time) || state.lastSnapshotAt || Date.now()) + Math.max(0, Date.now() - state.lastSnapshotAt);
+  // While viewing the past, every age and status is judged at that moment.
+  const serverNow = () => state.past ? state.past.at : liveNow();
+  const span = (seconds) => seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${seconds / 60}m` : `${seconds / 3600}h`;
   const age = (value, now = serverNow()) => {
     const stamp = time(value);
     if (stamp === null) return "unknown";
@@ -112,8 +118,7 @@
     const perMinute = Math.max(1, Math.round(60 / data.bucket_seconds));
     return series.slice(-perMinute).reduce((a, b) => a + b, 0);
   }
-  function harnesses() {
-    const runs = state.snapshot.runs;
+  function harnesses(runs, paint = true) {
     const map = new Map();
     (state.snapshot.profiles || []).forEach((p) => map.set(`profile:${p.id}`, { key: `profile:${p.id}`, label: profileLabel(p), runs: [] }));
     runs.forEach((run) => {
@@ -122,13 +127,18 @@
       map.get(h.key).runs.push(run);
     });
     const list = [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
-    state.colors = new Map(list.map((h, i) => [h.key, PALETTE[i % PALETTE.length]]));
+    if (paint) state.colors = new Map(list.map((h, i) => [h.key, PALETTE[i % PALETTE.length]]));
     list.forEach((h) => { h.rate = h.runs.reduce((sum, run) => sum + rateOf(run.run_id), 0); h.latest = h.runs.reduce((m, run) => Math.max(m, time(run.last_seen) || 0), 0); });
     return list;
   }
 
   function applySnapshot(snapshot, reset = false) {
     if (!snapshot || !Array.isArray(snapshot.runs)) throw new Error("Invalid dashboard snapshot.");
+    state.latest = snapshot;
+    state.lastSnapshotAt = Date.now();
+    if (state.zoom !== 600 && Date.now() - state.chartAt > 10000) loadChart();
+    // The past board stays still; only the chart follows live updates.
+    if (state.past) { render(); return; }
     const previousCursor = state.snapshot?.cursor;
     const replacedJournal = Boolean(state.snapshot?.stream_id && snapshot.stream_id && state.snapshot.stream_id !== snapshot.stream_id);
     const historyReset = reset || replacedJournal || (typeof previousCursor === "number" && snapshot.cursor < previousCursor);
@@ -137,7 +147,6 @@
       state.request += 1; // Ignore any timeline request from the previous journal.
     }
     state.snapshot = snapshot;
-    state.lastSnapshotAt = Date.now();
     const fingerprint = JSON.stringify([snapshot.runs, snapshot.profiles || [], snapshot.ai || {}]);
     const changed = fingerprint !== state.fingerprint;
     state.fingerprint = fingerprint;
@@ -151,8 +160,10 @@
   }
   function render() {
     if (!state.snapshot) return;
-    const list = harnesses();
-    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list); renderFlux(list);
+    // The chart always shows the live journal; colours follow its harnesses.
+    const current = harnesses(state.latest.runs);
+    const list = state.past ? harnesses(state.snapshot.runs, false) : current;
+    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list); renderFlux(current); renderPast();
     // Rebuild the table only when something visible changed, so clicks and focus survive live ticks.
     if (tableKey() !== state.tableKey) renderTable(); else updateSeen();
   }
@@ -235,9 +246,70 @@
     if (idle) host.append(node("p", `${idle} idle harness${idle === 1 ? "" : "es"} · pick one in the harness filter`, "harness-idle muted"));
     if (focused) [...host.children].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
+  function chartData() {
+    if (state.zoom === 600) return state.latest?.activity || activity();
+    return state.chart || { bucket_seconds: state.zoom / 60, buckets: 60, runs: {} };
+  }
+  function renderZoom() {
+    const [heading, left, middle] = ZOOMS[state.zoom];
+    [...$("zoom").children].forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.zoom) === state.zoom)));
+    $("flux-window").textContent = heading.replace("minutes", "min");
+    $("axis").replaceChildren(node("span", left), node("span", middle), node("span", "now", "now"));
+  }
+  function setZoom(zoom) {
+    state.zoom = zoom; state.chart = null; renderZoom();
+    if (zoom !== 600) loadChart();
+    if (state.snapshot) render();
+  }
+  async function loadChart() {
+    const zoom = state.zoom; state.chartAt = Date.now();
+    try {
+      const response = await fetch(`/api/activity?window=${zoom}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Chart unavailable (HTTP ${response.status}).`);
+      const data = await response.json();
+      if (zoom === state.zoom) { state.chart = data; if (state.snapshot) render(); }
+    } catch (error) { showError(error.message || "Unable to load the chart."); }
+  }
+  // A bar stands for the board at the end of its bucket; the newest bar is now.
+  function travel(i, data) {
+    if (i >= data.buckets - 1) { backToLive(); return; }
+    const end = time(data.end) || liveNow();
+    loadPast(end - (data.buckets - 1 - i) * data.bucket_seconds * 1000);
+  }
+  async function loadPast(at) {
+    const ticket = ++state.pastRequest;
+    try {
+      const response = await fetch(`/api/snapshot?at=${(at / 1000).toFixed(3)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`That moment is not in the kept history (HTTP ${response.status}).`);
+      const snapshot = await response.json();
+      if (ticket !== state.pastRequest) return;
+      if (!snapshot || !Array.isArray(snapshot.runs)) throw new Error("Invalid dashboard snapshot.");
+      state.past = { at: time(snapshot.at) ?? at };
+      state.snapshot = snapshot; state.fingerprint = `past:${snapshot.at}`;
+      showError(null); render();
+    } catch (error) { if (ticket === state.pastRequest) showError(error.message || "Unable to load that moment."); }
+  }
+  function backToLive() {
+    state.pastRequest += 1;
+    if (!state.past) return;
+    state.past = null; state.snapshot = state.latest; state.fingerprint = null;
+    render();
+  }
+  const pastText = node("span");
+  const backButton = node("button", "⟲ back to live"); backButton.type = "button";
+  backButton.addEventListener("click", backToLive);
+  $("past-bar").replaceChildren(pastText, backButton);
+  function renderPast() {
+    $("past-bar").hidden = !state.past;
+    if (!state.past) return;
+    const when = new Date(state.past.at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    pastText.textContent = `Viewing ${when} · ${age(state.past.at, liveNow())} ago · `;
+  }
   function renderFlux(list) {
     const host = $("flux"); host.replaceChildren();
-    const data = activity(); const count = data.buckets || 60; const scale = 60 / (data.bucket_seconds || 10);
+    const data = chartData(); const count = data.buckets || 60; const bucket = data.bucket_seconds || 10; const scale = 60 / bucket;
+    const windowText = ZOOMS[state.zoom][0];
+    $("flux-note").textContent = `height = ${bucket <= 60 ? "events/min" : `events per ${span(bucket)}`} · dots = latest events`;
     const byHarness = list.map((h) => {
       const series = new Array(count).fill(0);
       h.runs.forEach((run) => (data.runs?.[run.run_id] || []).forEach((v, i) => { series[i] += v; }));
@@ -245,7 +317,7 @@
     }).filter((h) => h.series.some(Boolean));
     const totals = new Array(count).fill(0).map((_, i) => byHarness.reduce((sum, h) => sum + h.series[i], 0));
     const peak = Math.max(...totals);
-    if (!peak) { host.append(node("span", "No events in the last 10 minutes", "empty")); host.setAttribute("aria-label", "No events in the last 10 minutes"); return; }
+    if (!peak) { host.append(node("span", `No events in the ${windowText}`, "empty")); host.setAttribute("aria-label", `No events in the ${windowText}`); return; }
     const height = 170; const unit = height / Math.max(peak, 3);
     totals.forEach((_, i) => {
       const col = node("div", null, "col");
@@ -254,10 +326,11 @@
         if (!h.series[i]) return;
         const seg = node("span"); seg.style.height = `${h.series[i] * unit}px`; seg.style.background = state.colors.get(h.key); col.append(seg);
       });
+      col.addEventListener("click", () => travel(i, data));
       host.append(col);
     });
     // Deterministic spray per absolute bucket so dots stay put as time advances.
-    const endBucket = Math.floor((time(data.end) || serverNow()) / 1000 / (data.bucket_seconds || 10));
+    const endBucket = Math.floor((time(data.end) || liveNow()) / 1000 / bucket);
     const noise = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); };
     for (let i = Math.max(0, count - 12); i < count; i++) {
       const top = byHarness.reduce((best, h) => h.series[i] > (best?.series[i] || 0) ? h : best, null);
@@ -273,9 +346,15 @@
         host.append(dot);
       }
     }
-    host.append(node("span", `${peak * scale}/min`, "ymax"));
-    const busiest = byHarness.map((h) => [h.label, h.series.slice(-scale).reduce((a, b) => a + b, 0)]).sort((a, b) => b[1] - a[1])[0];
-    host.setAttribute("aria-label", `Events per minute over the last 10 minutes, stacked by harness. Busiest now: ${busiest[0]} at ${busiest[1]} per minute.`);
+    if (state.past) {
+      const start = (time(data.end) || liveNow()) - count * bucket * 1000;
+      const x = (state.past.at - start) / (count * bucket * 1000);
+      if (x >= 0 && x <= 1) { const marker = node("span", null, "marker"); marker.style.left = `${x * 100}%`; host.append(marker); }
+    }
+    host.append(node("span", bucket <= 60 ? `${peak * scale}/min` : `${peak}/${span(bucket)}`, "ymax"));
+    const recent = Math.max(1, Math.round(scale));
+    const busiest = byHarness.map((h) => [h.label, h.series.slice(-recent).reduce((a, b) => a + b, 0)]).sort((a, b) => b[1] - a[1])[0];
+    host.setAttribute("aria-label", `Events over the ${windowText}, stacked by harness. Busiest in the latest ${bucket <= 60 ? "minute" : span(bucket)}: ${busiest[0]} with ${busiest[1]}.`);
   }
 
   function workRank(run) {
@@ -516,6 +595,8 @@
       }
     } else return [];
     if (state.targetNote) items.push(node("span", state.targetNote, "muted"));
+    // A past board never opens or resumes what is running now.
+    if (state.past) items.forEach((item) => { if (item.tagName === "button" || item.tagName === "BUTTON") { item.disabled = true; item.title = "Back to live to open or resume"; } });
     return items;
   }
   async function fetchTarget(id) {
@@ -531,12 +612,14 @@
     state.target = target; renderDetail();
   }
   async function openApp(id) {
+    if (state.past) return;
     let ok = false;
     try { ok = (await fetch(`/api/runs/${encodeURIComponent(id)}/focus`, { method: "POST", cache: "no-store", headers: { "X-Spiritboard": "focus" } })).ok; } catch (_) { ok = false; }
     if (id !== state.selected) return;
     state.targetNote = ok ? "opened" : "could not open"; renderDetail();
   }
   async function copyCommand(id) {
+    if (state.past) return;
     // Re-check first: a session that came back to life must not be resumed (forked).
     const target = await fetchTarget(id);
     if (id !== state.selected) return;
@@ -635,6 +718,7 @@
     if (state.snapshot) renderTable();
   }));
   renderSort();
+  [...$("zoom").children].forEach((b) => b.addEventListener("click", () => setZoom(Number(b.dataset.zoom))));
   $("harness-filter").addEventListener("change", render);
   $("window-filter").addEventListener("change", () => { if (state.snapshot) renderTable(); });
   $("search").addEventListener("input", () => { if (state.snapshot) renderTable(); });
@@ -645,7 +729,7 @@
     if (event.key === "Escape") { if (typing) event.target.blur(); else selectRun(null); return; }
     if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
     const actions = { "/": () => $("search").focus(), j: () => move(1), ArrowDown: () => move(1), k: () => move(-1), ArrowUp: () => move(-1),
-      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed") };
+      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed"), l: backToLive, L: backToLive };
     if (actions[event.key]) { event.preventDefault(); actions[event.key](); }
   });
   renderViews();
