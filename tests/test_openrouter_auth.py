@@ -4,7 +4,6 @@ import base64
 import hashlib
 import json
 import os
-import stat
 import tempfile
 import threading
 import time
@@ -13,6 +12,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlsplit
 
+from spiritboard.credentials import CredentialStore, CredentialStoreError
 from spiritboard.openrouter_auth import OpenRouterConnection, ProviderAuthError
 
 _KEY = "sk-or-v1-synthetic-key-not-a-real-credential"
@@ -52,7 +52,13 @@ class OpenRouterTests(unittest.TestCase):
         self.assertNotEqual(query["code_challenge"], second["code_challenge"])
         self.assertEqual(
             self.connection.public_state(),
-            {"available": True, "connected": False, "pending": True, "error": None},
+            {
+                "available": True,
+                "connected": False,
+                "pending": True,
+                "error": None,
+                "storage_error": False,
+            },
         )
 
     def test_callback_validation_never_allows_remote_or_reflected_routes(self) -> None:
@@ -95,10 +101,14 @@ class OpenRouterTests(unittest.TestCase):
         self.assertEqual(challenge, query["code_challenge"][0])
         self.assertEqual(self.connection.key(), _KEY)
         self.assertEqual(OpenRouterConnection(self.directory).key(), _KEY)
-        saved = self.directory / "auth/openrouter.json"
-        if os.name == "posix":
-            self.assertEqual(stat.S_IMODE(saved.stat().st_mode), 0o600)
-            self.assertEqual(stat.S_IMODE(saved.parent.stat().st_mode), 0o700)
+        self.assertEqual(
+            json.loads(CredentialStore(self.directory).load("openrouter")),
+            {"version": 1, "key": _KEY},
+        )
+        self.assertFalse((self.directory / "auth/openrouter.json").exists())
+        for path in self.directory.rglob("*"):
+            if path.is_file():
+                self.assertNotIn(_KEY.encode(), path.read_bytes())
         self.assertNotIn(_KEY, json.dumps(self.connection.public_state()))
         self.assertNotIn(body["code_verifier"], json.dumps(self.connection.public_state()))
         self.assertNotIn(query["state"][0], json.dumps(self.connection.public_state()))
@@ -275,6 +285,7 @@ class OpenRouterTests(unittest.TestCase):
             self.assertFalse(self.connection.public_state()["pending"])
             transport.assert_not_called()
         self.assertFalse((self.directory / "auth/openrouter.json").exists())
+        self.assertIsNone(CredentialStore(self.directory).load("openrouter"))
 
     def test_close_cancels_pending_without_deleting_saved_connection(self) -> None:
         self.connection.set_key(_KEY)
@@ -286,18 +297,20 @@ class OpenRouterTests(unittest.TestCase):
             self.connection.complete(query["state"][0], "synthetic-code")
 
     def test_malformed_storage_is_safe_and_does_not_expose_content(self) -> None:
-        saved = self.directory / "auth/openrouter.json"
-        for raw in (b"private transcript", b"x" * 8193, b"[]", b'{"version":1,"key":"bad"}'):
-            saved.write_bytes(raw)
-            saved.chmod(0o600)
-            restored = OpenRouterConnection(self.directory)
+        for raw in ("private transcript", "x" * 8193, "[]", '{"version":1,"key":"bad"}'):
+            with patch("spiritboard.openrouter_auth.CredentialStore.load", return_value=raw):
+                restored = OpenRouterConnection(self.directory)
             self.assertIsNone(restored.key())
             self.assertIn("safely", str(restored.public_state()["error"]))
+            self.assertTrue(restored.public_state()["storage_error"])
             self.assertNotIn("private transcript", json.dumps(restored.public_state()))
 
     @unittest.skipUnless(os.name == "posix", "POSIX unsafe file types and permissions")
-    def test_symlinks_fifo_hardlinks_and_public_files_are_rejected(self) -> None:
+    def test_legacy_symlinks_fifo_hardlinks_and_public_files_are_never_opened_or_deleted(
+        self,
+    ) -> None:
         saved = self.directory / "auth/openrouter.json"
+        saved.parent.mkdir(mode=0o700, exist_ok=True)
         target = self.directory / "synthetic-target"
         target.write_text("untouched")
         target.chmod(0o600)
@@ -314,29 +327,102 @@ class OpenRouterTests(unittest.TestCase):
                     saved.chmod(0o644)
                 restored = OpenRouterConnection(self.directory)
                 self.assertIsNone(restored.key())
-                with self.assertRaises(ProviderAuthError):
-                    restored.set_key(_KEY)
-                with self.assertRaises(ProviderAuthError):
-                    restored.disconnect()
+                restored.set_key(_KEY)
+                restored.disconnect()
+                self.assertTrue(saved.exists() or saved.is_symlink())
                 self.assertEqual(target.read_text(), "untouched")
                 saved.unlink()
 
     @unittest.skipUnless(os.name == "posix", "POSIX directory permissions")
     def test_existing_public_directory_not_silently_chmodded(self) -> None:
         auth = self.directory / "auth"
+        auth.mkdir(mode=0o700, exist_ok=True)
         auth.chmod(0o755)
         restored = OpenRouterConnection(self.directory)
         with self.assertRaises(ProviderAuthError):
             restored.set_key(_KEY)
-        self.assertEqual(stat.S_IMODE(auth.stat().st_mode), 0o755)
+        self.assertEqual(auth.stat().st_mode & 0o777, 0o755)
 
-    def test_failed_atomic_replace_keeps_previous_key_and_removes_temporary(self) -> None:
+    def test_failed_vault_save_stops_cached_key_without_plaintext_fallback_and_recovers(
+        self,
+    ) -> None:
         self.connection.set_key(_KEY)
-        with patch("spiritboard.openrouter_auth.os.replace", side_effect=OSError("secret")):
+        with patch(
+            "spiritboard.openrouter_auth.CredentialStore.save",
+            side_effect=CredentialStoreError("private credential location"),
+        ):
             with self.assertRaises(ProviderAuthError):
                 self.connection.set_key(_KEY + "-replacement")
-        self.assertEqual(self.connection.key(), _KEY)
+        self.assertIsNone(self.connection.key())
+        self.assertTrue(self.connection.public_state()["storage_error"])
         self.assertEqual(OpenRouterConnection(self.directory).key(), _KEY)
-        self.assertEqual(
-            [path.name for path in (self.directory / "auth").iterdir()], ["openrouter.json"]
-        )
+        self.assertNotIn("private credential", json.dumps(self.connection.public_state()))
+        self.connection.set_key(_KEY + "-replacement")
+        self.assertFalse(self.connection.public_state()["storage_error"])
+        self.assertIsNone(self.connection.public_state()["error"])
+        for path in self.directory.rglob("*"):
+            if path.is_file():
+                self.assertNotIn(_KEY.encode(), path.read_bytes())
+
+    def test_vault_load_failure_is_disconnected_and_never_reads_legacy_key(self) -> None:
+        legacy = self.directory / "auth/openrouter.json"
+        legacy.parent.mkdir(mode=0o700, exist_ok=True)
+        original = json.dumps({"version": 1, "key": _KEY}).encode()
+        legacy.write_bytes(original)
+        with patch(
+            "spiritboard.openrouter_auth.CredentialStore.load",
+            side_effect=CredentialStoreError("private upstream text"),
+        ):
+            restored = OpenRouterConnection(self.directory)
+        self.assertIsNone(restored.key())
+        self.assertTrue(restored.public_state()["storage_error"])
+        self.assertNotIn("private upstream", json.dumps(restored.public_state()))
+        self.assertEqual(legacy.read_bytes(), original)
+        restored.set_key(_KEY + "-replacement")
+        self.assertEqual(legacy.read_bytes(), original)
+        restored.disconnect()
+        self.assertEqual(legacy.read_bytes(), original)
+
+    def test_missing_vault_ignores_valid_legacy_key_without_native_access(self) -> None:
+        legacy = self.directory / "auth/openrouter.json"
+        legacy.parent.mkdir(mode=0o700, exist_ok=True)
+        original = json.dumps({"version": 1, "key": _KEY}).encode()
+        legacy.write_bytes(original)
+        with patch("spiritboard.credentials._native_backend") as backend:
+            restored = OpenRouterConnection(self.directory)
+            backend.assert_not_called()
+        self.assertIsNone(restored.key())
+        self.assertFalse(restored.public_state()["storage_error"])
+        self.assertEqual(legacy.read_bytes(), original)
+
+    def test_unavailable_native_backend_never_saves_a_plaintext_key(self) -> None:
+        with patch(
+            "spiritboard.credentials._native_backend",
+            side_effect=CredentialStoreError("private backend name"),
+        ):
+            with self.assertRaisesRegex(ProviderAuthError, "safely"):
+                self.connection.set_key(_KEY)
+        state = self.connection.public_state()
+        self.assertTrue(state["available"])
+        self.assertTrue(state["storage_error"])
+        self.assertFalse(state["connected"])
+        self.assertNotIn("private backend", json.dumps(state))
+        self.assertFalse((self.directory / "auth/openrouter.json").exists())
+        for path in self.directory.rglob("*"):
+            if path.is_file():
+                self.assertNotIn(_KEY.encode(), path.read_bytes())
+
+    def test_vault_delete_failure_forgets_cached_key_and_can_retry(self) -> None:
+        self.connection.set_key(_KEY)
+        with patch(
+            "spiritboard.openrouter_auth.CredentialStore.delete",
+            side_effect=CredentialStoreError("private upstream text"),
+        ):
+            with self.assertRaisesRegex(ProviderAuthError, "safely"):
+                self.connection.disconnect()
+        self.assertIsNone(self.connection.key())
+        self.assertTrue(self.connection.public_state()["storage_error"])
+        self.assertEqual(OpenRouterConnection(self.directory).key(), _KEY)
+        self.connection.disconnect()
+        self.assertFalse(self.connection.public_state()["storage_error"])
+        self.assertIsNone(OpenRouterConnection(self.directory).key())

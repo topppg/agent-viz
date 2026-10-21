@@ -183,11 +183,13 @@ class SummaryProviders:
     def _status(self, name: str) -> dict[str, object]:
         if name == "openrouter":
             state = self._openrouter.public_state() if self._openrouter is not None else {}
-            connected = state.get("connected") is True or self._session_key is not None
+            connected = (
+                state.get("connected") is True and state.get("storage_error") is not True
+            ) or self._session_key is not None
             available = not self._demo
         else:
             state = self._codex.public_state() if self._codex is not None else {}
-            connected = state.get("connected") is True
+            connected = state.get("connected") is True and state.get("storage_error") is not True
             available = state.get("available") is True
         error = None
         if state.get("error") or (name == "codex" and self._codex_error):
@@ -200,6 +202,7 @@ class SummaryProviders:
             "pending": name in self._pending,
             "error": error,
             "revocation_unconfirmed": state.get("revocation_unconfirmed") is True,
+            "storage_error": state.get("storage_error") is True,
             "model": _MODELS[name],
             **({"effort": "medium"} if name == "codex" else {}),
         }

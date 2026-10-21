@@ -6,17 +6,15 @@ import base64
 import hashlib
 import http.client
 import json
-import os
 import re
 import secrets
 import socket
-import tempfile
 import threading
 import time
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
-from spiritboard.launcher import LaunchError, _private_directory, _regular_descriptor
+from .credentials import CredentialStore, CredentialStoreError
 
 _MAX_DOCUMENT = 8192
 _TIMEOUT = 15.0
@@ -134,21 +132,16 @@ class OpenRouterConnection:
     """One explicit connection; keys and PKCE verifiers never enter public state."""
 
     def __init__(self, directory: Path):
-        self._directory = Path(directory) / "auth"
-        self._path = self._directory / "openrouter.json"
+        self._credentials = CredentialStore(Path(directory))
         self._lock = threading.RLock()
         self._generation = 0
         self._pending: tuple[str, str, str, float, int] | None = None
         self._key: str | None = None
         self._error: str | None = None
+        self._storage_error = False
         try:
-            self._prepare()
-            if self._path.exists() or self._path.is_symlink():
-                descriptor = _regular_descriptor(self._path)
-                try:
-                    raw = os.read(descriptor, _MAX_DOCUMENT + 1)
-                finally:
-                    os.close(descriptor)
+            raw = self._credentials.load("openrouter")
+            if raw is not None:
                 if len(raw) > _MAX_DOCUMENT:
                     raise ValueError
                 saved = json.loads(raw)
@@ -158,34 +151,19 @@ class OpenRouterConnection:
                 if not _valid_key(key):
                     raise ValueError
                 self._key = key
-        except (LaunchError, OSError, ValueError, UnicodeError, RecursionError):
+        except (CredentialStoreError, ValueError, UnicodeError, RecursionError):
             self._error = _STORAGE_ERROR
-
-    def _prepare(self) -> None:
-        _private_directory(self._directory.parent)
-        _private_directory(self._directory)
+            self._storage_error = True
 
     def _save(self, key: str) -> None:
-        temporary: str | None = None
         try:
-            self._prepare()
-            if self._path.exists() or self._path.is_symlink():
-                os.close(_regular_descriptor(self._path))
-            descriptor, temporary = tempfile.mkstemp(prefix=".openrouter-", dir=self._directory)
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(json.dumps({"version": 1, "key": key}).encode("ascii"))
-                output.flush()
-                os.fsync(output.fileno())
-            os.replace(temporary, self._path)
-            temporary = None
-        except (LaunchError, OSError):
+            self._credentials.save("openrouter", json.dumps({"version": 1, "key": key}))
+            self._storage_error = False
+        except CredentialStoreError:
+            self._storage_error = True
+            self._error = _STORAGE_ERROR
+            self._key = None
             raise ProviderAuthError(_STORAGE_ERROR) from None
-        finally:
-            if temporary is not None:
-                try:
-                    os.unlink(temporary)
-                except OSError:
-                    pass
 
     def begin(self, callback_url: str) -> dict[str, object]:
         callback_url = _callback(callback_url)
@@ -269,11 +247,10 @@ class OpenRouterConnection:
             self._key = None
             self._error = None
             try:
-                self._prepare()
-                if self._path.exists() or self._path.is_symlink():
-                    os.close(_regular_descriptor(self._path))
-                    self._path.unlink()
-            except (LaunchError, OSError):
+                self._credentials.delete("openrouter")
+                self._storage_error = False
+            except CredentialStoreError:
+                self._storage_error = True
                 self._error = _STORAGE_ERROR
                 raise ProviderAuthError(_STORAGE_ERROR) from None
 
@@ -293,4 +270,5 @@ class OpenRouterConnection:
                 "connected": self._key is not None,
                 "pending": self._pending is not None,
                 "error": self._error,
+                "storage_error": self._storage_error,
             }

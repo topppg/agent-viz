@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
+from spiritboard.credentials import CredentialStoreError
 from spiritboard.openrouter_auth import OpenRouterConnection, ProviderAuthError
 from spiritboard.summary_providers import SummaryProviders
 
@@ -117,6 +118,22 @@ class ProviderTests(unittest.TestCase):
         session.disconnect("openrouter")
         self.assertEqual(session.routes(), [])
         self.assertFalse(session.public_state()["providers"]["openrouter"]["connected"])
+
+    def test_session_key_never_enters_vault_even_when_vault_is_unavailable(self) -> None:
+        with patch(
+            "spiritboard.openrouter_auth.CredentialStore.load",
+            side_effect=CredentialStoreError("private account"),
+        ):
+            with patch("spiritboard.openrouter_auth.CredentialStore.save") as save:
+                session = SummaryProviders(self.directory, session_key=_KEY, enabled=True)
+                with patch("spiritboard.summaries._request", return_value={"id": "synthetic"}):
+                    self.assertEqual(session.request("openrouter", {}, 1), {"id": "synthetic"})
+                save.assert_not_called()
+        state = session.public_state()["providers"]["openrouter"]
+        self.assertTrue(state["available"])
+        self.assertTrue(state["storage_error"])
+        self.assertEqual(session.routes(), ["openrouter"])
+        self.assertNotIn("private account", json.dumps(session.public_state()))
 
     def test_openrouter_first_with_explicit_requests_and_billing_kind(self) -> None:
         self.codex.connected = True
@@ -234,6 +251,44 @@ class ProviderTests(unittest.TestCase):
             self.assertFalse(
                 self.providers.public_state()["providers"]["codex"]["revocation_unconfirmed"]
             )
+
+    def test_storage_errors_are_strict_safe_booleans_and_block_saved_credentials(self) -> None:
+        self.codex.connected = True
+        self.providers.start()
+        self.providers.set_key(_KEY)
+        for name, provider in (("openrouter", self.providers._openrouter), ("codex", self.codex)):
+            state = provider.public_state()
+            state.update({"storage_error": True, "error": "private vault details"})
+            with patch.object(provider, "public_state", return_value=state):
+                public = self.providers.public_state()
+                self.assertTrue(public["providers"][name]["available"])
+                self.assertTrue(public["providers"][name]["storage_error"])
+                self.assertFalse(public["providers"][name]["connected"])
+                self.assertNotIn(name, self.providers.routes())
+                self.assertNotIn("private vault", json.dumps(public))
+            state["storage_error"] = "true"
+            with patch.object(provider, "public_state", return_value=state):
+                self.assertFalse(self.providers.public_state()["providers"][name]["storage_error"])
+
+    def test_vault_delete_failure_is_durably_blocked_while_other_provider_stays_enabled(
+        self,
+    ) -> None:
+        self.codex.connected = True
+        self.providers.start()
+        self.providers.set_key(_KEY)
+        with patch(
+            "spiritboard.openrouter_auth.CredentialStore.delete",
+            side_effect=CredentialStoreError("private vault location"),
+        ):
+            with self.assertRaisesRegex(ProviderAuthError, "credentials could not be removed"):
+                self.providers.disconnect("openrouter")
+        self.assertEqual(self.providers.routes(), ["codex"])
+        self.assertTrue(self.providers.public_state()["providers"]["openrouter"]["storage_error"])
+        self.assertEqual(OpenRouterConnection(self.directory).key(), _KEY)
+        restored = SummaryProviders(self.directory)
+        restored.start()
+        self.assertEqual(restored.routes(), ["codex"])
+        self.assertNotIn("private vault", json.dumps(restored.public_state()))
 
     def test_failed_disconnect_is_tombstoned_before_teardown_and_survives_restart(self) -> None:
         self.codex.connected = True
@@ -375,7 +430,9 @@ class ProviderTests(unittest.TestCase):
 
     def test_demo_has_no_credentials_or_external_provider_initialization(self) -> None:
         root = self.directory / "synthetic-demo"
-        demo = SummaryProviders(root, demo=True, session_key=_KEY, enabled=True)
+        with patch("spiritboard.openrouter_auth.CredentialStore") as store:
+            demo = SummaryProviders(root, demo=True, session_key=_KEY, enabled=True)
+            store.assert_not_called()
         demo.start()
         self.assertFalse(root.exists())
         self.factory.assert_not_called()
