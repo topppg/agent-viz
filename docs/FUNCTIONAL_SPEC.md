@@ -1,4 +1,10 @@
-# Functional specification
+# Archived functional plan
+
+This records the original MVP plan and early implementation notes from October
+2026. It is retained as design history, not maintained as a description of the
+current product or repository permissions. For current behavior and contribution
+rules, see the [README](../README.md), [source guide](SOURCES.md),
+[summary guide](SUMMARIES.md), and [AGENTS.md](../AGENTS.md).
 
 ## TL;DR
 

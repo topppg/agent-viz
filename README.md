@@ -146,10 +146,11 @@ A PyPI release is not published yet; do not substitute `uvx spiritboard` until i
   without being read; change it with `--max-age-days N` (`0` reads everything).
 - **Liveness.** Every few seconds Spiritboard checks which sessions a live local
   process still owns, from Claude's `sessions/<pid>.json`, the Codex thread locks
-  and the DeepSeek Harness `session.lock` files. opencode and Pi record no owner, so a
-  live `opencode` or `pi` running in a session's directory marks only that
-  directory's most recent session open. A session is only marked closed when that
-  check can run.
+  and the DeepSeek Harness `session.lock` files. opencode and Pi record no
+  per-session owner. With N live `opencode` processes in a directory, its N most
+  recently updated top-level sessions and their children count as open. A live
+  `pi` process marks that directory's most recent session open. A session is only
+  marked closed when the relevant check can run.
 
 What is read, and the bounds on it, are in the [source guide](docs/SOURCES.md).
 
@@ -278,7 +279,7 @@ skips before relying on that coverage. Contribution rules, including worktrees
 and one change per PR, are in [AGENTS.md](AGENTS.md).
 
 More detail: [sources](docs/SOURCES.md), [summaries](docs/SUMMARIES.md),
-[validation record](docs/VALIDATION.md), [functional specification](docs/FUNCTIONAL_SPEC.md)
+[historical validation record](docs/VALIDATION.md), [archived functional plan](docs/FUNCTIONAL_SPEC.md)
 and [reference projects](docs/REFERENCES.md). The `references/` folder holds
 shallow research checkouts of other projects, excluded from Git history and never
 installed, executed or copied.
@@ -297,7 +298,7 @@ changes. Labels stay literal (needs you, your turn,
 closed, open in cmux) so the board needs no vocabulary of its own.
 
 Next: more harnesses and framework adapters, exact tab focus for Ghostty once a
-released version exposes it, and a demo scenario that is safe to record.
+released version exposes it, and a longer scripted demo scenario for recording.
 
 ## Boundaries
 

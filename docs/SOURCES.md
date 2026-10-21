@@ -102,16 +102,16 @@ must keep an unresolved parent visible rather than inventing metadata.
 
 ## Privacy
 
-By default the dashboard receives generic labels such as “Tool call recorded,”
-not prompts, assistant text, tool names, arguments, results, instructions or
-account identifiers. Project labels contain only the last directory name.
-That name can still be private.
+By default, profiles send bounded excerpts of the latest user request and
+assistant reply to the local dashboard, alongside generic activity labels such
+as “Tool call recorded.” Set `"include_text": false` on a profile to hide the
+excerpts. They can contain private information, are not redacted, and become
+part of local dashboard storage. Turning text off prevents future capture; it
+does not erase existing local history.
 
-Profiles show the bounded latest request and assistant excerpts by default. Set
-`"include_text": false` on a profile to hide them. Excerpts can contain private
-information, are not redacted, and become part of local dashboard storage. Tool arguments/results and hidden reasoning are never exported by
-these adapters. Turning text off prevents future capture; it does not erase
-existing local history.
+Tool arguments, results and hidden reasoning are not exported by these adapters.
+When text is enabled, opencode can show the active tool name. Project labels
+contain only the last directory name; that name can still be private.
 
 Every harness applies the same text rules. The request is the user's latest own
 words: instruction echoes, environment and tool wrappers are skipped, and app
