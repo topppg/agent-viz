@@ -198,6 +198,24 @@ class CodexConnectionTests(unittest.TestCase):
             self.assertTrue(restored.public_state()["connected"])
         restored.close()
 
+    def test_registration_only_start_preserves_identity_without_restoring_tokens_or_network(self):
+        original = self.login()
+        saved = self.connection._path.read_bytes()
+        blocked = CodexConnection(self.root)
+        try:
+            with patch("http.client.HTTPSConnection", side_effect=AssertionError("No network")):
+                blocked.start_registration()
+                self.assertFalse(blocked.public_state()["connected"])
+                self.assertEqual(set(blocked._record), {"host_id", "client_id", "subject"})
+                self.assertNotIn("synthetic-access", json.dumps(blocked._record))
+                self.assertEqual(blocked._path.read_bytes(), saved)
+                query = parse_qs(urlsplit(blocked.begin_login(CALLBACK)["auth_url"]).query)
+            self.assertEqual(query["ext_agent_host_id"], original["ext_agent_host_id"])
+            self.assertEqual(query["client_id"], [CLIENT])
+            self.assertNotIn("agent_name_hint", query)
+        finally:
+            blocked.close()
+
     def test_missing_mismatched_reused_expired_and_cancelled_states_make_no_token_call(self):
         for case in ("missing", "mismatch", "expired", "cancelled"):
             self.connection.close()

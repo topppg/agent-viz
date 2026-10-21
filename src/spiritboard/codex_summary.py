@@ -75,10 +75,26 @@ class CodexConnection:
 
     def start(self) -> None:
         """Restore only this app's previously approved credentials, without network I/O."""
+        self._restore(registration_only=False)
+
+    def start_registration(self) -> None:
+        """Restore this app's registration without enabling tokens, requests or network I/O."""
+        self._restore(registration_only=True)
+
+    def _restore(self, *, registration_only: bool) -> None:
         with self._lock:
             self._closed = False
             try:
-                self._record = self._read_record()
+                record = self._read_record()
+                self._record = (
+                    {
+                        key: record[key]
+                        for key in ("host_id", "client_id", "subject")
+                        if key in record
+                    }
+                    if registration_only
+                    else record
+                )
                 self._validated = False
                 self._error = None
             except (OSError, ValueError, TypeError):
