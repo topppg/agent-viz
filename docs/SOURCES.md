@@ -1,8 +1,8 @@
-# Local Codex, Claude and opencode sources
+# Local Codex, Claude, opencode and Pi sources
 
 ## What works
 
-The collector can observe multiple Codex, Claude and opencode storage profiles together.
+The collector can observe multiple Codex, Claude, opencode and Pi storage profiles together.
 Each profile has its own stable ID, label and transcript directory. The same
 native session ID in two profiles creates two separate dashboard runs. Labels
 describe storage profiles; they do **not** prove which account is signed in.
@@ -17,9 +17,10 @@ without a root conversation ID. Different profiles cannot share a collection.
 
 By default discovery runs again on every background scan, without requiring a
 four-profile configuration or restarting the dashboard when another profile
-appears. It checks the standard `.codex` and `.claude` directories, named
+appears. It checks the standard `.codex`, `.claude` and `.pi/agent` directories, named
 `.codex-*` and `.claude-*` directories, `.codex-switch/profiles/*`, and the current process's
-`CODEX_HOME` / `CLAUDE_CONFIG_DIR` selectors. Aliases pointing to the same storage
+`CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`
+selectors. Aliases pointing to the same storage
 directory are deduplicated. Distinct storage directories are **not** collapsed
 because they contain identical native session IDs: copied histories and separate
 accounts stay distinct. No account, authentication, key or credential file
@@ -37,7 +38,11 @@ Codex discovery accepts `sessions/`, `archived_sessions/`, or both. When both
 exist, indexing combines them into one newest-first selection and one shared
 per-profile entry/file budget. Archived runs preserve their native identity;
 moving a transcript into the archive does not make a new dashboard run. Claude
-uses its `projects/` transcript tree. Coverage metadata lists only these generic
+uses its `projects/` transcript tree. Pi uses `sessions/--<cwd>--/` under its agent
+directory, or the flat directory `PI_CODING_AGENT_SESSION_DIR` names. Pi's
+`sessionDir` setting and `--session-dir` flag are not followed: Spiritboard does not
+open Pi's `settings.json`, and a flag is invisible on disk; use an explicit profile
+for such a directory. Coverage metadata lists only these generic
 tree names and counts, never absolute storage paths.
 
 opencode keeps sessions in a SQLite database, `opencode.db` (WAL) in
@@ -90,7 +95,8 @@ Codex parent links use explicit `parent_thread_id` metadata, including
 `source.subagent.thread_spawn`. Claude subagents use `isSidechain`, `agentId`
 and `sessionId`. A Claude `parentUuid` is a message link, **not** an agent link.
 No parent is inferred from filenames, similar titles, process trees, or project
-names. A parent may be outside the selected recent-file window; the collector
+names. Pi has no subagents; a Pi `parentSession` header marks a `/fork` or
+`/clone` origin and is not shown as a parent. A parent may be outside the selected recent-file window; the collector
 must keep an unresolved parent visible rather than inventing metadata.
 
 ## Privacy
@@ -215,10 +221,41 @@ the session ID, the transcript's recorded working directory and the profile root
 Every command explicitly sets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `OPENCODE_DB`
 (`cd <directory> && OPENCODE_DB=<db> opencode -s <id>`), including the
 default `~/.claude` / `~/.codex` / `opencode.db`, so an existing terminal's account override cannot
-select a different profile. Resume is offered only when no live
+select a different profile; Pi resumes by session file path instead. Resume is offered only when no live
 process is found and liveness could be checked, and never for subagents. The
 browser re-checks the target before copying, so a session that came back to life
 is opened rather than forked.
+
+## Pi sessions
+
+A Pi session file starts with a `session` header (`id`, `cwd`, `timestamp`) and
+appends entries linked by `id` / `parentId` into a tree. Rewinding with `/tree`
+starts a new branch from an earlier entry, so only the **active branch** (from the
+last entry back through `parentId`) is read for the request, reply, state and
+summary context; abandoned branches are ignored. The deep request search scans
+backwards along that same chain. In the bounded read a branch stops where a parent
+falls outside the header/tail window.
+
+- **State.** The last message on the active branch decides: a user message or tool
+  result is `working`, an assistant `toolUse` is `waiting_tool`, `pending` or
+  `deferred` is `working`, and `stop`, `length`, `error` or `aborted` is `idle`
+  (never failed). Pi has no permission prompts, so it is never `waiting_user`.
+  System, extension and `!` shell messages, usage, labels and model changes do
+  not change it.
+- **Text.** The title is the latest `session_info` name (an empty name clears it),
+  else the first user request. Replies use only assistant `text` blocks; thinking,
+  tool-call arguments and tool results are never read into a run. Compaction
+  summaries on the active branch are summary recaps.
+- **Liveness.** Pi holds no lock and does not keep the file open. `ps` lists
+  processes whose command is `pi` (Pi sets its process title), and
+  `lsof -a -d cwd` gives each one's working directory; the most recently modified
+  session in the profile whose header `cwd` matches is treated as live. This is
+  per directory: two Pi processes in one directory make only the newest session
+  live and leave focus unknown, a process using another storage directory can
+  mark this profile's session in the same directory, and a session opened from
+  another project is not matched. Without `ps` or `lsof` liveness is unknown.
+- **Resume.** `cd <cwd> && pi --session <session file>`, shell-quoted. The file
+  path selects the session regardless of `PI_CODING_AGENT_DIR`.
 
 ## Adding a harness
 
