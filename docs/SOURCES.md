@@ -88,7 +88,7 @@ these adapters. Turning text off prevents future capture; it does not erase
 existing local history.
 
 Claude subagents are named by the short description their parent gave them,
-read from the sibling `agent-<id>.meta.json` (bounded, symlinks not followed),
+read from the sibling `agent-<id>.meta.json` (bounded regular files only, symlinks not followed),
 and their goal is the first prompt the parent sent. Both are text, so a profile
 with `"include_text": false` keeps the generic name and hides the prompt.
 
@@ -110,7 +110,10 @@ current local machine's discovered inventories fit within those bounds.
 It reads at most
 a 256 KiB header and 512 KiB tail per selected file. Unchanged observations are
 cached without retaining raw transcript content. Child symlinks are skipped;
-file opens use no-follow support where available. Invalid JSON, incomplete
+file opens use no-follow support where available. Transcript, subagent metadata
+and session-title index readers use nonblocking opens and verify regular files
+before reading, so named pipes and other special files cannot stall discovery
+or summaries. Invalid JSON, incomplete
 trailing records, unreadable and disappearing files are skipped. Large middle
 sections are not parsed: older events and initial task text may be missing.
 
@@ -147,7 +150,9 @@ look for the live process that owns it; SDK runs are never eligible.
   of the form `<digits>.json`, bounded and without following links. The adjacent
   `<pid>.<hash>.key` files are **never opened or read**. A match needs the same
   `sessionId` and `pid`, a live process, and a `procStart` equal to that process's
-  start time, so a reused PID is not mistaken for the session. Subagents use their
+  start time, so a reused PID is not mistaken for the session. A matching live
+  process without usable start-time metadata leaves liveness unknown; it cannot
+  enable resume or establish that the session is closed. Subagents use their
   parent session's process.
 - **Codex:** the session's rollout transcript is located by native ID under the
   profile's `sessions/` and `archived_sessions/` trees, and `lsof -t` reports the
@@ -170,8 +175,10 @@ fixed argv lists (no shell) with short timeouts: `cmux select-workspace` /
 `focus-panel`, `tmux select-window` / `select-pane` / `switch-client`, an
 AppleScript that selects a matching iTerm2 session or Terminal tab, `open -b` /
 `open -a`, or `wmctrl -i -a`. Errors are generic. Resume commands are built from
-the session ID, the transcript's recorded working directory and the profile root
-(omitted for the default `~/.claude` / `~/.codex`), offered only when no live
+the session ID, the transcript's recorded working directory and the profile root.
+Every command explicitly sets `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, including the
+default `~/.claude` / `~/.codex`, so an existing terminal's account override cannot
+select a different profile. Resume is offered only when no live
 process is found and liveness could be checked, and never for subagents. The
 browser re-checks the target before copying, so a session that came back to life
 is opened rather than forked.
