@@ -1,9 +1,14 @@
 # Functional checkpoint — October 20, 2026
 
-## Automatic discovery and summary update
+This is a historical validation record, not a current test report or a guide to
+present defaults. In particular, native request and reply excerpts are now
+shown by default; see the [source guide](SOURCES.md#privacy). The current Python
+requirement is in [pyproject.toml](../pyproject.toml).
+
+## Automatic discovery and summary update (October 20, 2026)
 
 The original checkpoint below records the earlier functional baseline. The
-updated prototype passes 98 tests in the current Python environment, JavaScript
+updated prototype passed 98 tests in the checkpoint's Python environment, JavaScript
 syntax validation, and wheel/source builds. Added tests cover discovery limits,
 archived Codex sessions, safe summary inputs, mocked billing, persistent caches,
 unknown-cost pauses, and active-first browser rendering.
