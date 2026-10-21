@@ -9,10 +9,12 @@ import threading
 from pathlib import Path
 from typing import Protocol
 
+from .api_summaries import MODELS as API_MODELS
+from .api_summaries import APIKeyConnection
 from .launcher import LaunchError, _private_directory, _regular_descriptor
 from .openrouter_auth import OpenRouterConnection, ProviderAuthError
 
-_MODELS = {"openrouter": "deepseek/deepseek-v4-flash", "codex": "gpt-6-luna"}
+_MODELS = {"openrouter": "deepseek/deepseek-v4-flash", "codex": "gpt-6-luna", **API_MODELS}
 _PREFERENCE_ERROR = "Summary preferences could not be stored or read safely."
 _CONSENT_ERROR = "Summary settings changed. Please start the connection again."
 _DISABLED_ERROR = "Summary requests need an enabled, connected provider."
@@ -41,7 +43,7 @@ def _codex_connection(directory: Path) -> _CodexProvider | None:
 
 
 class SummaryProviders:
-    """OpenRouter first, then Codex, only after the user has enabled summaries."""
+    """The chosen provider first, then explicitly connected services, after consent."""
 
     def __init__(
         self,
@@ -62,11 +64,17 @@ class SummaryProviders:
         self._disconnect_errors: set[str] = set()
         self._closed = False
         self._active: str | None = None
+        self._preferred = "openrouter"
         self._codex: _CodexProvider | None = None
         self._codex_started = False
         self._codex_error = False
         self._session_key = session_key if not demo else None
         self._openrouter = OpenRouterConnection(self._directory) if not demo else None
+        self._api = (
+            {name: APIKeyConnection(self._directory, name) for name in API_MODELS}
+            if not demo
+            else {}
+        )
         self._enabled = False
         self._preference_error = False
         if not demo:
@@ -97,12 +105,18 @@ class SummaryProviders:
             ):
                 raise ValueError
             self._blocked = set(blocked)
+            preferred = saved.get("preferred_provider", "openrouter")
+            if not isinstance(preferred, str) or preferred not in _MODELS:
+                raise ValueError
+            self._preferred = preferred
             return saved["enabled"]
         except (LaunchError, OSError, ValueError, UnicodeError, RecursionError):
             self._preference_error = True
             return False
 
-    def _save_enabled(self, enabled: bool, *, unblock: str | None = None) -> None:
+    def _save_enabled(
+        self, enabled: bool, *, unblock: str | None = None, preferred: str | None = None
+    ) -> None:
         temporary: str | None = None
         blocked = self._blocked - {unblock} if unblock is not None else self._blocked.copy()
         try:
@@ -115,7 +129,12 @@ class SummaryProviders:
             with os.fdopen(descriptor, "wb") as output:
                 output.write(
                     json.dumps(
-                        {"version": 1, "enabled": enabled, "blocked": sorted(blocked)}
+                        {
+                            "version": 1,
+                            "enabled": enabled,
+                            "blocked": sorted(blocked),
+                            "preferred_provider": preferred or self._preferred,
+                        }
                     ).encode("ascii")
                 )
                 output.flush()
@@ -123,6 +142,7 @@ class SummaryProviders:
             os.replace(temporary, self._preferences)
             temporary = None
             self._blocked = blocked
+            self._preferred = preferred or self._preferred
             self._preference_error = False
         except (LaunchError, OSError):
             self._preference_error = True
@@ -187,10 +207,15 @@ class SummaryProviders:
                 state.get("connected") is True and state.get("storage_error") is not True
             ) or self._session_key is not None
             available = not self._demo
-        else:
+        elif name == "codex":
             state = self._codex.public_state() if self._codex is not None else {}
             connected = state.get("connected") is True and state.get("storage_error") is not True
             available = state.get("available") is True
+        else:
+            provider = self._api.get(name)
+            state = provider.public_state() if provider is not None else {}
+            connected = state.get("connected") is True and state.get("storage_error") is not True
+            available = not self._demo and state.get("available") is True
         error = None
         if state.get("error") or (name == "codex" and self._codex_error):
             error = f"{name.title()} connection needs attention."
@@ -204,7 +229,7 @@ class SummaryProviders:
             "revocation_unconfirmed": state.get("revocation_unconfirmed") is True,
             "storage_error": state.get("storage_error") is True,
             "model": _MODELS[name],
-            **({"effort": "medium"} if name == "codex" else {}),
+            **({"effort": "medium"} if name in ("codex", "openai") else {}),
         }
 
     def public_state(self) -> dict[str, object]:
@@ -212,7 +237,8 @@ class SummaryProviders:
             return {
                 "enabled": self._enabled and not self._closed,
                 "active_provider": self._active,
-                "policy": "openrouter-first",
+                "policy": "preferred-first",
+                "preferred_provider": self._preferred,
                 "demo": self._demo,
                 "providers": {name: self._status(name) for name in _MODELS},
                 "error": _PREFERENCE_ERROR if self._preference_error else None,
@@ -222,7 +248,8 @@ class SummaryProviders:
         with self._lock:
             if not self._enabled or self._demo or self._closed:
                 return []
-            return [name for name in _MODELS if self._status(name)["connected"]]
+            order = [self._preferred, *(name for name in _MODELS if name != self._preferred)]
+            return [name for name in order if self._status(name)["connected"]]
 
     @property
     def revision(self) -> int:
@@ -239,7 +266,7 @@ class SummaryProviders:
 
     def billing_kind(self, name: str) -> str:
         self._name(name)
-        return "api" if name == "openrouter" else "subscription"
+        return "subscription" if name == "codex" else "api"
 
     def request(self, name: str, payload: dict, timeout: float) -> dict:
         self._name(name)
@@ -248,6 +275,7 @@ class SummaryProviders:
                 raise ProviderAuthError(_DISABLED_ERROR)
             key = None
             codex = self._codex
+            api = self._api.get(name)
             if self._openrouter is not None:
                 key = self._openrouter.key() or self._session_key
         if name == "openrouter" and key is not None:
@@ -256,6 +284,8 @@ class SummaryProviders:
             return _request(key, payload, timeout)
         if name == "codex" and codex is not None:
             return codex.request(payload, timeout)
+        if api is not None:
+            return api.request(payload, timeout)
         raise ProviderAuthError(_DISABLED_ERROR)
 
     def record_success(self, name: str) -> None:
@@ -266,6 +296,8 @@ class SummaryProviders:
 
     def begin(self, name: str, callback_url: str) -> dict[str, object]:
         self._name(name)
+        if name not in ("openrouter", "codex"):
+            raise ProviderAuthError("This provider uses an API key, not browser sign-in.")
         with self._lock:
             self._mutating()
             if self._pending:
@@ -301,6 +333,8 @@ class SummaryProviders:
 
     def complete(self, name: str, state: str, code: str, **extra: object) -> None:
         self._name(name)
+        if name not in ("openrouter", "codex"):
+            raise ProviderAuthError("This provider uses an API key, not browser sign-in.")
         with self._lock:
             self._mutating()
             revision = self._pending.get(name)
@@ -326,7 +360,7 @@ class SummaryProviders:
                     raise ProviderAuthError(_CONSENT_ERROR)
                 if provider.public_state().get("connected") is not True:
                     raise ProviderAuthError("Summary provider sign-in did not complete.")
-                self._save_enabled(True, unblock=name)
+                self._save_enabled(True, unblock=name, preferred=name)
                 self._disconnect_errors.discard(name)
                 self._enabled = True
                 self._changed()
@@ -337,17 +371,31 @@ class SummaryProviders:
                     if provider is None or provider.public_state().get("pending") is not True:
                         self._pending.pop(name, None)
 
-    def set_key(self, key: str) -> None:
+    def set_key(self, key: str, *, provider: str = "openrouter") -> None:
+        self._name(provider)
+        if provider == "codex":
+            raise ProviderAuthError("Use Continue with ChatGPT for this provider.")
         with self._lock:
             self._mutating()
             self._changed()
-            if self._openrouter is None:
+            connection = self._openrouter if provider == "openrouter" else self._api.get(provider)
+            if connection is None:
                 raise ProviderAuthError("This summary provider is unavailable.")
-            self._openrouter.set_key(key)
-            self._session_key = None
-            self._save_enabled(True, unblock="openrouter")
-            self._disconnect_errors.discard("openrouter")
+            connection.set_key(key)
+            if provider == "openrouter":
+                self._session_key = None
+            self._save_enabled(True, unblock=provider, preferred=provider)
+            self._disconnect_errors.discard(provider)
             self._enabled = True
+
+    def set_provider(self, name: str) -> None:
+        self._name(name)
+        with self._lock:
+            self._mutating()
+            if not self._status(name)["connected"]:
+                raise ProviderAuthError("Connect this provider before choosing it for summaries.")
+            self._changed()
+            self._save_enabled(self._enabled, preferred=name)
 
     def set_enabled(self, enabled: bool) -> None:
         if type(enabled) is not bool:
@@ -368,7 +416,13 @@ class SummaryProviders:
             self._mutating()
             self._changed()
             self._blocked.add(name)
-            provider = self._openrouter if name == "openrouter" else self._codex
+            provider = (
+                self._openrouter
+                if name == "openrouter"
+                else self._codex
+                if name == "codex"
+                else self._api.get(name)
+            )
             if name == "openrouter":
                 self._session_key = None
             enabled = self._enabled and any(self._status(item)["connected"] for item in _MODELS)
@@ -390,7 +444,7 @@ class SummaryProviders:
                 return
             self._closed = True
             self._changed()
-            providers = (self._openrouter, self._codex)
+            providers = (self._openrouter, self._codex, *self._api.values())
         for provider in providers:
             if provider is not None:
                 provider.close()

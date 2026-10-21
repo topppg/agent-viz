@@ -168,7 +168,7 @@ class CredentialStore:
 
     @staticmethod
     def _name(name: str) -> None:
-        if name not in ("openrouter", "codex"):
+        if name not in ("openrouter", "codex", "openai", "anthropic"):
             raise ValueError
 
     def _service(self, name: str, record: dict, index: int) -> str:

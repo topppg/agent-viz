@@ -191,12 +191,13 @@
     const ai = state.snapshot.ai || {};
     const host = $("ai-status"); host.replaceChildren();
     if (!ai.enabled) { host.append(node("span", "summaries off", "muted")); host.title = "Open AI summaries to connect a provider or resume summaries"; return; }
-    const spent = `$${(ai.known_cost_usd ?? ai.actual_cost_usd ?? 0).toFixed(4)}${ai.unknown_cost_calls ? "+" : ""}`;
+    const known = ai.known_cost_usd ?? ai.actual_cost_usd ?? 0;
+    const spent = ai.unknown_cost_calls && known === 0 ? "cost unavailable" : `$${known.toFixed(4)}${ai.unknown_cost_calls ? "+ known spend" : " spent"}`;
     const usage = [];
-    if (ai.api_calls !== 0) usage.push(`${spent} spent · ${ai.api_calls ?? ai.calls ?? 0} API calls`);
+    if (ai.api_calls !== 0) usage.push(`${spent} · ${ai.api_calls ?? ai.calls ?? 0} API calls`);
     if (ai.subscription_calls) usage.push(`${ai.subscription_calls} ChatGPT plan calls`);
     if (!usage.length) usage.push("no provider calls yet");
-    const provider = ai.provider === "codex" ? "ChatGPT" : ai.provider === "openrouter" ? "OpenRouter" : "";
+    const provider = ({ codex: "ChatGPT", openrouter: "OpenRouter", anthropic: "Anthropic", openai: "OpenAI API" })[ai.provider] || "";
     host.append(node("span", `summaries ${ai.status === "error" ? "error" : "on"}${provider ? ` · ${provider}` : ""}`, "ai-mark"),
       node("span", ` · ${usage.join(" · ")}`, "muted"));
     host.title = ai.error || "Opt-in: bounded redacted context goes only to connected providers; ChatGPT uses plan allowance, not a reported USD charge";

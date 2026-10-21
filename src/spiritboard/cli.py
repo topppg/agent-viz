@@ -197,7 +197,7 @@ def serve_dashboard(args: argparse.Namespace) -> int:
                 flush=True,
             )
         print(
-            "AI summaries: connect OpenRouter or ChatGPT in the dashboard; "
+            "AI summaries: choose and connect a provider in the dashboard; "
             "only explicitly enabled providers receive context.",
             flush=True,
         )

@@ -8,13 +8,14 @@ dashboard keeps the original status evidence next to them.
 ## Connect from the dashboard
 
 Open **AI summaries**, read the sharing notice, and check the consent box before
-connecting a provider. Connecting enables summaries.
+connecting a provider. Choose a service from **Provider**, then sign in or add
+its API key. Connecting enables summaries and makes that service the first choice.
 
 The main panel keeps only connection and consent controls visible. Expand
-**How it works** for model details, or **Use an API key instead** for manual
-OpenRouter setup.
+**How it works** for model details. OpenRouter also offers **Use an API key
+instead** below its sign-in button.
 
-Use either option or both:
+Available connections:
 
 - **OpenRouter:** browser sign-in with PKCE (a one-use proof that binds the code
   to this app), or paste a dedicated API key into the password field.
@@ -22,13 +23,27 @@ Use either option or both:
 - **Continue with ChatGPT:** the official browser authorization flow for
   open-source apps. Model: `gpt-6-luna`, reasoning effort `medium`.
   The model must be available to the authorized account; Spiritboard does not
-  silently substitute another model. No installed Codex CLI is needed.
+  silently substitute another model. This flow requires an eligible personal
+  Plus or Pro account; Enterprise workspaces are not supported. No installed
+  Codex CLI is needed. If OpenAI shows a workspace-policy rejection, do not keep
+  retrying the same workspace: choose an eligible personal account for permitted
+  data, or another approved provider. Do not send work data through a personal
+  account to bypass an organization's policy.
+- **Anthropic API:** paste a dedicated Anthropic API key. Model:
+  `claude-haiku-5-5`. This uses API billing, not a Claude chat subscription.
+- **OpenAI API:** paste a dedicated OpenAI API key. Model: `gpt-6-luna`, reasoning
+  effort `medium`. This uses API billing, not a ChatGPT plan or its allowance.
 
-Spiritboard uses OpenRouter first. If that attempt fails or returns unusable
-output, it can try the explicitly connected ChatGPT account for the same batch.
-With only one connection, only that provider is used. Each attempt is recorded;
-fallback is not a free retry. There are no tool calls or agent actions in either
-summary request.
+For an already connected service, choose **Use for summaries** to put it first.
+If that attempt fails or returns unusable output, Spiritboard can try the other
+explicitly connected services for the same batch. Remaining order is OpenRouter,
+ChatGPT, OpenAI API, then Anthropic API, excluding the first choice. With only one
+connection, only that provider is used. Each attempt is recorded; fallback may
+use another provider's credits and is not a free retry. There are no tool calls
+or agent actions in any summary request.
+
+T3 Code is a harness that runs underlying coding agents, not a separate summary
+model provider. Spiritboard does not borrow its login or offer a T3 sign-in.
 
 Pause with **Enable AI summaries**, cancel pending sign-ins, or disconnect an
 individual provider. Connections and the enabled setting survive restarts.
@@ -37,11 +52,13 @@ cannot silently become authorized again if removal fails. Calls already sent
 may still consume provider usage; late summaries are discarded after pausing.
 Demo mode disables connections and model requests entirely.
 
-The browser sends a pasted key only to the loopback service and clears the form
-on submission or close. It never stores credentials in browser storage. OAuth
+The browser sends a pasted key only to the loopback service and clears all key
+fields on submission, provider changes, or close. It never stores credentials in
+browser storage. OAuth
 callbacks validate one-use state; ChatGPT additionally verifies signed identity
 tokens, account identity, requested scopes and a login nonce. Spiritboard stores
-OpenRouter keys and ChatGPT access, refresh and identity tokens in the native OS
+OpenRouter, Anthropic and OpenAI API keys, and ChatGPT access, refresh and identity
+tokens in the native OS
 credential store: macOS Keychain, Windows Credential Manager, or Linux Secret
 Service. It does not reuse authentication files from discovered Codex or Claude
 profiles. No credential values are written into Spiritboard's local files.
@@ -126,7 +143,10 @@ Spiritboard never executes provider output or changes the original task or statu
 There is no spend or call cap. Each OpenRouter request's actual charge is read from
 OpenRouter's `usage.cost` field and recorded; a timeout or missing cost is counted
 as unknown rather than zero. The header shows total known spend and the number
-of API calls. ChatGPT requests are reported separately as plan calls: they use
+of API calls. Direct OpenAI and Anthropic responses report token usage, not a
+final billed dollar charge; those calls count as unknown cost, never as free or
+as an estimated "actual" charge. When no charge is known, the header says
+**cost unavailable**. ChatGPT requests are reported separately as plan calls: they use
 your account allowance, and no dollar charge is invented. A total dollar cost
 is unknown if any API attempt has no receipt or any plan call is present.
 The refresh rules above keep the request rate low; they do not guarantee a price.

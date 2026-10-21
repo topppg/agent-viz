@@ -32,11 +32,14 @@ document={body, activeElement:null,
   getElementById:id=>id==='summary-settings-open' ? button : null,
   createElement:tag=>new Element(tag)};
 const posts=[],requests=[],popups=[],timers=new Map(); let nextTimer=1, fail=false, blocked=false, authURL='https://openrouter.ai/auth?code_challenge=synthetic';
-let state={enabled:false,active_provider:null,policy:'openrouter-first',demo:false,providers:{
+let state={enabled:false,active_provider:null,preferred_provider:'openrouter',
+  policy:'preferred-first',demo:false,providers:{
   openrouter:{available:true,connected:false,pending:false,error:null,
     model:'deepseek/deepseek-v4-flash'},
   codex:{available:true,connected:false,pending:false,error:null,
-    model:'gpt-6-luna',effort:'medium'}}};
+    model:'gpt-6-luna',effort:'medium'},
+  anthropic:{available:true,connected:false,pending:false,error:null,model:'claude-sonnet-synthetic'},
+  openai:{available:true,connected:false,pending:false,error:null,model:'gpt-synthetic'}}};
 const context={document,URL,
   setTimeout:fn=>{ const id=nextTimer++; timers.set(id,fn); return id; },
   clearTimeout:id=>timers.delete(id),
@@ -55,7 +58,11 @@ const context={document,URL,
       state.providers[name].pending=true;
       return {ok:true,json:async()=>({auth_url:authURL})};
     }
-    if(url.endsWith('/key')) state.providers.openrouter.connected=true;
+    if(url.endsWith('/key')) {
+      const name=url.split('/')[3]; state.providers[name].connected=true;
+      state.preferred_provider=name;
+    }
+    if(url.endsWith('/provider')) state.preferred_provider=data.provider;
     if(url.endsWith('/enabled')) state.enabled=data.enabled;
     if(url.endsWith('/disconnect')) {
       state.providers[data.provider].connected=false;
@@ -75,9 +82,11 @@ const consent=()=>find(n=>n.tagName==='input'&&n.type==='checkbox');
 const toggle=()=>all().filter(n=>n.tagName==='input'&&n.type==='checkbox')[1];
 const connect=name=>find(n=>n.dataset.summaryConnect===name);
 const disconnect=name=>find(n=>n.dataset.summaryDisconnect===name);
-const key=()=>find(n=>n.type==='password');
-const submit=async()=>{
-  find(n=>n.tagName==='form').listeners.submit({preventDefault(){}}); await tick();
+const selector=()=>find(n=>n.tagName==='select');
+const select=async name=>{selector().value=name; await change(selector());};
+const key=(name='openrouter')=>find(n=>n.id===`summary-${name}-key`);
+const submit=async(name='openrouter')=>{
+  find(n=>n.dataset.summaryKey===name).listeners.submit({preventDefault(){}}); await tick();
 };
 """
 
@@ -111,7 +120,7 @@ assert.ok(body.textContent.includes('GPT-6 Luna · medium'));
 assert.equal(connect('codex').textContent,'Continue with ChatGPT');
 assert.ok(body.textContent.includes('short excerpts'));
 assert.ok(body.textContent.includes('OpenRouter credits'));
-assert.ok(body.textContent.includes('ChatGPT plan limits'));
+assert.ok(body.textContent.includes('Plus or Pro'));
 consent().checked=true; await change(consent());
 await click(connect('openrouter'));
 assert.equal(posts.length,1);
@@ -173,7 +182,7 @@ const visible=n=>{
 const text=visible(dialog());
 assert.ok(text.includes('private work'));
 assert.ok(text.includes('OpenRouter credits'));
-assert.ok(text.includes('ChatGPT plan limits'));
+assert.ok(!text.includes('Plus or Pro'));
 assert.ok(!text.includes('DeepSeek V4 Flash'));
 assert.ok(!text.includes('GPT-6 Luna'));
 assert.ok(!text.includes('Or paste an OpenRouter API key'));
@@ -260,6 +269,105 @@ await open();
 assert.ok(body.textContent.includes('Connection needs attention'));
 assert.ok(!body.textContent.includes('<img'));
 assert.ok(!body.textContent.includes('<script>'));
+""")
+
+    def test_provider_selector_uses_preference_but_polling_preserves_user_choice(self) -> None:
+        self.run_browser(r"""
+state.preferred_provider='anthropic';
+await open();
+assert.equal(selector().value,'anthropic');
+const sections=()=>all().filter(n=>n.tagName==='section');
+assert.equal(sections().filter(n=>!n.hidden).length,1);
+assert.ok(!find(n=>n.attrs['aria-labelledby']==='summary-provider-anthropic').hidden);
+key('anthropic').value='synthetic-unsaved';
+await select('openai');
+assert.equal(key('anthropic').value,'');
+key('openai').value='synthetic-still-typing';
+const [id,poll]=[...timers.entries()][0]; timers.delete(id); await poll();
+assert.equal(selector().value,'openai');
+assert.equal(key('openai').value,'synthetic-still-typing');
+assert.equal(sections().filter(n=>!n.hidden).length,1);
+dialog().close();
+assert.equal(key('openai').value,'');
+await open(); assert.equal(selector().value,'anthropic');
+""")
+
+    def test_all_key_providers_require_consent_and_use_their_own_endpoint(self) -> None:
+        self.run_browser(r"""
+await open();
+for(const name of ['openrouter','anthropic','openai']) {
+  await select(name); key(name).value='synthetic-no-consent'; await submit(name);
+  assert.equal(key(name).value,''); assert.equal(posts.length,0);
+}
+consent().checked=true; await change(consent());
+for(const name of ['openrouter','anthropic','openai']) {
+  await select(name); key(name).value=`synthetic-${name}`; await submit(name);
+  assert.equal(key(name).value,'');
+  assert.equal(posts.at(-1).url,`/api/summaries/${name}/key`);
+  assert.equal(posts.at(-1).data.key,`synthetic-${name}`);
+  assert.ok(!body.textContent.includes(`synthetic-${name}`));
+}
+assert.ok(body.textContent.includes('API use is billed separately'));
+assert.ok(body.textContent.includes('Enterprise workspaces are not supported'));
+""")
+
+    def test_connected_provider_can_be_preferred_with_explicit_consent(self) -> None:
+        self.run_browser(r"""
+state.providers.anthropic.connected=true;
+await open(); await select('anthropic');
+const use=()=>find(n=>n.dataset.summaryUse==='anthropic');
+assert.equal(use().hidden,false); assert.equal(use().disabled,true);
+await click(use()); assert.equal(posts.length,0);
+consent().checked=true; await change(consent()); await click(use());
+assert.equal(posts.at(-1).url,'/api/summaries/provider');
+assert.equal(posts.at(-1).data.provider,'anthropic');
+assert.equal(use().disabled,true); assert.equal(use().textContent,'Preferred for summaries');
+assert.ok(body.textContent.includes('Your preferred service is tried first'));
+assert.ok(body.textContent.includes('other connected services'));
+""")
+
+    def test_pending_and_demo_disable_new_provider_actions(self) -> None:
+        self.run_browser(r"""
+state.providers.codex.pending=true;
+await open(); consent().checked=true; await change(consent());
+assert.equal(selector().disabled,true);
+for(const name of ['openrouter','anthropic','openai']) {
+  assert.equal(key(name).disabled,true);
+  key(name).value='synthetic'; await submit(name);
+}
+assert.equal(posts.length,0);
+dialog().close(); state.providers.codex.pending=false; state.demo=true;
+await open(); consent().checked=true; await change(consent());
+for(const name of ['openrouter','anthropic','openai']) {
+  assert.equal(key(name).disabled,true);
+  key(name).value='synthetic'; await submit(name);
+}
+assert.equal(selector().disabled,true); assert.equal(posts.length,0);
+""")
+
+    def test_any_setting_change_clears_unsaved_keys(self) -> None:
+        self.run_browser(r"""
+state.providers.anthropic.connected=true;
+await open();
+key('openrouter').value='synthetic-unsaved';
+toggle().checked=true; await change(toggle());
+assert.equal(key('openrouter').value,'');
+assert.equal(posts.at(-1).url,'/api/summaries/enabled');
+assert.ok(!JSON.stringify(posts).includes('synthetic-unsaved'));
+""")
+
+    def test_reopening_a_pending_sign_in_keeps_cancel_reachable(self) -> None:
+        self.run_browser(r"""
+state.providers.codex.pending=true;
+await open();
+assert.equal(selector().value,'codex');
+const section=find(n=>n.attrs['aria-labelledby']==='summary-provider-codex');
+assert.equal(section.hidden,false);
+assert.equal(disconnect('codex').hidden,false);
+assert.equal(disconnect('codex').disabled,false);
+await click(disconnect('codex'));
+assert.equal(posts.at(-1).data.provider,'codex');
+assert.equal(selector().disabled,false);
 """)
 
 

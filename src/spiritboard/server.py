@@ -312,8 +312,15 @@ class Handler(BaseHTTPRequestHandler):
                     f"http://{host}:{self.server.server_port}/api/summaries/{provider}/callback"
                 )
                 result = manager.begin(provider, callback)
-            elif path == "/api/summaries/openrouter/key" and set(body) == {"key"}:
-                manager.set_key(body["key"])
+            elif path in {
+                "/api/summaries/openrouter/key",
+                "/api/summaries/anthropic/key",
+                "/api/summaries/openai/key",
+            } and set(body) == {"key"}:
+                manager.set_key(body["key"], provider=path.split("/")[3])
+                result = manager.public_state()
+            elif path == "/api/summaries/provider" and set(body) == {"provider"}:
+                manager.set_provider(body["provider"])
                 result = manager.public_state()
             elif path == "/api/summaries/disconnect" and set(body) == {"provider"}:
                 manager.disconnect(body["provider"])

@@ -46,15 +46,33 @@
   guide.rel = 'noopener noreferrer';
   details.append(
     element('summary', 'How it works'),
-    element('p', 'Connect either service. If both are connected, OpenRouter is tried first. You can pause summaries or disconnect at any time.', 'summary-settings-help'),
+    element('p', 'Your preferred service is tried first, then other connected services if needed. Only services you connect can receive excerpts. Pause summaries or disconnect at any time.', 'summary-settings-help'),
     element('p', 'Models: DeepSeek V4 Flash on OpenRouter; GPT-6 Luna · medium on ChatGPT.', 'summary-settings-help'),
     guide,
   );
   const providers = {};
+  const names = ['openrouter', 'codex', 'anthropic', 'openai'];
+  const titles = { openrouter: 'OpenRouter', codex: 'ChatGPT', anthropic: 'Anthropic', openai: 'OpenAI API' };
+  const pickerLabel = element('label', 'Provider', 'summary-settings-picker');
+  const picker = element('select');
+  picker.id = 'summary-provider';
+  picker.disabled = true;
+  pickerLabel.htmlFor = picker.id;
+  for (const name of names) {
+    const option = element('option', titles[name]);
+    option.value = name;
+    picker.append(option);
+  }
+  picker.value = 'openrouter';
+  pickerLabel.append(picker);
+  const apiModels = element('p', '', 'summary-settings-help');
+  details.append(apiModels);
 
   for (const [name, title, description] of [
     ['openrouter', 'OpenRouter', 'Uses your OpenRouter credits.'],
-    ['codex', 'ChatGPT', 'Uses your ChatGPT plan limits.'],
+    ['codex', 'ChatGPT', 'Uses an eligible ChatGPT Plus or Pro plan. Enterprise workspaces are not supported.'],
+    ['anthropic', 'Anthropic', 'API use is billed separately from your Claude subscription.'],
+    ['openai', 'OpenAI API', 'API use is billed separately from your ChatGPT subscription.'],
   ]) {
     const section = element('section', '', 'summary-settings-provider');
     section.setAttribute('aria-labelledby', `summary-provider-${name}`);
@@ -79,7 +97,12 @@
     disconnect.type = 'button';
     disconnect.dataset.summaryDisconnect = name;
     disconnect.hidden = true;
-    actions.append(connect, disconnect);
+    const use = element('button', 'Use for summaries');
+    use.type = 'button';
+    use.dataset.summaryUse = name;
+    use.hidden = true;
+    if (name === 'openrouter' || name === 'codex') actions.append(connect);
+    actions.append(use, disconnect);
     section.append(titleNode, status, descriptionNode, revocation, actions);
     const install = element('p', '', 'summary-settings-help');
     install.hidden = true;
@@ -87,30 +110,39 @@
       install.textContent = 'ChatGPT sign-in is unavailable in this installation. Check the local service setup.';
       section.append(install);
     }
-    providers[name] = { section, status, connect, disconnect, install, revocation };
+    providers[name] = { section, status, connect, disconnect, install, revocation, use };
   }
 
-  const keyForm = element('form', '', 'summary-settings-key');
-  const keyOptions = element('details', '', 'summary-settings-details');
-  keyOptions.append(element('summary', 'Use an API key instead'), keyForm);
-  const keyLabel = element('label', 'Or paste an OpenRouter API key');
-  const key = element('input');
-  key.id = 'summary-openrouter-key';
-  key.type = 'password';
-  key.autocomplete = 'off';
-  key.spellcheck = false;
-  key.required = true;
-  key.disabled = true;
-  key.setAttribute('aria-describedby', 'summary-key-help');
-  keyLabel.htmlFor = key.id;
-  const saveKey = element('button', 'Save key securely');
-  saveKey.type = 'submit';
-  saveKey.disabled = true;
-  const keyHelp = element('p', 'Saved in your system credential store.', 'summary-settings-help');
-  keyHelp.id = 'summary-key-help';
-  keyForm.append(keyLabel, key, saveKey, keyHelp);
-  providers.openrouter.section.append(keyOptions);
-  dialog.append(header, intro, notice, message, consentLabel, toggleLabel, providers.openrouter.section, providers.codex.section, details);
+  for (const name of ['openrouter', 'anthropic', 'openai']) {
+    const keyForm = element('form', '', 'summary-settings-key');
+    keyForm.dataset.summaryKey = name;
+    const keyLabel = element('label', `Paste an ${titles[name]} API key`);
+    const key = element('input');
+    key.id = `summary-${name}-key`;
+    key.type = 'password';
+    key.autocomplete = 'off';
+    key.spellcheck = false;
+    key.required = true;
+    key.disabled = true;
+    key.setAttribute('aria-describedby', `summary-${name}-key-help`);
+    keyLabel.htmlFor = key.id;
+    const saveKey = element('button', 'Save key securely');
+    saveKey.type = 'submit';
+    saveKey.disabled = true;
+    const keyHelp = element('p', 'Saved in your system credential store.', 'summary-settings-help');
+    keyHelp.id = `summary-${name}-key-help`;
+    keyForm.append(keyLabel, key, saveKey, keyHelp);
+    let keyOptions = null;
+    if (name === 'openrouter') {
+      keyOptions = element('details', '', 'summary-settings-details');
+      keyOptions.append(element('summary', 'Use an API key instead'), keyForm);
+      providers[name].section.append(keyOptions);
+    } else {
+      providers[name].section.append(keyForm);
+    }
+    Object.assign(providers[name], { keyForm, key, saveKey, keyOptions });
+  }
+  dialog.append(header, intro, notice, message, consentLabel, toggleLabel, pickerLabel, ...names.map(name => providers[name].section), details);
   document.body.append(dialog);
 
   let settings = null;
@@ -118,6 +150,21 @@
   let timer = null;
   let generation = 0;
   let pendingPopup = null;
+  let selected = null;
+
+  function clearKeys() {
+    for (const nodes of Object.values(providers)) {
+      if (nodes.key) nodes.key.value = '';
+    }
+  }
+
+  function hasPending() {
+    return Object.values(settings?.providers || {}).some(value => value.pending === true);
+  }
+
+  function canConnect(name) {
+    return settings && settings.demo !== true && !busy && !hasPending() && consent.checked && settings.providers?.[name]?.available === true;
+  }
 
   function showError(text) {
     message.textContent = text;
@@ -127,29 +174,43 @@
   function render() {
     if (!settings) return;
     const demo = settings.demo === true;
-    notice.textContent = demo ? 'Synthetic demo: sign-in and AI summaries are off.' : settings.enabled ? `Summaries enabled · ${settings.active_provider === 'openrouter' ? 'OpenRouter' : settings.active_provider === 'codex' ? 'ChatGPT' : 'waiting for a connection'}` : 'Summaries paused.';
+    notice.textContent = demo ? 'Synthetic demo: sign-in and AI summaries are off.' : settings.enabled ? `Summaries enabled · ${titles[settings.active_provider] || 'waiting for a connection'}` : 'Summaries paused.';
     consent.disabled = busy || demo;
-    const pending = Object.values(settings.providers || {}).some(value => value.pending === true);
+    const pending = hasPending();
+    picker.disabled = busy || demo || pending;
+    if (selected === null) selected = names.find(name => settings.providers?.[name]?.pending === true) || (names.includes(settings.preferred_provider) ? settings.preferred_provider : 'openrouter');
+    picker.value = selected;
+    apiModels.textContent = ['anthropic', 'openai'].flatMap(name => {
+      const model = settings.providers?.[name]?.model;
+      return typeof model === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,100}$/.test(model) ? [`${titles[name]}: ${model}`] : [];
+    }).join(' · ');
+    apiModels.hidden = !apiModels.textContent;
     let connected = false;
-    for (const name of ['openrouter', 'codex']) {
+    for (const name of names) {
       const value = settings.providers?.[name] || {};
       const nodes = providers[name];
       const available = value.available === true;
+      nodes.section.hidden = name !== selected;
       connected ||= value.connected === true;
       nodes.status.textContent = demo ? 'Disabled in demo' : value.storage_error === true ? 'Secure storage is unavailable. Set up or unlock your system credential store, then try again.' : value.pending ? 'Waiting for sign-in…' : value.error ? 'Connection needs attention. Disconnect and try again.' : value.connected ? 'Connected' : available ? 'Not connected' : 'Unavailable';
       nodes.status.dataset.state = value.connected ? 'connected' : value.pending ? 'pending' : 'disconnected';
       nodes.connect.hidden = value.connected === true || value.pending === true;
       nodes.connect.disabled = busy || demo || pending || !available || !consent.checked;
+      nodes.use.hidden = value.connected !== true;
+      nodes.use.textContent = settings.preferred_provider === name ? 'Preferred for summaries' : 'Use for summaries';
+      nodes.use.disabled = !canConnect(name) || settings.preferred_provider === name;
       nodes.revocation.hidden = demo || name !== 'codex' || value.revocation_unconfirmed !== true;
       nodes.disconnect.hidden = !value.connected && !value.pending && !value.error;
       nodes.disconnect.textContent = value.pending ? 'Cancel sign-in' : 'Disconnect';
       nodes.disconnect.disabled = busy || demo;
       nodes.install.hidden = demo || available || name !== 'codex';
+      if (nodes.key) {
+        nodes.key.disabled = !canConnect(name);
+        nodes.saveKey.disabled = !canConnect(name);
+      }
     }
     toggle.checked = settings.enabled === true;
     toggle.disabled = busy || demo || (!connected && !toggle.checked);
-    key.disabled = busy || demo || pending;
-    saveKey.disabled = busy || demo || pending || !consent.checked;
   }
 
   async function request(path, data) {
@@ -188,6 +249,7 @@
   }
 
   async function change(path, data, popup = null, provider = null) {
+    clearKeys();
     if (busy || !settings || settings.demo) {
       if (popup) popup.close();
       return;
@@ -220,7 +282,8 @@
   }
 
   function connect(provider) {
-    if (!consent.checked || !settings || settings.demo || busy) return;
+    if (!canConnect(provider)) return;
+    clearKeys();
     const popup = window.open('about:blank', '_blank');
     if (!popup) {
       showError('Allow pop-up windows for this local dashboard, then try connecting again.');
@@ -231,29 +294,43 @@
     void change(`/api/summaries/${provider}/connect`, {}, popup, provider);
   }
 
-  for (const name of ['openrouter', 'codex']) {
+  for (const name of names) {
     providers[name].connect.addEventListener('click', () => connect(name));
     providers[name].disconnect.addEventListener('click', () => {
+      clearKeys();
       void change('/api/summaries/disconnect', { provider: name });
     });
+    providers[name].use.addEventListener('click', () => {
+      if (!canConnect(name) || settings.providers?.[name]?.connected !== true || settings.preferred_provider === name) return;
+      clearKeys();
+      void change('/api/summaries/provider', { provider: name });
+    });
+    if (providers[name].keyForm) providers[name].keyForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const value = providers[name].key.value.trim();
+      clearKeys();
+      if (!value || !canConnect(name)) return;
+      void change(`/api/summaries/${name}/key`, { key: value });
+    });
   }
+  picker.addEventListener('change', () => {
+    clearKeys();
+    if (!picker.disabled && names.includes(picker.value)) selected = picker.value;
+    for (const nodes of Object.values(providers)) if (nodes.keyOptions) nodes.keyOptions.open = false;
+    showError('');
+    render();
+  });
   consent.addEventListener('change', render);
   toggle.addEventListener('change', () => {
     void change('/api/summaries/enabled', { enabled: toggle.checked });
-  });
-  keyForm.addEventListener('submit', event => {
-    event.preventDefault();
-    const value = key.value.trim();
-    key.value = '';
-    if (!value || !consent.checked || busy) return;
-    void change('/api/summaries/openrouter/key', { key: value });
   });
   close.addEventListener('click', () => dialog.close());
   dialog.addEventListener('close', () => {
     generation += 1;
     clearTimeout(timer);
-    key.value = '';
-    keyOptions.open = false;
+    clearKeys();
+    for (const nodes of Object.values(providers)) if (nodes.keyOptions) nodes.keyOptions.open = false;
+    selected = null;
     details.open = false;
     consent.checked = false;
     if (pendingPopup) pendingPopup.close();

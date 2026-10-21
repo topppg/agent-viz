@@ -28,7 +28,11 @@ class Providers:
         return revision == self.revision and name in self.routes()
 
     def model(self, name: str):
-        return "gpt-6-luna" if name == "codex" else "deepseek/deepseek-v4-flash"
+        return {
+            "codex": "gpt-6-luna",
+            "openai": "gpt-6-luna",
+            "anthropic": "claude-haiku-5-5",
+        }.get(name, "deepseek/deepseek-v4-flash")
 
     def billing_kind(self, name: str):
         return "subscription" if name == "codex" else "api"
@@ -75,12 +79,12 @@ class SummaryFallbackTests(unittest.TestCase):
             ]
         }
 
-    def create(self, providers: Providers):
+    def create(self, providers: Providers, state_name: str = "summaries.sqlite3"):
         summarizer = Summarizer(
             lambda: [],
             self.store,
             providers=providers,
-            state_path=Path(self.temporary.name) / "summaries.sqlite3",
+            state_path=Path(self.temporary.name) / state_name,
         )
         self.addCleanup(summarizer.db.close)
         self.addCleanup(summarizer.stop)
@@ -100,6 +104,21 @@ class SummaryFallbackTests(unittest.TestCase):
         self.assertEqual(state["summaries"][0]["model"], "gpt-6-luna")
         self.assertEqual(state["summaries"][0]["provider"], "codex")
         self.assertIsNone(state["summaries"][0]["actual_cost_usd"])
+
+    def test_direct_api_success_without_reported_charge_is_not_free_or_plan_usage(self):
+        for name in ("anthropic", "openai"):
+            with self.subTest(provider=name):
+                providers = Providers([name])
+                providers.responses[name] = response()
+                summarizer = self.create(providers, f"{name}.sqlite3")
+                summarizer.tick()
+                state = summarizer.public_state()
+                self.assertEqual(state["provider"], name)
+                self.assertEqual(state["subscription_calls"], 0)
+                self.assertEqual(state["api_calls"], 1)
+                self.assertEqual(state["unknown_cost_calls"], 1)
+                self.assertIsNone(state["actual_cost_usd"])
+                self.assertEqual(len(state["summaries"]), 1)
 
     def test_or_failure_falls_back_and_journals_both_attempts_honestly(self):
         providers = Providers(["openrouter", "codex"])
