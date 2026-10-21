@@ -44,3 +44,12 @@ def test_package_and_command_version_match() -> None:
         )
     ]
     assert versions == [project["project"]["version"]]
+
+
+def test_readme_offers_matching_gif_and_video() -> None:
+    readme = (ROOT / "README.md").read_text()
+    media = re.findall(
+        r"/topppg/spiritboard/(?:blob/)?([0-9a-f]{40})/docs/media/demo\.(gif|mp4)", readme
+    )
+    assert {extension for _, extension in media} == {"gif", "mp4"}
+    assert len({commit for commit, _ in media}) == 1
