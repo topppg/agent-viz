@@ -22,10 +22,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/topppg/agent-viz"
-Source = "https://github.com/topppg/agent-viz"
-Issues = "https://github.com/topppg/agent-viz/issues"
-Documentation = "https://github.com/topppg/agent-viz/blob/main/docs/DISTRIBUTION.md"
+Homepage = "https://github.com/topppg/spiritboard"
+Source = "https://github.com/topppg/spiritboard"
+Issues = "https://github.com/topppg/spiritboard/issues"
+Documentation = "https://github.com/topppg/spiritboard/blob/main/docs/DISTRIBUTION.md"
 
 [project.scripts]
 spiritboard = "spiritboard.cli:main"

@@ -9,18 +9,18 @@ key, or a separate web server. Python 3.12 or newer is required; `uv` can manage
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
 ```bash
-uvx --from git+https://github.com/topppg/agent-viz@main spiritboard
+uvx --from git+https://github.com/topppg/spiritboard@main spiritboard
 ```
 
 This installs into uv's isolated tool cache and opens the local dashboard. Keep the terminal
 running; Ctrl-C stops Spiritboard, not the agents being observed. Nothing is uploaded and model
 summaries are off unless explicitly enabled. Fetching the package itself requires internet access.
-The GitHub repository is still named `agent-viz`; the installed command is `spiritboard`.
+The GitHub repository, package, and installed command are all named `spiritboard`.
 
 For an installed command you can use repeatedly:
 
 ```bash
-uv tool install git+https://github.com/topppg/agent-viz@main
+uv tool install git+https://github.com/topppg/spiritboard@main
 spiritboard
 ```
 
@@ -102,7 +102,7 @@ One-time actions, performed by the repository/package owner:
 2. Create a GitHub environment named `pypi`. Restrict deployment branches to `main`, require a
    release reviewer where available, and disable self-review where appropriate.
 3. Add a PyPI trusted publisher (or pending publisher for the first release) with owner `topppg`,
-   repository `agent-viz`, workflow filename `release.yml`, and environment `pypi`. All fields must
+   repository `spiritboard`, workflow filename `release.yml`, and environment `pypi`. All fields must
    match exactly. If the GitHub repository is renamed, update the publisher and project URLs first.
 4. Protect the default branch and require the normal checks and distribution matrix before release.
 

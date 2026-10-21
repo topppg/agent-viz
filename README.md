@@ -52,7 +52,7 @@ See your own agents. Supported Codex and Claude storage folders are discovered
 automatically, without opening authentication files:
 
 ```sh
-uvx --from git+https://github.com/topppg/agent-viz.git@main spiritboard
+uvx --from git+https://github.com/topppg/spiritboard.git@main spiritboard
 ```
 
 Your browser opens automatically. The terminal prints the loopback-only URL;
@@ -63,7 +63,7 @@ reopens the existing board instead of starting a second collector.
 Or try an invented scenario with no real agents, tools or models:
 
 ```sh
-uvx --from git+https://github.com/topppg/agent-viz.git@main spiritboard --demo
+uvx --from git+https://github.com/topppg/spiritboard.git@main spiritboard --demo
 ```
 
 The demo has separate local history and never discovers real profiles or calls
@@ -72,7 +72,7 @@ a model. Add `--no-open` to print the URL without launching a browser.
 For a permanent command:
 
 ```sh
-uv tool install git+https://github.com/topppg/agent-viz.git@main
+uv tool install git+https://github.com/topppg/spiritboard.git@main
 spiritboard
 ```
 
