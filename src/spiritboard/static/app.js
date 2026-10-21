@@ -186,7 +186,7 @@
       ["needs", "◐", statuses.filter((s) => s.key === "needs").length, "needs you"],
       ["quiet", "○", statuses.filter((s) => s.key === "quiet").length, "quiet"]];
     $("counts").replaceChildren(...counts.map(([key, glyph, value, text]) => {
-      const item = node("span"); item.append(node("span", glyph, `g-${key}`), " ", node("strong", value), ` ${text}`); return item;
+      const item = node("span"); item.append(node("span", glyph, `g-${key}`), " ", node("strong", value), node("span", ` ${text}`, "count-word")); return item;
     }));
     if (state.past) $("counts").append(node("span", `at ${new Date(state.past.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`, "counts-at"));
   }
@@ -742,13 +742,17 @@
   const foldMenu = (open) => fold($("more"), $("top-actions"), open);
   const foldKeys = (open) => fold($("keys-toggle"), $("keys"), open);
   $("more").addEventListener("click", () => foldMenu($("more").getAttribute("aria-expanded") !== "true"));
-  $("top-actions").addEventListener("click", (event) => { if (event.target?.closest?.("button")) foldMenu(false); });
+  const closeMenu = () => { foldMenu(false); if (!document.querySelector?.("dialog[open]")) $("more").focus(); };
+  $("top-actions").addEventListener("click", (event) => { if (event.target?.closest?.("button")) closeMenu(); });
   $("keys-toggle").addEventListener("click", () => foldKeys($("keys-toggle").getAttribute("aria-expanded") !== "true"));
   document.addEventListener("click", (event) => { if (!event.target?.closest?.("#more, #top-actions")) foldMenu(false); });
   document.addEventListener("keydown", (event) => {
     if (document.querySelector?.("dialog[open]")) return;
     const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(event.target?.tagName);
-    if (event.key === "Escape") { foldMenu(false); if (typing) event.target.blur(); else selectRun(null); return; }
+    if (event.key === "Escape") {
+      if ($("more").getAttribute("aria-expanded") === "true") closeMenu(); else if (typing) event.target.blur(); else selectRun(null);
+      return;
+    }
     if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
     const actions = { "/": () => $("search").focus(), j: () => move(1), ArrowDown: () => move(1), k: () => move(-1), ArrowUp: () => move(-1),
       a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed"), l: backToLive, L: backToLive,

@@ -335,7 +335,9 @@
     consent.checked = false;
     if (pendingPopup) pendingPopup.close();
     pendingPopup = null;
-    opener.focus();
+    // On narrow screens the opener sits in the folded header menu; return focus to the menu button.
+    const more = document.getElementById('more');
+    (opener.offsetParent === null && more ? more : opener).focus();
   });
   opener.addEventListener('click', () => {
     if (dialog.open) return;

@@ -197,13 +197,13 @@ kbd { font-family: var(--mono); font-size: 11.5px; background: #1d1830; border: 
 }
 
 /* Narrower than a full laptop screen: one-line header with actions behind a menu, compact toolbar. */
-@media (max-width: 1100px) {
+@media (max-width: 1099px) {
   .top { flex-wrap: nowrap; gap: 12px; padding: 10px 16px; }
   .brand { gap: 8px; }
   .brand .muted, .brand .cursor { display: none; }
   .logo { font-size: 18px; }
-  .counts { flex-wrap: nowrap; gap: 12px; white-space: nowrap; }
-  #connection { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .counts { flex-wrap: nowrap; gap: 12px; min-width: 0; overflow: hidden; white-space: nowrap; }
+  #connection { flex: 0 1 auto; min-width: 4ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #more { display: block; flex: none; width: 32px; padding: 0; font-size: 16px; line-height: 1; }
   .top-actions { display: none; position: absolute; top: calc(100% + 4px); right: 16px; z-index: 6; min-width: 220px; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
   .top-actions.open { display: flex; }
@@ -214,10 +214,11 @@ kbd { font-family: var(--mono); font-size: 11.5px; background: #1d1830; border: 
   .find input { flex: 1; width: auto; min-width: 0; max-width: none; }
   #hidden-note { flex-basis: 100%; margin-left: 0; }
 }
+@media (max-width: 720px) { .count-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } }
 @media (max-width: 560px) { .logo { display: none; } }
 
 /* Narrow or short: keep the header in view, fold the overview into chips and a sparkline, hide the shortcut list. */
-@media (max-width: 1100px), (max-height: 600px) {
+@media (max-width: 1099px), (max-height: 600px) {
   .top { position: sticky; top: 0; z-index: 5; }
   main { gap: 10px; padding-top: 12px; padding-bottom: 12px; }
   .overview { gap: 10px; }
