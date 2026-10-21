@@ -19,6 +19,8 @@ from typing import Any
 
 HEAD_BYTES = 256 * 1024
 TAIL_BYTES = 512 * 1024
+REQUEST_SEARCH_BYTES = 32 * 1024 * 1024
+TEXT_HIDDEN = "Text hidden · enable include_text for this profile"
 MAX_ENTRIES = 30_000
 MAX_DEPTH = 7
 DEFAULT_SCAN_LIMIT = 5_000
@@ -334,7 +336,7 @@ def _base(profile: SourceProfile, native: str, project: str, started: str | None
         "parent_run_id": None,
         "native_id": native,
         "name": f"{profile.kind.title()} {native[:8]}",
-        "task": "Text hidden · enable include_text for this profile",
+        "task": TEXT_HIDDEN,
         "activity": "Transcript observed",
         "source": profile.kind,
         "account": profile.label,
@@ -401,22 +403,34 @@ def _codex(profile: SourceProfile, records: list[dict], mtime: float) -> dict | 
             if profile.include_text and event == "user_message":
                 text = _request_text(p.get("message"))
                 if text:
-                    out["task"] = text
+                    out["task"], last_reply = text, ""
         elif kind == "response_item":
             event = p.get("type")
             if event in {"function_call", "custom_tool_call", "local_shell_call"}:
-                state, activity, evidence = "waiting_tool", "Tool call recorded", str(event)
+                state, evidence = "waiting_tool", str(event)
+                activity = last_reply or "Tool call recorded"
             elif event in {
                 "function_call_output",
                 "custom_tool_call_output",
                 "local_shell_call_output",
             }:
-                state, activity, evidence = "working", "Tool result recorded", str(event)
-            elif event in {"message", "reasoning", "agent_message"} and p.get("role") != "user":
-                state, activity, evidence = "working", "Model activity recorded", str(event)
+                state, evidence = "working", str(event)
+                activity = last_reply or "Tool result recorded"
+            elif event == "message" and p.get("role") == "user":
+                text = _request_text(p.get("content")) if profile.include_text else ""
+                if text:
+                    # A new request starts a new turn; the previous reply no longer describes it.
+                    out["task"], last_reply = text, ""
+                    state, activity, evidence = "working", "Turn started", "user message"
+            elif event in {"reasoning", "agent_message"} or (
+                event == "message" and p.get("role") == "assistant"
+            ):
+                state, evidence = "working", str(event)
                 if profile.include_text and event in {"message", "agent_message"}:
-                    last_reply = _text(p.get("content")) or last_reply
-                    activity = last_reply or activity
+                    # Only the agent's own prose; wrapped system notices are not replies.
+                    reply = _text(p.get("content"))
+                    last_reply = reply if reply and not reply.startswith("<") else last_reply
+                activity = last_reply or "Model activity recorded"
         if state and (stamp is None or last_state_time is None or stamp >= last_state_time):
             out.update(
                 state=state,
@@ -458,11 +472,8 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
             result = isinstance(content, list) and any(
                 isinstance(x, dict) and x.get("type") == "tool_result" for x in content
             )
-            state, activity, evidence = (
-                "working",
-                "Tool result recorded" if result else "User turn recorded",
-                "user/tool_result" if result else "user",
-            )
+            state, evidence = "working", "user/tool_result" if result else "user"
+            activity = (last_reply or "Tool result recorded") if result else "User turn recorded"
             # Skill bodies, compaction summaries and command echoes are not requests.
             if (
                 profile.include_text
@@ -473,6 +484,8 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
                 text = _request_text(content, 400 if agent else 160)
                 if text and not (agent and prompt_seen):
                     out["task"], prompt_seen = text, True
+                    if not result:
+                        last_reply = ""
         elif kind == "assistant" and isinstance(message, dict):
             stop = message.get("stop_reason")
             content = message.get("content", [])
@@ -485,14 +498,11 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
                 state, evidence = "idle", "assistant stop_reason"
                 activity = last_reply or "Turn ended · session may resume"
             elif tool or stop == "tool_use":
-                state, activity, evidence = (
-                    "waiting_tool",
-                    "Tool call recorded",
-                    "assistant tool_use",
-                )
+                state, evidence = "waiting_tool", "assistant tool_use"
+                activity = last_reply or "Tool call recorded"
             else:
                 state, evidence = "working", "assistant"
-                activity = (profile.include_text and _text(content)) or "Model activity recorded"
+                activity = last_reply or "Model activity recorded"
         elif kind == "system" and row.get("subtype") == "turn_duration":
             state, evidence = "idle", "turn_duration"
             activity = last_reply or "Turn ended · session may resume"
@@ -505,6 +515,60 @@ def _claude(profile: SourceProfile, records: list[dict], mtime: float) -> dict |
             last_state_time = stamp or last_state_time
     out["last_seen"] = out["last_seen"] or datetime.fromtimestamp(mtime, UTC).isoformat()
     return out
+
+
+def _row_request(row: dict[str, Any], kind: str) -> str:
+    if kind == "codex":
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            return ""
+        if row.get("type") == "response_item" and payload.get("type") == "message":
+            return _request_text(payload.get("content")) if payload.get("role") == "user" else ""
+        if row.get("type") == "event_msg" and payload.get("type") == "user_message":
+            return _request_text(payload.get("message"))
+        return ""
+    message = row.get("message")
+    if row.get("type") != "user" or not isinstance(message, dict):
+        return ""
+    if row.get("isMeta") or row.get("isCompactSummary") or row.get("isSidechain"):
+        return ""
+    content = message.get("content")
+    if isinstance(content, list) and any(
+        isinstance(x, dict) and x.get("type") == "tool_result" for x in content
+    ):
+        return ""
+    return _request_text(content)
+
+
+def _last_request(path: Path, kind: str) -> str:
+    """The latest user request before the bounded tail, scanning backwards in chunks."""
+    marker = b'"role":"user"' if kind == "codex" else b'"type":"user"'
+    chunk = 1024 * 1024
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as stream:
+            end = os.fstat(stream.fileno()).st_size
+            floor, carry = max(0, end - REQUEST_SEARCH_BYTES), b""
+            while end > floor:
+                start = max(floor, end - chunk)
+                stream.seek(start)
+                lines = (stream.read(end - start) + carry).split(b"\n")
+                # The first piece may start mid-line; it is completed by the next chunk.
+                carry, body = (lines[0], lines[1:]) if start > 0 else (b"", lines)
+                for line in reversed(body):
+                    if marker not in line.replace(b'": "', b'":"'):
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    text = _row_request(row, kind) if isinstance(row, dict) else ""
+                    if text:
+                        return text
+                end = start
+    except OSError:
+        return ""
+    return ""
 
 
 def _subagent_description(path: Path) -> str:
@@ -562,6 +626,12 @@ def scan_profile(
                 )
                 if value and value.get("parent_run_id") and profile.include_text:
                     value["name"] = _subagent_description(path) or value["name"]
+                if value and profile.include_text and value.get("task") == TEXT_HIDDEN:
+                    # Long transcripts can hold the last request before the read tail; a
+                    # request found earlier stays valid until a newer one reaches the tail.
+                    earlier = cached[1].get("task") if cached and cached[1] else ""
+                    found = earlier if earlier and earlier != TEXT_HIDDEN else ""
+                    value["task"] = found or _last_request(path, profile.kind) or TEXT_HIDDEN
                 _CACHE[key] = (signature, value)
             if value:
                 result.append(dict(value))
