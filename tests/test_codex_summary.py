@@ -229,6 +229,42 @@ class CodexConnectionTests(unittest.TestCase):
             with patch.object(self.connection, "_json") as network, self.assertRaises(CodexError):
                 self.connection.complete(state, "unused", **kwargs)
             network.assert_not_called()
+            self.assertFalse(self.connection.public_state()["pending"])
+
+    def test_unrelated_callback_does_not_cancel_legitimate_pending_login(self):
+        self.connection.begin_login(CALLBACK)
+        pending = self.connection._pending.copy()
+        self.pending_nonce = pending["nonce"]
+        with patch.object(self.connection, "_json") as network:
+            with self.assertRaises(CodexError):
+                self.connection.complete("unrelated-state", "unused", CLIENT)
+            network.assert_not_called()
+        self.assertEqual(self.connection._pending, pending)
+        self.assertTrue(self.connection.public_state()["pending"])
+        with patch.object(self.connection, "_json", side_effect=self.network):
+            self.connection.complete(pending["state"], "synthetic-code", CLIENT)
+        self.assertTrue(self.connection.public_state()["connected"])
+
+    def test_issued_registration_survives_exchange_failure_without_tokens(self):
+        self.connection.begin_login(CALLBACK)
+        state = self.connection._pending["state"]
+        self.pending_nonce = self.connection._pending["nonce"]
+
+        def failed_exchange(*args, **kwargs):
+            if args[1].endswith("oauth/token"):
+                raise OSError("synthetic-exchange-failure")
+            return self.network(*args, **kwargs)
+
+        with patch.object(self.connection, "_json", side_effect=failed_exchange):
+            with self.assertRaises(CodexError):
+                self.connection.complete(state, "synthetic-code", CLIENT)
+        self.assertFalse(self.connection.public_state()["connected"])
+        record = json.loads(self.connection._path.read_text())
+        self.assertEqual(record["client_id"], CLIENT)
+        self.assertNotIn("access_token", record)
+        retry = parse_qs(urlsplit(self.connection.begin_login(CALLBACK)["auth_url"]).query)
+        self.assertEqual(retry["client_id"], [CLIENT])
+        self.assertNotIn("agent_name_hint", retry)
 
     def test_token_identity_signature_and_claims_are_validated(self):
         for changes in (

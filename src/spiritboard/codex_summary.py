@@ -168,7 +168,9 @@ class CodexConnection:
     ) -> None:
         with self._operation:
             with self._lock:
-                pending, self._pending = self._pending, None
+                pending = self._pending
+                if pending is not None and pending["expires"] <= time.monotonic():
+                    self._pending = None
                 if (
                     pending is None
                     or not _text(state, 256)
@@ -179,6 +181,7 @@ class CodexConnection:
                 ):
                     self._error = "ChatGPT sign-in could not be verified. Start sign-in again."
                     raise CodexError(self._error)
+                self._pending = None
                 generation = self._generation
             try:
                 if error is not None or not _text(code, 4096):
