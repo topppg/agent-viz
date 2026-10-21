@@ -89,10 +89,11 @@ class Element {
 }
 function flatten(el) { return el.children.filter(c => typeof c !== 'string').flatMap(c => [c, ...flatten(c)]); }
 const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
+const headers = Object.fromEntries(['harness','status','agent','doing','rate','seen'].map(key => { const button = new Element('button'); button.dataset.sort = key; button.textContent = key; return [key, button]; }));
 ids['window-filter'].value = '604800000';
 ['active','waiting','all'].forEach(v => { const b = new Element('button'); b.dataset.view = v; ids.views.children.push(b); });
 const docListeners = {};
-document = { getElementById: id => ids[id], createElement: tag => new Element(tag), activeElement: null, addEventListener: (k, fn) => { docListeners[k] = fn; } };
+document = { getElementById: id => ids[id], createElement: tag => new Element(tag), querySelectorAll: selector => selector === '[data-sort]' ? Object.values(headers) : [], activeElement: null, addEventListener: (k, fn) => { docListeners[k] = fn; } };
 const now = new Date().toISOString();
 const old = '2020-01-01T00:00:00Z';
 const run = (id, parent, name, extra = {}) => ({run_id:id,parent_run_id:parent,name,session_id:'codex-work:observed',source:'codex',account:'work',state:'working',health:'observed',inferred:true,task:'Original task',activity:'<img src=x onerror=alert(1)>',last_seen:now,started_at:now,demo:true,operations:[],...extra});
@@ -146,6 +147,29 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(ids.flux.attrs['aria-label'].includes('codex · work'));
  assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 API calls'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
+ // Header sorting reverses on a second click and keeps children with their parent.
+ headers.agent.listeners.click();
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan','root','child','ask','sdk-run']);
+ assert.equal(headers.agent.attrs['aria-pressed'], 'true');
+ assert.equal(headers.agent.dataset.arrow, '▲');
+ headers.agent.listeners.click();
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['sdk-run','root','ask','child','orphan']);
+ assert.equal(headers.agent.dataset.arrow, '▼');
+ headers.rate.listeners.click();
+ assert.equal(rows()[0].dataset.runId, 'root');
+ headers.seen.listeners.click();
+ assert.equal(headers.seen.dataset.arrow, '▼');
+ headers.doing.listeners.click();
+ assert.equal(headers.doing.attrs['aria-pressed'], 'true');
+ headers.status.listeners.click();
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask','child','orphan','sdk-run']);
+ headers.harness.listeners.click();
+ assert.equal(rows()[0].dataset.runId, 'orphan');
+ headers.status.listeners.click();
+ headers.status.listeners.click();
+ headers.status.listeners.click();
+ assert.equal(headers.status.attrs['aria-pressed'], 'false');
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask','child','orphan','sdk-run']);
  // Harness filter.
  harnessButtons.find(b => b.textContent.includes('claude · personal')).listeners.click();
  assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan']);

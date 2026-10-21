@@ -53,7 +53,14 @@
       </div>
       <div class="table-wrap">
         <div class="table">
-          <div class="row head" aria-hidden="true"><span></span><span>STATUS</span><span>AGENT</span><span>WORKING ON</span><span>EV/MIN</span><span>LAST SEEN</span></div>
+          <div class="row head" role="group" aria-label="Sort agents">
+            <span><button type="button" data-sort="harness">HARNESS</button></span>
+            <span><button type="button" data-sort="status">STATUS</button></span>
+            <span><button type="button" data-sort="agent">AGENT</button></span>
+            <span><button type="button" data-sort="doing">WORKING ON</button></span>
+            <span><button type="button" data-sort="rate">EV/MIN</button></span>
+            <span><button type="button" data-sort="seen">LAST SEEN</button></span>
+          </div>
           <div id="runs" aria-busy="true"><p class="empty">Loading agents…</p></div>
         </div>
       </div>
