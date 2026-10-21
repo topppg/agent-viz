@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from ..sources import SourceProfile
 
 # Native session IDs handed to ``session_pid`` and ``resume`` always match this.
-SESSION_ID = re.compile(r"[0-9A-Za-z][0-9A-Za-z-]{7,79}")
+SESSION_ID = re.compile(r"[0-9A-Za-z][0-9A-Za-z_-]{7,79}")
 
 
 @dataclass(frozen=True)
