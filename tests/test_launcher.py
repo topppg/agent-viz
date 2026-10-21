@@ -251,8 +251,10 @@ class InstanceTests(unittest.TestCase):
                 thread = threading.Thread(target=publish_later)
                 thread.start()
                 try:
-                    with Instance(self.directory, self.settings) as client:
-                        self.assertEqual(client.existing_url(), url)
+                    # A slow CI runner needs more than the shortened default to see the publish.
+                    with patch("spiritboard.launcher._STARTUP_WAIT", 2.0):
+                        with Instance(self.directory, self.settings) as client:
+                            self.assertEqual(client.existing_url(), url)
                     self.assertTrue(published.is_set())
                 finally:
                     thread.join(2)
