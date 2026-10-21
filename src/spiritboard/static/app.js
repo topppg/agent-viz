@@ -3,7 +3,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const terminal = new Set(["completed", "failed", "cancelled"]);
-  const PALETTE = ["#7aa2f7", "#5eead4", "#c3a6ff", "#f0a07a", "#e6c07b", "#94e2d5", "#f5a3c7", "#a3be8c"];
+  const PALETTE = ["#8fa8ff", "#c4b5fd", "#f0abfc", "#fda4af", "#7dd3fc", "#fdba74", "#a7f3d0", "#e9d5ff"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   const MAX_ROWS = 300;
   const state = { snapshot: null, selected: null, view: "active", order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false };
@@ -355,7 +355,7 @@
     const rateCell = node("span", null, "rate-cell");
     const bar = node("span", null, "bar"); bar.style.width = `${Math.round(rate / maxRate * 56)}px`; bar.style.background = state.colors.get(harness.key);
     rateCell.append(node("span", rate, "num"), bar);
-    const last = node("span", seenText(run.last_seen), "cell");
+    const last = node("span", seenText(run.last_seen), "cell seen");
     last.dataset.seen = run.last_seen || "";
     button.append(harnessCell, statusCell, agent, doingCell, rateCell, last);
     button.addEventListener("click", () => selectRun(state.selected === run.run_id ? null : run.run_id));
@@ -392,41 +392,66 @@
     host.setAttribute("role", "region"); host.setAttribute("aria-label", `Details for ${nameOf(run)}`);
     const status = statusOf(run);
     const parent = byId.get(run.parent_run_id);
+    const harness = harnessOf(run);
+    const main = node("div", null, "detail-main");
+    const title = node("div", null, "detail-title");
+    title.append(node("h3", nameOf(run)), node("span", `${status.glyph} ${status.text}`, `pill g-${status.key}`));
+    main.append(title);
     if (status.turn) {
       const turn = node("p", `↩ finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
-      turn.append(node("span", ` · continue it in ${harnessOf(run).label}`, "needs-where"));
-      host.append(turn);
+      turn.append(node("span", ` · continue it in ${harness.label}`, "needs-where"));
+      main.append(turn);
     } else if (status.key === "closed") {
-      host.append(node("p", `■ closed ${age(run.last_seen)} ago · no running process owns this session any more`, "closed-line"));
+      main.append(node("p", `■ closed ${age(run.last_seen)} ago · no running process owns this session any more`, "closed-line"));
     } else if (status.key === "needs") {
       const needs = node("p", `◐ waiting on you for ${age(run.last_seen)}${run.activity ? ` · ${run.activity}` : ""}`, "needs-line");
       needs.append(node("span", ` · answer it in “${parent ? nameOf(parent) : nameOf(run)}”`, "needs-where"));
-      host.append(needs);
+      main.append(needs);
     }
     // A subagent's goal is the task its parent gave it, unless a summary exists.
     const goal = run.ai_summary?.text || (run.parent_run_id ? run.task : "");
-    if (goal) host.append(node("p", goal, "goal"));
+    if (goal) {
+      const summary = node("div", null, "summary");
+      const heading = node("span", null, "label");
+      if (run.ai_summary?.text) heading.append(node("span", "✦ ", "ai-mark"), "summary"); else heading.append("task");
+      summary.append(heading, node("p", goal, "goal"));
+      main.append(summary);
+    }
     const fields = node("dl", null, "fields");
-    const field = (title, content) => { if (content) fields.append(node("dt", title), node("dd", content)); };
+    const field = (title, content, className) => {
+      if (!content) return;
+      const item = node("div", null, className);
+      const dd = node("dd"); dd.append(content);
+      item.append(node("dt", title, "label"), dd);
+      fields.append(item);
+    };
     field("now", terminal.has(run.state) ? run.summary || label(run.state) : run.activity || "no activity reported");
-    if (!run.parent_run_id) field("you asked", run.task || (run.inferred ? "text hidden · set include_text for this profile" : ""));
+    if (!run.parent_run_id) field("you asked", run.task || (run.inferred ? "text hidden · set include_text for this profile" : ""), run.task ? "quote" : "");
     if (run.parent_run_id) {
-      const dd = node("dd");
       if (parent) {
         const link = node("button", nameOf(parent), "link"); link.type = "button"; link.dataset.focusKey = `parent:${parent.run_id}`;
         link.addEventListener("click", () => selectRun(parent.run_id));
-        dd.append(link);
-      } else dd.append("not yet available");
-      fields.append(node("dt", "parent"), dd);
+        field("parent", link);
+      } else field("parent", "not yet available");
     }
-    host.append(fields);
-    const footer = node("div", null, "expansion-footer");
-    footer.append(node("span", `${harnessOf(run).label}${run.project ? ` · ${run.project}` : ""} · ${age(run.started_at, time(run.ended_at) || serverNow())}`, "muted"), node("span", "", "spacer"));
+    main.append(fields);
+    const side = node("aside", null, "detail-side"); side.setAttribute("aria-label", "Session");
+    const facts = node("dl", null, "side-facts");
+    const fact = (title, ...content) => { const dd = node("dd"); dd.append(...content); facts.append(node("dt", title), dd); };
+    const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(harness.key);
+    fact("harness", swatch, harness.label);
+    if (run.project) fact("project", run.project);
+    fact(terminal.has(run.state) || status.key === "closed" ? "ran for" : "running for", age(run.started_at, time(run.ended_at) || serverNow()));
+    fact("last seen", seenText(run.last_seen));
+    const actions = node("div", null, "detail-actions");
+    actions.append(...targetControls(run));
+    const links = node("div", null, "side-links");
     const history = node("button", state.historyOpen ? "hide history" : "history ▸", "link"); history.type = "button"; history.dataset.focusKey = "history";
     history.addEventListener("click", () => { state.historyOpen = !state.historyOpen; if (state.historyOpen && !state.events.length) loadEvents(true); else renderTable(); });
     const close = node("button", "esc close", "link"); close.type = "button"; close.addEventListener("click", () => selectRun(null));
-    footer.append(...targetControls(run), history, close);
-    host.append(footer);
+    links.append(history, close);
+    side.append(node("span", "session", "label"), facts, actions, links);
+    host.append(main, side);
     if (state.historyOpen) host.append(historyList(run));
     return host;
   }

@@ -225,9 +225,10 @@ use, which tells you at a glance what each agent is working on and which one
 needs you. It is not a cost or process monitor, and it does not launch, steer or
 approve agents.
 
-The look is ghostly rather than spooky: dark terminal surfaces, crisp monospace,
-mint for activity, amber for attention, violet for summaries, and motion only
-when something actually changes. Labels stay literal (needs you, your turn,
+The look is ghostly rather than spooky: dark amethyst surfaces, Space Grotesk
+for reading with Space Mono for numbers and times, violet for activity, amber
+for attention, pink for summaries, and motion only when something actually
+changes. Labels stay literal (needs you, your turn,
 closed, open in cmux) so the board needs no vocabulary of its own.
 
 Next: more harnesses and framework adapters, exact tab focus for Ghostty once a
@@ -242,4 +243,6 @@ that an unresponsive agent has failed.
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). The bundled Space Grotesk and Space Mono fonts are under the
+SIL Open Font License 1.1; their licences ship next to them in
+`src/spiritboard/static/fonts/`.
