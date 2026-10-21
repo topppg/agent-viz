@@ -522,6 +522,166 @@ class SourcesTests(unittest.TestCase):
             self.assertEqual(scan_profile(profile)[0]["task"], "Deep request")
         self.assertEqual(search.call_count, 1)
 
+    def test_long_transcript_head_is_not_the_current_request_or_reply(self):
+        def item(payload):
+            return {
+                "type": "response_item",
+                "timestamp": "2026-10-20T08:00:03Z",
+                "payload": payload,
+            }
+
+        def said(role, value):
+            kind = "input_text" if role == "user" else "output_text"
+            return item(
+                {"type": "message", "role": role, "content": [{"type": kind, "text": value}]}
+            )
+
+        filler = item({"type": "function_call_output", "output": "x" * 4000})
+        codex = self.profile("codex", "codex-head", text=True)
+        rows = (
+            self.codex()[:1]
+            + [said("user", "Opening request"), said("assistant", "Opening reply")]
+            + [filler] * 100
+            + [said("user", "Latest request")]
+            + [filler] * 200
+        )
+        self.log(codex, "run.jsonl", rows)
+        row = scan_profile(codex)[0]
+        self.assertEqual((row["task"], row["activity"]), ("Latest request", "Tool result recorded"))
+
+        claude = self.profile("claude", "claude-head", text=True)
+        base = {"sessionId": "same", "timestamp": "2026-10-20T08:00:00Z"}
+        result = {
+            **base,
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "content": "x" * 4000}]},
+        }
+        rows = (
+            [
+                {**base, "type": "user", "message": {"content": "Opening request"}},
+                {**base, "type": "assistant", "message": {"content": "Opening reply"}},
+            ]
+            + [result] * 100
+            + [{**base, "type": "user", "message": {"content": "Latest request"}}]
+            + [result] * 200
+        )
+        self.log(claude, "p/session.jsonl", rows)
+        row = scan_profile(claude)[0]
+        self.assertEqual((row["task"], row["activity"]), ("Latest request", "Tool result recorded"))
+
+    def test_codex_app_requests_are_unwrapped(self):
+        profile = self.profile("codex", "codex-app", text=True)
+        meta = self.codex()[:1]
+        cases = {
+            "files": [
+                "\n# Files mentioned by the user:\n\n## cv.pdf: /private/SECRET/cv.pdf\n"
+                "## My request:\nShip the CV",
+                "<image name=[Image #1] path=/private/SECRET.png>",
+                "</image>",
+            ],
+            "browser": [
+                '\n<in-app-browser-context source="ambient-ui-state">\n# In app browser:\n'
+                "SECRET page\n</in-app-browser-context>\n## My request:\nmerge it"
+            ],
+            "ide": [
+                "# Context from my IDE setup:\n\n## Active file: SECRET.py\n\n"
+                "## My request for Codex:\nfix the parser"
+            ],
+        }
+        cases["split"] = [
+            "# Files mentioned by the user:\n\n## a.pdf: /private/SECRET/a.pdf\n",
+            "do it",
+        ]
+        expected = {
+            "files": "Ship the CV",
+            "browser": "merge it",
+            "ide": "fix the parser",
+            "split": "do it",
+        }
+        for name, parts in cases.items():
+            content = [{"type": "input_text", "text": part} for part in parts]
+            message = {"type": "message", "role": "user", "content": content}
+            self.log(
+                profile,
+                f"{name}.jsonl",
+                [
+                    {**meta[0], "payload": {**meta[0]["payload"], "id": name}},
+                    {
+                        "type": "response_item",
+                        "timestamp": "2026-10-20T08:00:01Z",
+                        "payload": message,
+                    },
+                ],
+            )
+        rows = {row["native_id"]: row for row in scan_profile(profile)}
+        self.assertEqual({name: rows[name]["task"] for name in cases}, expected)
+        self.assertNotIn("SECRET", json.dumps(list(rows.values())))
+
+    def test_markup_is_not_a_reply_in_any_harness(self):
+        claude = self.profile("claude", "claude-markup", text=True)
+        base = {"sessionId": "same", "timestamp": "2026-10-20T08:00:00Z"}
+        self.log(
+            claude,
+            "p/session.jsonl",
+            [
+                {**base, "type": "user", "message": {"content": "Draft the page"}},
+                {**base, "type": "assistant", "message": {"content": "Writing the page"}},
+                {
+                    **base,
+                    "type": "assistant",
+                    "message": {
+                        "content": "<!doctype html><html></html>",
+                        "stop_reason": "end_turn",
+                    },
+                },
+            ],
+        )
+        self.assertEqual(scan_profile(claude)[0]["activity"], "Writing the page")
+        codex = self.profile("codex", "codex-markup", text=True)
+        rows = self.codex()[:1] + [
+            {
+                "type": "response_item",
+                "timestamp": "2026-10-20T08:00:01Z",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Writing the page"}],
+                },
+            },
+            {
+                "type": "event_msg",
+                "timestamp": "2026-10-20T08:00:02Z",
+                "payload": {"type": "task_complete", "last_agent_message": "<!doctype html>"},
+            },
+        ]
+        self.log(codex, "run.jsonl", rows)
+        self.assertEqual(scan_profile(codex)[0]["activity"], "Writing the page")
+
+    def test_codex_inter_agent_messages_are_not_replies(self):
+        profile = self.profile("codex", "codex-agents", text=True)
+        item = {"type": "response_item", "timestamp": "2026-10-20T08:00:01Z"}
+        envelope = "Message Type: MESSAGE\nTask name: /root\nSender: /root/worker\nPayload:\n"
+        rows = self.codex()[:1] + [
+            {
+                **item,
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Splitting the parser work"}],
+                },
+            },
+            {
+                **item,
+                "payload": {
+                    "type": "agent_message",
+                    "content": [{"type": "input_text", "text": envelope}],
+                },
+            },
+            {**item, "payload": {"type": "function_call", "arguments": "SECRET args"}},
+        ]
+        self.log(profile, "run.jsonl", rows)
+        self.assertEqual(scan_profile(profile)[0]["activity"], "Splitting the parser work")
+
     def test_native_titles_name_sessions_without_summaries(self):
         claude = self.profile("claude", "claude-titled", text=True)
         rows = self.claude() + [

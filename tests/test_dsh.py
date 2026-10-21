@@ -124,6 +124,25 @@ class DshTests(unittest.TestCase):
         found = scan_profile(self.profile(text))
         return next(run for run in found if run["native_id"] == native)
 
+    def test_long_log_head_is_not_the_current_request_or_reply(self):
+        filler = [
+            event(10 + i, "tool/result", {"callId": "c", "content": "x" * 4000}) for i in range(300)
+        ]
+        opening = [
+            header(PARENT),
+            user(1, "Opening request"),
+            assistant(2, {"type": "text", "text": "Opening reply"}),
+        ]
+        run = self.observe(
+            rows=opening + filler[:100] + [user(400, "Latest request")] + filler[100:]
+        )
+        self.assertEqual((run["task"], run["activity"]), ("Latest request", "Tool result recorded"))
+
+    def test_markup_is_not_a_reply(self):
+        rows = conversation()
+        rows.insert(-2, assistant(7, {"type": "text", "text": "<!doctype html><html></html>"}))
+        self.assertEqual(self.observe(rows=rows)["activity"], "The test is fixed.")
+
     def test_registered_and_discovered(self):
         self.assertIs(HARNESSES["dsh"], dsh.HARNESS)
         home = self.root.parent

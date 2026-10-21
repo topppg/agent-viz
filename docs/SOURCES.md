@@ -113,6 +113,15 @@ information, are not redacted, and become part of local dashboard storage. Tool 
 these adapters. Turning text off prevents future capture; it does not erase
 existing local history.
 
+Every harness applies the same text rules. The request is the user's latest own
+words: instruction echoes, environment and tool wrappers are skipped, and app
+context (Codex desktop "Files mentioned by the user", IDE state, in-app browser)
+is dropped in favour of the text under its `## My request:` heading. A request
+or reply that only survives in a long file's header is not reported as current;
+the backward request search finds the newest one instead. The reply is the
+agent's own prose: text that starts with markup is skipped, and Codex
+`agent_message` items, which are routed between agents, never count.
+
 Sessions are named by their own titles when text is shown: a Claude `/rename`
 (`custom-title`), else Claude's generated `ai-title`, the Codex thread name
 from the profile's `session_index.jsonl` (cached by size and mtime), and the

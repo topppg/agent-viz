@@ -86,6 +86,13 @@ class PiTests(unittest.TestCase):
         session = Session(str(path), path, info.st_size, info.st_mtime_ns, info.st_mtime)
         return pi.observe(profile or self.profile, session)
 
+    def test_markup_is_not_a_reply(self):
+        transcript = Transcript()
+        transcript.user("Draft the page")
+        transcript.assistant(say("Writing the page"), stop="toolUse")
+        transcript.assistant(say("<!doctype html><html></html>"))
+        self.assertEqual(self.observe(transcript)["activity"], "Writing the page")
+
     def test_registered_and_encoded_folder_matches_pi(self):
         self.assertIs(HARNESSES["pi"], pi.HARNESS)
         self.assertEqual(pi.encoded("/Users/a/b c"), "--Users-a-b c--")

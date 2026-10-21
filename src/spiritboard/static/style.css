@@ -111,7 +111,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .harness-cell { display: flex; align-items: center; }
 .harness-cell .swatch { width: 8px; height: 8px; border-radius: 2px; }
 .mark { font-style: normal; color: var(--dim); }
-.mark.ai { color: var(--ai); }
 .doing.needs { color: var(--wait); }
 .doing.stale-summary { color: var(--soft); }
 .doing.dim { color: var(--muted); font-style: italic; }

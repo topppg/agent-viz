@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 from .. import processes
 from ..transcripts import (
     READ_FLAGS,
+    READ_GAP,
+    TEXT_HIDDEN,
     Session,
     existing_trees,
     last_request,
@@ -22,9 +24,9 @@ from ..transcripts import (
     observation,
     records,
     redact,
+    reply_text,
     request_text,
     safe,
-    text,
     utc_time,
     valid_cwd,
     walk_jsonl,
@@ -103,6 +105,10 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
         if stamp and (out["last_seen"] is None or stamp > out["last_seen"]):
             out["last_seen"] = stamp
         kind = row.get("type")
+        if kind == READ_GAP:
+            # The header's request and reply predate the unread middle; the scan searches back.
+            out["task"], last_reply = TEXT_HIDDEN, ""
+            continue
         p = row.get("payload", {})
         if not isinstance(p, dict):
             continue
@@ -113,7 +119,7 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 state, activity, evidence = "working", "Turn started", str(event)
             elif event in {"task_complete", "turn_complete", "turn_aborted"}:
                 # An idle session reads best as its last reply, when text is allowed.
-                reply = text(p.get("last_agent_message")) if profile.include_text else ""
+                reply = reply_text(p.get("last_agent_message")) if profile.include_text else ""
                 reply = reply or last_reply
                 state, evidence = "idle", str(event)
                 activity = reply or "Turn ended · session may resume"
@@ -143,10 +149,10 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 event == "message" and p.get("role") == "assistant"
             ):
                 state, evidence = "working", str(event)
-                if profile.include_text and event in {"message", "agent_message"}:
-                    # Only the agent's own prose; wrapped system notices are not replies.
-                    reply = text(p.get("content"))
-                    last_reply = reply if reply and not reply.startswith("<") else last_reply
+                if profile.include_text and event == "message":
+                    # Only the agent's own prose: agent_message items are routed between agents
+                    # and wrapped system notices are not replies.
+                    last_reply = reply_text(p.get("content")) or last_reply
                 activity = last_reply or "Model activity recorded"
         if state and (stamp is None or last_state_time is None or stamp >= last_state_time):
             out.update(
