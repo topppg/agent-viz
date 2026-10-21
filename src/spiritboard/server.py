@@ -7,6 +7,7 @@ import json
 import re
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -42,6 +43,7 @@ class Collector(ThreadingHTTPServer):
         self.stopping = threading.Event()
         self._activity: tuple[int, dict] | None = None
         self.focus_lock = threading.Lock()
+        self.instance_id = uuid.uuid4().hex
         super().__init__((host, port), Handler)
 
     @property
@@ -112,7 +114,7 @@ class Collector(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "AgentViz/0.1"
+    server_version = "Spiritboard/0.1"
 
     def log_message(self, *_):
         # Never put private run IDs, source paths, or labels into HTTP access logs.
@@ -232,7 +234,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, self.server.focus_target(run_id).public())
         elif path == "/api/health":
-            self._json(200, {"ok": True, "service": "spiritboard", "version": 1})
+            self._json(
+                200,
+                {
+                    "ok": True,
+                    "service": "spiritboard",
+                    "version": 1,
+                    "instance_id": self.server.instance_id,
+                },
+            )
         elif path == "/api/snapshot":
             self._json(200, self.server.snapshot())
         elif path == "/api/events":

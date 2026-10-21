@@ -115,7 +115,14 @@ def load_profiles(config_path: str | Path) -> list[SourceProfile]:
     Unknown fields fail rather than accidentally interpreting secret-bearing
     tool configuration as dashboard configuration.
     """
-    value = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(config_path, flags), "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("Source config must be a regular file")
+        raw = stream.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise ValueError("Source config exceeds the size limit")
+    value = json.loads(raw.decode("utf-8"))
     entries = value.get("profiles") if isinstance(value, dict) else value
     if not isinstance(entries, list) or len(entries) > 100:
         raise ValueError("Expected at most 100 source profiles")

@@ -43,23 +43,41 @@ Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w
 
 ## Quick start
 
-Python 3.12+ and [uv](https://docs.astral.sh/uv/) are required; there are no
-runtime package dependencies.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run
+Spiritboard from anywhere. No repo checkout or API key is needed; uv manages
+the isolated Python environment (Python 3.12+). There are no runtime package
+dependencies.
 
 See your own agents. Supported Codex and Claude storage folders are discovered
 automatically, without opening authentication files:
 
 ```sh
-uv run spiritboard serve --data-dir .spiritboard/live --port 8767
+uvx --from git+https://github.com/topppg/agent-viz.git@main spiritboard
 ```
 
-Then open <http://127.0.0.1:8767>. Stopping the dashboard never stops an agent.
+Your browser opens automatically. The terminal prints the loopback-only URL;
+if port 8766 is busy, a free port is chosen. Leave that terminal running.
+Ctrl-C stops only Spiritboard, never an agent. Running the same command again
+reopens the existing board instead of starting a second collector.
 
 Or try an invented scenario with no real agents, tools or models:
 
 ```sh
-uv run spiritboard serve --demo --data-dir .spiritboard/demo --port 8766
+uvx --from git+https://github.com/topppg/agent-viz.git@main spiritboard --demo
 ```
+
+The demo has separate local history and never discovers real profiles or calls
+a model. Add `--no-open` to print the URL without launching a browser.
+
+For a permanent command:
+
+```sh
+uv tool install git+https://github.com/topppg/agent-viz.git@main
+spiritboard
+```
+
+A PyPI release is not published yet; do not substitute `uvx spiritboard` until it is. See the
+[distribution guide](docs/DISTRIBUTION.md) for upgrades, removal and publishing.
 
 ## Sources and privacy
 
@@ -68,8 +86,8 @@ uv run spiritboard serve --demo --data-dir .spiritboard/demo --port 8766
   / `CODEX_HOME`. To choose sources yourself, write a private config and pass it:
 
   ```sh
-  uv run spiritboard discover --write-config .spiritboard/profiles.json
-  uv run spiritboard serve --config .spiritboard/profiles.json --data-dir .spiritboard/live
+  spiritboard discover --write-config ~/.config/spiritboard/profiles.json
+  spiritboard --config ~/.config/spiritboard/profiles.json
   ```
 
   An explicit config replaces automatic discovery, so list every folder you want.
@@ -104,8 +122,7 @@ still be running elsewhere.
 ## Optional goal summaries
 
 ```sh
-uv run spiritboard serve --data-dir .spiritboard/live --port 8767 \
-  --summaries --openrouter-key-file /absolute/path/to/private.env
+spiritboard --summaries --openrouter-key-file /absolute/path/to/private.env
 ```
 
 Each active session gets one line describing its overall goal. Claude's own
@@ -117,16 +134,20 @@ spend. Read the [summary guide](docs/SUMMARIES.md) before using this on
 confidential work. The key can also come from `OPENROUTER_API_KEY`; it is never
 served to the browser.
 
+Stop an existing board before changing its launch settings. A second command
+with different options refuses to reuse it, rather than silently ignoring your
+privacy or source choices, including edits to an explicit source config.
+
 ## Report from your own agents
 
 A small SDK lets any Python agent report runs, subagents, activity and tool calls
 to the same board:
 
 ```python
-from pathlib import Path
+from spiritboard.launcher import default_data_dir
 from spiritboard.sdk import Client
 
-token = Path(".spiritboard/local/token").read_text().strip()
+token = (default_data_dir() / "token").read_text().strip()
 with Client("http://127.0.0.1:8766", token, account="example") as client:
     with client.run("Coordinator", "Inspect an invented change") as root:
         with root.child("Reviewer", "Check the example") as child:
@@ -138,26 +159,48 @@ with Client("http://127.0.0.1:8766", token, account="example") as client:
     print("Delivered:", delivered, client.diagnostics)
 ```
 
-Start `serve` with its default data directory first. Use `heartbeat()` during
+Start `spiritboard --no-discovery --port 8766` first (SDK only). If you choose
+another port or data directory, use that URL and token path. Use `heartbeat()` during
 long quiet work. Failed delivery never changes your application's result; check
 `flush()` and `diagnostics` to detect loss.
 
 ## Local storage and cleanup
 
-The `--data-dir` holds `events.sqlite3`, a private ingestion token and, with
-summaries on, `summaries.sqlite3`. Source config and local data are ignored by
-Git. Retention is manual:
+History stays in a stable per-user directory, independent of your terminal's
+working folder:
+
+| Platform | Default directory |
+| --- | --- |
+| macOS | `~/Library/Application Support/spiritboard` |
+| Linux | `$XDG_DATA_HOME/spiritboard`, or `~/.local/share/spiritboard` |
+| Windows | `%LOCALAPPDATA%/spiritboard` |
+
+`--demo` uses its `demo` subdirectory. `--data-dir /your/chosen/directory`
+overrides either default. Existing checkout-local history is never moved or
+deleted; pass its old directory explicitly to keep using it.
+
+On macOS/Linux, existing data directories must be private to your user; unsafe
+permissions cause a clear error instead of being changed automatically.
+
+This directory holds `events.sqlite3`, a private ingestion token, an instance
+lock and, with summaries on, `summaries.sqlite3`. Keep it and any custom source
+config out of version control. Retention is manual:
 
 ```sh
-uv run spiritboard prune --data-dir .spiritboard/live --older-than-days 7
+spiritboard prune --older-than-days 7
 ```
 
 This deletes only old observer records, never your agents' transcripts. Stop the
-dashboard first, and do not run two against the same data directory.
+dashboard first; pruning refuses while that data directory is in use. You can
+run separate boards with separate `--data-dir` values and ports.
 
 ## Development
 
+Contributors still use a checkout:
+
 ```sh
+uv sync --frozen
+uv run spiritboard --demo --no-open
 uv run ruff check . && uv run ruff format --check .
 uv run pytest
 node --check src/spiritboard/static/app.js

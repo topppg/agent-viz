@@ -25,7 +25,7 @@ spiritboard
 ```
 
 If uv reports that its tool directory is not on your PATH, run `uv tool update-shell` and open a
-new terminal. To upgrade this GitHub installation, rerun the install command with `--force`.
+new terminal. To upgrade this GitHub installation, rerun the install command with `--force --refresh`.
 For a reproducible installation, replace `@main` with a reviewed full commit SHA or a published
 release tag. The moving `main` branch is a development channel, not an immutable release.
 
@@ -71,7 +71,9 @@ Do not advertise those short commands before the intended package is actually av
 `Distribution` builds both a source archive and a wheel on Linux, macOS, and Windows with Python
 3.12 and 3.13. It validates metadata, installs each artifact into an isolated environment, and
 checks the command's help/version and the bundled HTML, CSS, and JavaScript from outside the
-checkout. These checks do not discover profiles, read transcripts, start model calls, or prove
+checkout. Synthetic subprocess tests also check startup, storage, instance reuse, conflicting
+options, demo isolation and restart against each installed artifact. These checks do not
+discover profiles, read transcripts, start model calls, or prove
 that every native integration works on every OS. The normal `Checks` workflow runs the unit tests.
 
 Local checks before preparing a release:
