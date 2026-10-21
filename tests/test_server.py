@@ -311,6 +311,8 @@ class LivenessSnapshotTests(unittest.TestCase):
             }
         )
         store.observe({**base, "run_id": "cl:s2", "session_id": "cl:observed"})
+        desktop = {**base, "run_id": "cl:d1", "session_id": "cl:observed", "app": "Claude desktop"}
+        store.observe(desktop)
         codex = {**base, "source": "codex"}
         store.observe({**codex, "run_id": "cx:t1", "session_id": "cx:observed"})
         store.observe({**codex, "run_id": "cx:t2", "session_id": "cx:observed"})
@@ -324,6 +326,7 @@ class LivenessSnapshotTests(unittest.TestCase):
                 "cl:s1": True,
                 "cl:s1:agent:x": True,
                 "cl:s2": False,
+                "cl:d1": None,
                 "cx:t1": True,
                 "cx:t2": False,
                 "cu:t3": None,
