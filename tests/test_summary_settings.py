@@ -106,12 +106,12 @@ assert.ok(dialog().open);
 assert.equal(connect('openrouter').disabled,true);
 assert.equal(connect('codex').disabled,true);
 assert.equal(toggle().disabled,true);
-assert.ok(body.textContent.includes('deepseek/deepseek-v4-flash'));
+assert.ok(body.textContent.includes('DeepSeek V4 Flash'));
 assert.ok(body.textContent.includes('GPT-6 Luna · medium'));
 assert.equal(connect('codex').textContent,'Continue with ChatGPT');
-assert.ok(body.textContent.includes('bounded excerpts'));
+assert.ok(body.textContent.includes('short excerpts'));
 assert.ok(body.textContent.includes('OpenRouter credits'));
-assert.ok(body.textContent.includes('plan allowance'));
+assert.ok(body.textContent.includes('ChatGPT plan limits'));
 consent().checked=true; await change(consent());
 await click(connect('openrouter'));
 assert.equal(posts.length,1);
@@ -134,11 +134,40 @@ assert.equal(connect('openrouter').hidden,false);
 state.providers.codex.revocation_unconfirmed=true;
 state.providers.codex.error='upstream-private-detail';
 await open();
-assert.ok(body.textContent.includes('Signed out locally'));
-assert.ok(body.textContent.includes('revocation was not confirmed'));
+assert.ok(body.textContent.includes('Signed out here'));
+assert.ok(body.textContent.includes('could not confirm'));
 assert.ok(!body.textContent.includes('upstream-private-detail'));
 const link=find(n=>n.tagName==='a' && n.href==='https://chatgpt.com/#settings');
 assert.ok(link); assert.equal(link.rel,'noopener noreferrer');
+""")
+
+    def test_main_view_is_short_and_advanced_options_start_collapsed(self) -> None:
+        self.run_browser(r"""
+await open();
+const details=all().filter(n=>n.tagName==='details');
+assert.equal(details.length,2);
+assert.ok(details.every(n=>!n.open));
+assert.ok(details.some(n=>n.textContent.includes('Use an API key instead')));
+assert.ok(details.some(n=>n.textContent.includes('How it works')));
+const visible=n=>{
+  if(typeof n==='string') return n;
+  if(n.hidden) return '';
+  const children=n.tagName==='details'&&!n.open
+    ? n.children.filter(c=>c.tagName==='summary') : n.children;
+  return n._text+children.map(visible).join(' ');
+};
+const text=visible(dialog());
+assert.ok(text.includes('private work'));
+assert.ok(text.includes('OpenRouter credits'));
+assert.ok(text.includes('ChatGPT plan limits'));
+assert.ok(!text.includes('DeepSeek V4 Flash'));
+assert.ok(!text.includes('GPT-6 Luna'));
+assert.ok(!text.includes('Or paste an OpenRouter API key'));
+assert.ok(text.split(/\s+/).length<130);
+details.forEach(n=>n.open=true);
+key().value='synthetic-unsaved'; dialog().close();
+assert.ok(details.every(n=>!n.open));
+assert.equal(key().value,'');
 """)
 
     def test_keys_clear_on_submit_and_close_and_errors_never_render_raw_data(self) -> None:

@@ -15,13 +15,15 @@
 .summary-settings input[type="checkbox"] { flex: none; min-height: 0; margin-top: 4px; accent-color: var(--run); }
 .summary-settings-toggle { font-weight: 600; }
 .summary-settings-help { color: var(--muted); font-size: 12.5px; line-height: 1.6; }
-.summary-settings-toggle + .summary-settings-help { margin-top: 8px; }
+.summary-settings-details { margin-top: 14px; font-size: 12.5px; }
+.summary-settings-details summary { cursor: pointer; color: var(--soft); }
+.summary-settings-details > p { margin-top: 8px; }
+.summary-settings-details > a { display: inline-block; margin-top: 8px; }
 .summary-settings-provider { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
 .summary-settings-provider h3 { margin: 0; font-size: 16px; color: var(--bright); }
 .summary-provider-status { margin-top: 5px; color: var(--muted); font-size: 13px; }
 .summary-provider-status[data-state="connected"] { color: var(--run); }
 .summary-provider-status[data-state="pending"] { color: var(--wait); }
-.summary-settings-model { margin-top: 8px; font-family: var(--mono); color: var(--brand); font-size: 11.5px; overflow-wrap: anywhere; }
 .summary-settings-provider .summary-settings-help { margin-top: 6px; }
 .summary-settings-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .summary-settings-actions button:first-child, .summary-settings-key button { border-color: #665288; background: #241b35; }

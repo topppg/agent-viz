@@ -21,7 +21,7 @@
   close.type = 'button';
   close.setAttribute('aria-label', 'Close summary settings');
   header.append(heading, close);
-  const intro = element('p', 'Connect a provider to turn recent agent activity into short, useful summaries.', 'summary-settings-intro');
+  const intro = element('p', 'See what your agents are working on, at a glance.', 'summary-settings-intro');
   intro.id = 'summary-settings-intro';
   const notice = element('p', '', 'summary-settings-notice');
   notice.setAttribute('role', 'status');
@@ -33,18 +33,28 @@
   const consent = element('input');
   consent.type = 'checkbox';
   consent.disabled = true;
-  consentLabel.append(consent, element('span', 'I agree to send bounded excerpts of local session text to the providers I connect for AI summaries. Excerpts may contain private work.'));
+  consentLabel.append(consent, element('span', 'Share short excerpts of my sessions with connected services. These may include private work.'));
   const toggleLabel = element('label', '', 'summary-settings-toggle');
   const toggle = element('input');
   toggle.type = 'checkbox';
   toggle.disabled = true;
   toggleLabel.append(toggle, element('span', 'Enable AI summaries'));
-  const routing = element('p', 'Automatic routing: OpenRouter first, then ChatGPT when available. Only explicitly connected providers are used. Disconnect a provider to stop using it.', 'summary-settings-help');
+  const details = element('details', '', 'summary-settings-details');
+  const guide = element('a', 'Privacy & setup');
+  guide.href = 'https://github.com/topppg/spiritboard/blob/main/docs/SUMMARIES.md';
+  guide.target = '_blank';
+  guide.rel = 'noopener noreferrer';
+  details.append(
+    element('summary', 'How it works'),
+    element('p', 'Connect either service. If both are connected, OpenRouter is tried first. You can pause summaries or disconnect at any time.', 'summary-settings-help'),
+    element('p', 'Models: DeepSeek V4 Flash on OpenRouter; GPT-6 Luna · medium on ChatGPT.', 'summary-settings-help'),
+    guide,
+  );
   const providers = {};
 
-  for (const [name, title, model, description] of [
-    ['openrouter', 'OpenRouter', 'deepseek/deepseek-v4-flash', 'Uses your OpenRouter credits. Sign in or add a dedicated API key.'],
-    ['codex', 'ChatGPT', 'GPT-6 Luna · medium', 'Uses your ChatGPT plan allowance and its limits, not API credits.'],
+  for (const [name, title, description] of [
+    ['openrouter', 'OpenRouter', 'Uses your OpenRouter credits.'],
+    ['codex', 'ChatGPT', 'Uses your ChatGPT plan limits.'],
   ]) {
     const section = element('section', '', 'summary-settings-provider');
     section.setAttribute('aria-labelledby', `summary-provider-${name}`);
@@ -52,9 +62,8 @@
     titleNode.id = `summary-provider-${name}`;
     const status = element('p', 'Not connected', 'summary-provider-status');
     status.setAttribute('aria-live', 'polite');
-    const modelNode = element('p', model, 'summary-settings-model');
     const descriptionNode = element('p', description, 'summary-settings-help');
-    const revocation = element('p', 'Signed out locally. Remote revocation was not confirmed. Disconnect Spiritboard in ', 'summary-settings-error');
+    const revocation = element('p', 'Signed out here, but we could not confirm sign-out in ChatGPT. Remove Spiritboard in ', 'summary-settings-error');
     const accountSettings = element('a', 'ChatGPT settings');
     accountSettings.href = 'https://chatgpt.com/#settings';
     accountSettings.target = '_blank';
@@ -71,7 +80,7 @@
     disconnect.dataset.summaryDisconnect = name;
     disconnect.hidden = true;
     actions.append(connect, disconnect);
-    section.append(titleNode, status, modelNode, descriptionNode, revocation, actions);
+    section.append(titleNode, status, descriptionNode, revocation, actions);
     const install = element('p', '', 'summary-settings-help');
     install.hidden = true;
     if (name === 'codex') {
@@ -82,6 +91,8 @@
   }
 
   const keyForm = element('form', '', 'summary-settings-key');
+  const keyOptions = element('details', '', 'summary-settings-details');
+  keyOptions.append(element('summary', 'Use an API key instead'), keyForm);
   const keyLabel = element('label', 'Or paste an OpenRouter API key');
   const key = element('input');
   key.id = 'summary-openrouter-key';
@@ -95,11 +106,11 @@
   const saveKey = element('button', 'Save key locally');
   saveKey.type = 'submit';
   saveKey.disabled = true;
-  const keyHelp = element('p', 'The key is sent only to this local Spiritboard service, never kept in browser storage. It is cleared from this form after submission or closing.', 'summary-settings-help');
+  const keyHelp = element('p', 'Saved only on this device.', 'summary-settings-help');
   keyHelp.id = 'summary-key-help';
   keyForm.append(keyLabel, key, saveKey, keyHelp);
-  providers.openrouter.section.append(keyForm);
-  dialog.append(header, intro, notice, message, consentLabel, toggleLabel, routing, providers.openrouter.section, providers.codex.section);
+  providers.openrouter.section.append(keyOptions);
+  dialog.append(header, intro, notice, message, consentLabel, toggleLabel, providers.openrouter.section, providers.codex.section, details);
   document.body.append(dialog);
 
   let settings = null;
@@ -116,7 +127,7 @@
   function render() {
     if (!settings) return;
     const demo = settings.demo === true;
-    notice.textContent = demo ? 'Synthetic demo: provider sign-in and summaries are disabled. No provider calls are made.' : settings.enabled ? `Summaries enabled · ${settings.active_provider === 'openrouter' ? 'OpenRouter' : settings.active_provider === 'codex' ? 'ChatGPT' : 'waiting for a connected provider'}` : 'Summaries paused. Local monitoring stays on.';
+    notice.textContent = demo ? 'Synthetic demo: sign-in and AI summaries are off.' : settings.enabled ? `Summaries enabled · ${settings.active_provider === 'openrouter' ? 'OpenRouter' : settings.active_provider === 'codex' ? 'ChatGPT' : 'waiting for a connection'}` : 'Summaries paused.';
     consent.disabled = busy || demo;
     const pending = Object.values(settings.providers || {}).some(value => value.pending === true);
     let connected = false;
@@ -242,6 +253,8 @@
     generation += 1;
     clearTimeout(timer);
     key.value = '';
+    keyOptions.open = false;
+    details.open = false;
     consent.checked = false;
     if (pendingPopup) pendingPopup.close();
     pendingPopup = null;

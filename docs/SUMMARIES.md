@@ -8,7 +8,13 @@ dashboard keeps the original status evidence next to them.
 ## Connect from the dashboard
 
 Open **AI summaries**, read the sharing notice, and check the consent box before
-connecting a provider. Connecting enables summaries. Use either option or both:
+connecting a provider. Connecting enables summaries.
+
+The main panel keeps only connection and consent controls visible. Expand
+**How it works** for model details, or **Use an API key instead** for manual
+OpenRouter setup.
+
+Use either option or both:
 
 - **OpenRouter:** browser sign-in with PKCE (a one-use proof that binds the code
   to this app), or paste a dedicated API key into the password field.
