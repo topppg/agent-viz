@@ -7,12 +7,12 @@ from the repo root down to that file's directory. Closer files add to or overrid
 ## 1. Start from latest main, in a dedicated worktree
 - Every task that changes files starts from the latest `origin/main`, on its own branch, in its own git worktree.
   Never implement work directly in the primary checkout.
-- All worktrees live in one sibling folder, `../agent-viz-worktrees/<slug>`. Never create worktrees inside the repo
+- All worktrees live in one sibling folder, `../spiritboard-worktrees/<slug>`. Never create worktrees inside the repo
   or scattered elsewhere.
 
   ```bash
   git fetch origin main
-  git worktree add ../agent-viz-worktrees/<slug> -b <type>/<slug> origin/main
+  git worktree add ../spiritboard-worktrees/<slug> -b <type>/<slug> origin/main
   ```
 
   `<type>` matches the conventional commit prefix (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`).
@@ -28,7 +28,7 @@ from the repo root down to that file's directory. Closer files add to or overrid
   responsibility, prevents overlapping file ownership, integrates the result and stays accountable for the final
   verification.
 - On a shared branch only the lead stages and commits. Independently mergeable streams get their own child
-  branch and worktree under `../agent-viz-worktrees/` rather than concurrent git operations on one branch.
+  branch and worktree under `../spiritboard-worktrees/` rather than concurrent git operations on one branch.
 - Keep tightly coupled edits with one owner. Substantial work gets at least one independent subagent review: give
   the reviewer the requirements and the diff, not the desired verdict. Resolve findings or record why they do not
   apply.
@@ -41,7 +41,7 @@ from the repo root down to that file's directory. Closer files add to or overrid
 - Do not merge a PR whose specific changes the owner has not reviewed or approved. Present the changes, validation
   evidence and open questions, then ask. A request to implement or open a PR is not approval to merge.
 - After a PR merges, delete its remote branch, then remove only that exact worktree and local branch
-  (`git worktree remove ../agent-viz-worktrees/<slug>`). Never use broad paths or globs.
+  (`git worktree remove ../spiritboard-worktrees/<slug>`). Never use broad paths or globs.
 
 ## 4. Privacy and references
 - Spiritboard reads local agent transcripts. Never commit real transcripts, session data, profile paths, account
