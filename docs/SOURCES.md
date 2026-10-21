@@ -1,8 +1,8 @@
-# Local Codex and Claude sources
+# Local Codex, Claude and opencode sources
 
 ## What works
 
-The collector can observe multiple Codex and Claude storage profiles together.
+The collector can observe multiple Codex, Claude and opencode storage profiles together.
 Each profile has its own stable ID, label and transcript directory. The same
 native session ID in two profiles creates two separate dashboard runs. Labels
 describe storage profiles; they do **not** prove which account is signed in.
@@ -40,6 +40,22 @@ moving a transcript into the archive does not make a new dashboard run. Claude
 uses its `projects/` transcript tree. Coverage metadata lists only these generic
 tree names and counts, never absolute storage paths.
 
+opencode keeps sessions in a SQLite database, `opencode.db` (WAL) in
+`$XDG_DATA_HOME/opencode`, default `~/.local/share/opencode`; non-default release
+channels use `opencode-<channel>.db` there, and `OPENCODE_DB` (absolute, or relative
+to that directory) selects another file. A profile root is the database file (or a
+directory holding `opencode.db`). It is opened with a `mode=ro` URI and
+`PRAGMA query_only`, never written, checkpointed or vacuumed, and an SQLite
+authorizer refuses any read of the `account`, `account_state` and
+`control_account` tables. Only the `session`, `message` and `part` tables are
+queried; a database without them (for example only the 2.x `session_v2` tables)
+yields no sessions and an `unsupported_schema` coverage flag rather than an error.
+Each session row is one inventory unit: its key is the session ID, and its cache
+signature is the message count and the newest `time_updated` of the session and
+its messages (plus its parts, for sessions active in the last 15 minutes).
+Archived sessions (`time_archived` set) are never observed and are counted as
+`archived_skipped`. Child sessions (`parent_id`) are subagents of their parent.
+
 ```json
 {
   "profiles": [
@@ -64,6 +80,9 @@ shows the most recent recorded activity and its timestamp.
 - A recorded user turn or model activity suggests `working`.
 - A recorded tool call suggests `waiting_tool`; a tool result suggests `working`.
 - A recorded end of a turn suggests `idle`, not completed: a session may resume.
+- opencode is `working` while its latest assistant message has no
+  `time.completed` or one of its tool parts is `pending`/`running`, otherwise
+  `idle`. Permission prompts are not persisted, so it never shows waiting for you.
 - Unsupported records do not fabricate an outcome or a waiting-for-user state.
 - Polls do not generate fake agent heartbeats or change `last_seen`.
 
@@ -88,9 +107,12 @@ these adapters. Turning text off prevents future capture; it does not erase
 existing local history.
 
 Sessions are named by their own titles when text is shown: a Claude `/rename`
-(`custom-title`), else Claude's generated `ai-title`, and the Codex thread name
-from the profile's `session_index.jsonl` (cached by size and mtime). This needs
-no summaries and makes no provider call.
+(`custom-title`), else Claude's generated `ai-title`, the Codex thread name
+from the profile's `session_index.jsonl` (cached by size and mtime), and the
+opencode session `title`. This needs no summaries and makes no provider call.
+opencode excerpts come only from non-synthetic `text` parts (at most 4,000
+characters each); reasoning parts, tool titles, inputs and outputs are never
+selected, and tool names appear only with text enabled.
 
 Claude subagents are named by the short description their parent gave them,
 read from the sibling `agent-<id>.meta.json` (bounded regular files only, symlinks not followed),
@@ -100,8 +122,13 @@ with `"include_text": false` keeps the generic name and hides the prompt.
 Every few seconds the monitor checks which native sessions a live local process
 still owns: Claude through `sessions/<pid>.json` matched against the live
 process start time (`.key` files there are never opened), Codex through the
-`thread-writer-locks/<thread>.lock` files a codex process holds open (`lsof`).
-A session confirmed to have no owner shows as **closed**. When the check cannot
+`thread-writer-locks/<thread>.lock` files a codex process holds open (`lsof`),
+and opencode through the working directories (`ps`, `lsof -d cwd`) of live
+top-level `opencode` processes. opencode records no per-session owner, so this
+is per directory: with N such processes in a directory, its N most recently
+updated non-archived top-level sessions and their child sessions count as live.
+An older session that is still open in a second terminal in the same directory
+can therefore be reported closed. A session confirmed to have no owner shows as **closed**. When the check cannot
 run (no `sessions/` or lock directory, no `lsof`, a lookup error, or transcripts
 synced from another machine) the dashboard falls back to transcript evidence
 and never says closed.
@@ -163,6 +190,10 @@ look for the live process that owns it; SDK runs are never eligible.
   profile's `sessions/` and `archived_sessions/` trees, and `lsof -t` reports the
   Codex process holding it open. Archived transcripts are treated as stopped; a
   file held only by some other program leaves liveness unknown (no button).
+- **opencode:** the live `opencode` process whose working directory is the
+  session's `directory`, when the session is one of the live ones above and that
+  directory has exactly one such process. An older session in a directory with a
+  live process leaves liveness unknown (no focus, no resume).
 - **Process details:** `ps` supplies the parent chain, terminal device, start
   time and executable path (to find an enclosing `.app` bundle). The environment
   is read with `ps eww` after stripping the process arguments (or
@@ -181,8 +212,9 @@ fixed argv lists (no shell) with short timeouts: `cmux select-workspace` /
 AppleScript that selects a matching iTerm2 session or Terminal tab, `open -b` /
 `open -a`, or `wmctrl -i -a`. Errors are generic. Resume commands are built from
 the session ID, the transcript's recorded working directory and the profile root.
-Every command explicitly sets `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, including the
-default `~/.claude` / `~/.codex`, so an existing terminal's account override cannot
+Every command explicitly sets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `OPENCODE_DB`
+(`cd <directory> && OPENCODE_DB=<db> opencode -s <id>`), including the
+default `~/.claude` / `~/.codex` / `opencode.db`, so an existing terminal's account override cannot
 select a different profile. Resume is offered only when no live
 process is found and liveness could be checked, and never for subagents. The
 browser re-checks the target before copying, so a session that came back to life
@@ -200,11 +232,11 @@ registered kind and call only these fields:
 | --- | --- |
 | `kind`, `name`, `env` | Source kind, display name (`Codex`), and the environment selector naming a storage root (`CODEX_HOME`). |
 | `home_roots(home)`, `home_label(entry_name)`, `is_root(root)` | Discovery: `(label, root)` pairs always checked, a label for a matching home entry (or `None`), and whether a root holds session storage. Never open credential or configuration files. |
-| `inventory(root, limit, max_age_days, archived)` | The newest `limit` `Session` units (`key`, `path`, `size`, `mtime_ns`, `mtime`) and coverage counters; raises `OSError` when no storage is readable. `archived=False` restricts it to live storage (summaries). |
+| `inventory(root, limit, max_age_days, archived)` | The newest `limit` `Session` units (`key`, `path`, `size`, `mtime_ns`, `mtime`; a unit can be a file or a database row, and `(size, mtime_ns)` is its cache signature) and coverage counters; raises `OSError` when no storage is readable. `archived=False` restricts it to live storage (summaries). |
 | `observe(profile, session)` | One observation dict (`run_id` via `ns`, `session_id` `<profile>:observed`, `parent_run_id`, `name`, `task`, `activity`, `state`, `last_seen`, `started_at`, `project`, …) or `None`. Text appears only when `profile.include_text`. |
 | `latest_request(session)`, `titles(root)` | Deep request search when the bounded read missed it; optional native-ID → title index. |
 | `live_sessions(root)`, `owner(native_id)` | Native IDs a live process owns (`None` when unknown) and the native ID whose process owns a (sub)agent. |
-| `session_pid(root, session_id)`, `resume(root, session_id)` | `(known, pid)` for focus and the resume command (or `None`); IDs always match `SESSION_ID`. |
+| `session_pid(root, session_id)`, `resume(root, session_id)` | `(known, pid)` for focus and the resume command (or `None`); IDs always match `SESSION_ID` (letters, digits, `-`, `_`). |
 | `goal(session)`, `free_recaps` | Summary context (`Goal`: redacted title and recap, raw user/assistant messages that summaries filters and redacts) and whether a recap is itself a summary. |
 
 Build on `transcripts.py` (bounded no-follow readers, `walk_jsonl`, `safe`,
