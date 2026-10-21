@@ -70,7 +70,8 @@ attention order. Subagents stay under their parent while sorting.
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run
 Spiritboard from anywhere. No repo checkout or API key is needed; uv manages
 the isolated Python environment (Python 3.12+), including the small JWT and
-cryptography dependencies used to verify ChatGPT sign-in.
+cryptography dependencies used to verify ChatGPT sign-in, plus `keyring` for
+your system's credential store.
 
 See your own agents. Supported Codex, Claude, opencode, Pi and DeepSeek Harness storage
 is discovered automatically, without opening authentication files or tables:
@@ -162,6 +163,9 @@ Open **AI summaries** in the dashboard. Read the excerpt-sharing notice, then
 connect OpenRouter or choose **Continue with ChatGPT**. No existing agent-account
 credentials are borrowed. You can also paste an OpenRouter key into the local
 settings panel. These connections and your summary setting survive restarts.
+Saved keys and ChatGPT tokens use macOS Keychain, Windows Credential Manager,
+or Linux Secret Service—not plaintext files. If secure storage is unavailable,
+Spiritboard asks you to set it up or unlock it; it never falls back to a file.
 
 Each eligible session gets one line describing its overall goal. Claude's own
 recaps are used as they are, at no cost. Other sessions use

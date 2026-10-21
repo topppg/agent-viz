@@ -103,10 +103,10 @@
   key.disabled = true;
   key.setAttribute('aria-describedby', 'summary-key-help');
   keyLabel.htmlFor = key.id;
-  const saveKey = element('button', 'Save key locally');
+  const saveKey = element('button', 'Save key securely');
   saveKey.type = 'submit';
   saveKey.disabled = true;
-  const keyHelp = element('p', 'Saved only on this device.', 'summary-settings-help');
+  const keyHelp = element('p', 'Saved in your system credential store.', 'summary-settings-help');
   keyHelp.id = 'summary-key-help';
   keyForm.append(keyLabel, key, saveKey, keyHelp);
   providers.openrouter.section.append(keyOptions);
@@ -136,7 +136,7 @@
       const nodes = providers[name];
       const available = value.available === true;
       connected ||= value.connected === true;
-      nodes.status.textContent = demo ? 'Disabled in demo' : value.pending ? 'Waiting for sign-in…' : value.error ? 'Connection needs attention. Disconnect and try again.' : value.connected ? 'Connected' : available ? 'Not connected' : 'Unavailable';
+      nodes.status.textContent = demo ? 'Disabled in demo' : value.storage_error === true ? 'Secure storage is unavailable. Set up or unlock your system credential store, then try again.' : value.pending ? 'Waiting for sign-in…' : value.error ? 'Connection needs attention. Disconnect and try again.' : value.connected ? 'Connected' : available ? 'Not connected' : 'Unavailable';
       nodes.status.dataset.state = value.connected ? 'connected' : value.pending ? 'pending' : 'disconnected';
       nodes.connect.hidden = value.connected === true || value.pending === true;
       nodes.connect.disabled = busy || demo || pending || !available || !consent.checked;

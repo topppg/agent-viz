@@ -24,6 +24,7 @@ from spiritboard.codex_summary import (
     SCOPES,
     CodexConnection,
     CodexError,
+    CredentialStoreError,
 )
 
 DISCOVERY = {
@@ -86,6 +87,16 @@ class CodexConnectionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        self.vault_values = {}
+        self.vault = Mock()
+        self.vault.load.side_effect = self.vault_values.get
+        self.vault.save.side_effect = self.vault_values.__setitem__
+        self.vault.delete.side_effect = lambda provider: self.vault_values.pop(provider, None)
+        self.vault_patch = patch(
+            "spiritboard.codex_summary.CredentialStore", return_value=self.vault
+        )
+        self.vault_patch.start()
+        self.addCleanup(self.vault_patch.stop)
         self.connection = CodexConnection(self.root)
         self.connection.start()
         self.calls = []
@@ -192,17 +203,15 @@ class CodexConnectionTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(CodexError):
                 self.connection.begin_login(url)
 
-    def test_verified_login_stores_private_credentials_without_public_identity(self):
+    def test_verified_login_stores_vault_credentials_without_public_identity_or_token_files(self):
         self.login()
         self.assertTrue(self.connection.public_state()["connected"])
         self.assertFalse(self.connection.public_state()["pending"])
         self.assertNotIn("synthetic", json.dumps(self.connection.public_state()))
-        record = self.connection._path.read_text()
+        record = self.vault_values["codex"]
         self.assertIn("synthetic-access", record)
         self.assertIn(CLIENT, record)
-        if os.name != "nt":
-            self.assertEqual(self.connection._path.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(self.connection.directory.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(list(self.root.rglob("*")), [])
         restored = CodexConnection(self.root)
         with patch("http.client.HTTPSConnection", side_effect=AssertionError("No network")):
             restored.start()
@@ -211,7 +220,7 @@ class CodexConnectionTests(unittest.TestCase):
 
     def test_registration_only_start_preserves_identity_without_restoring_tokens_or_network(self):
         original = self.login()
-        saved = self.connection._path.read_bytes()
+        saved = self.vault_values["codex"]
         blocked = CodexConnection(self.root)
         try:
             with patch("http.client.HTTPSConnection", side_effect=AssertionError("No network")):
@@ -219,13 +228,42 @@ class CodexConnectionTests(unittest.TestCase):
                 self.assertFalse(blocked.public_state()["connected"])
                 self.assertEqual(set(blocked._record), {"host_id", "client_id", "subject"})
                 self.assertNotIn("synthetic-access", json.dumps(blocked._record))
-                self.assertEqual(blocked._path.read_bytes(), saved)
+                self.assertEqual(self.vault_values["codex"], saved)
                 query = parse_qs(urlsplit(blocked.begin_login(CALLBACK)["auth_url"]).query)
             self.assertEqual(query["ext_agent_host_id"], original["ext_agent_host_id"])
             self.assertEqual(query["client_id"], [CLIENT])
             self.assertNotIn("agent_name_hint", query)
         finally:
             blocked.close()
+
+    def test_real_store_contract_keeps_tokens_and_account_metadata_out_of_local_files(self):
+        self.vault_patch.stop()
+        self.connection = CodexConnection(self.root)
+        self.connection.start()
+        self.login()
+        sensitive = (
+            "synthetic-access",
+            "synthetic-refresh",
+            "synthetic-subject",
+            CLIENT,
+            self.connection._record["id_token"],
+        )
+        files = [path for path in self.root.rglob("*") if path.is_file()]
+        self.assertTrue(files)
+        for path in files:
+            contents = path.read_text()
+            for value in sensitive:
+                self.assertNotIn(value, contents)
+        restored = CodexConnection(self.root)
+        try:
+            with patch("http.client.HTTPSConnection", side_effect=AssertionError("No network")):
+                restored.start()
+                self.assertTrue(restored.public_state()["connected"])
+                restored.start_registration()
+                self.assertFalse(restored.public_state()["connected"])
+                self.assertEqual(set(restored._record), {"host_id", "client_id", "subject"})
+        finally:
+            restored.close()
 
     def test_missing_mismatched_reused_expired_and_cancelled_states_make_no_token_call(self):
         for case in ("missing", "mismatch", "expired", "cancelled"):
@@ -288,7 +326,7 @@ class CodexConnectionTests(unittest.TestCase):
             with self.assertRaises(CodexError):
                 self.connection.complete(state, "synthetic-code", CLIENT)
         self.assertFalse(self.connection.public_state()["connected"])
-        record = json.loads(self.connection._path.read_text())
+        record = json.loads(self.vault_values["codex"])
         self.assertEqual(record["client_id"], CLIENT)
         self.assertNotIn("access_token", record)
         retry = parse_qs(urlsplit(self.connection.begin_login(CALLBACK)["auth_url"]).query)
@@ -378,7 +416,7 @@ class CodexConnectionTests(unittest.TestCase):
         with patch.object(self.connection, "_json", side_effect=self.network):
             self.connection.disconnect()
         self.assertFalse(self.connection.public_state()["connected"])
-        record = json.loads(self.connection._path.read_text())
+        record = json.loads(self.vault_values["codex"])
         self.assertEqual(set(record), {"host_id", "client_id", "subject"})
         self.assertTrue(any(url.endswith("oauth/revoke") for _, url, _, _ in self.calls))
         self.login()
@@ -389,7 +427,7 @@ class CodexConnectionTests(unittest.TestCase):
         )
         self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
         self.assertNotIn("synthetic-secret", json.dumps(self.connection.public_state()))
-        self.assertNotIn("access_token", self.connection._path.read_text())
+        self.assertNotIn("access_token", self.vault_values["codex"])
         self.connection.disconnect()
         self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
         self.login()
@@ -428,7 +466,7 @@ class CodexConnectionTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertTrue(failures)
         self.assertFalse(self.connection.public_state()["connected"])
-        self.assertNotIn("access_token", self.connection._path.read_text())
+        self.assertNotIn("access_token", self.vault_values["codex"])
 
     def test_tool_free_request_preserves_exact_model_effort_and_has_no_unsupported_fields(self):
         self.login()
@@ -471,7 +509,7 @@ class CodexConnectionTests(unittest.TestCase):
             patch.object(self.connection, "_response", return_value={}),
         ):
             self.connection.request(PAYLOAD, 5)
-        record = json.loads(self.connection._path.read_text())
+        record = json.loads(self.vault_values["codex"])
         self.assertEqual(record["refresh_token"], "rotated-refresh")
         self.assertEqual(record["access_token"], "rotated-access")
         grants = [body for _, url, body, _ in self.calls if url.endswith("oauth/token")]
@@ -574,34 +612,149 @@ class CodexConnectionTests(unittest.TestCase):
 
     def test_close_preserves_login_but_invalidates_pending_login(self):
         self.login()
-        saved = self.connection._path.read_bytes()
+        saved = self.vault_values["codex"]
         self.connection.begin_login(CALLBACK)
         self.connection.close()
         self.assertFalse(self.connection.public_state()["pending"])
         self.assertFalse(self.connection.public_state()["connected"])
-        self.assertEqual(saved, self.connection._path.read_bytes())
+        self.assertEqual(saved, self.vault_values["codex"])
         with self.assertRaises(CodexError):
             self.connection.begin_login(CALLBACK)
 
-    def test_unsafe_private_files_are_not_followed_or_read(self):
-        self.connection.directory.mkdir(parents=True)
-        self.connection._path.write_text("not json")
+    def test_malformed_vault_records_are_not_restored(self):
+        self.vault_values["codex"] = "not json"
         self.connection.start()
         self.assertIn("could not be read safely", self.connection.public_state()["error"])
-        self.connection._path.unlink()
+        self.assertFalse(self.connection.public_state()["connected"])
+
+    def test_unavailable_vault_stays_disconnected_without_exposing_backend_errors(self):
+        self.vault.load.side_effect = CredentialStoreError("synthetic-private-backend-error")
+        self.connection.start()
+        state = self.connection.public_state()
+        self.assertTrue(state["storage_error"])
+        self.assertFalse(state["connected"])
+        self.assertNotIn("synthetic-private-backend-error", json.dumps(state))
+        self.assertEqual(list(self.root.rglob("*")), [])
+
+    def test_retry_after_unlock_reuses_saved_registration_without_restoring_tokens(self):
+        original = self.login()
+        self.vault.load.side_effect = CredentialStoreError("synthetic-private-backend-error")
+        self.connection.start_registration()
+        self.assertTrue(self.connection.public_state()["storage_error"])
+        self.vault.load.side_effect = self.vault_values.get
+        query = parse_qs(urlsplit(self.connection.begin_login(CALLBACK)["auth_url"]).query)
+        self.assertEqual(query["client_id"], [CLIENT])
+        self.assertEqual(query["ext_agent_host_id"], original["ext_agent_host_id"])
+        self.assertFalse(self.connection.public_state()["storage_error"])
+        self.assertFalse(self.connection.public_state()["connected"])
+
+    def test_vault_save_failure_blocks_login_and_has_no_plaintext_fallback(self):
+        self.vault.save.side_effect = CredentialStoreError("synthetic-private-backend-error")
+        with patch.object(self.connection, "_json") as network:
+            with self.assertRaises(CodexError):
+                self.connection.begin_login(CALLBACK)
+        network.assert_not_called()
+        self.assertTrue(self.connection.public_state()["storage_error"])
+        self.assertFalse(self.connection.public_state()["connected"])
+        self.assertFalse(self.connection.public_state()["pending"])
+        self.assertEqual(list(self.root.rglob("*")), [])
+        self.vault.save.side_effect = self.vault_values.__setitem__
+        self.connection.begin_login(CALLBACK)
+        self.assertFalse(self.connection.public_state()["storage_error"])
+        self.assertTrue(self.connection.public_state()["available"])
+
+    def test_refresh_commit_failure_disables_requests_until_vault_recovers(self):
+        self.login()
+        self.connection._record["expires_at"] = 0
+        self.vault.save.side_effect = CredentialStoreError("synthetic-private-backend-error")
+        with (
+            patch.object(self.connection, "_json", side_effect=self.network),
+            patch.object(self.connection, "_response") as inference,
+        ):
+            with self.assertRaises(CodexError):
+                self.connection.request(PAYLOAD, 5)
+        inference.assert_not_called()
+        self.assertTrue(self.connection.public_state()["storage_error"])
+        self.assertFalse(self.connection.public_state()["connected"])
+        with patch.object(self.connection, "_json") as network:
+            with self.assertRaises(CodexError):
+                self.connection.request(PAYLOAD, 5)
+        network.assert_not_called()
+        self.assertEqual(list(self.root.rglob("*")), [])
+
+    def test_token_commit_failure_does_not_activate_unsecured_credentials(self):
+        self.connection.begin_login(CALLBACK)
+        self.pending_nonce = self.connection._pending["nonce"]
+        state = self.connection._pending["state"]
+
+        def save(provider, value):
+            if "access_token" in json.loads(value):
+                raise CredentialStoreError("synthetic-private-backend-error")
+            self.vault_values[provider] = value
+
+        self.vault.save.side_effect = save
+        with patch.object(self.connection, "_json", side_effect=self.network):
+            with self.assertRaises(CodexError):
+                self.connection.complete(state, "synthetic-code", CLIENT)
+        self.assertTrue(self.connection.public_state()["storage_error"])
+        self.assertFalse(self.connection.public_state()["connected"])
+        self.assertNotIn("access_token", self.vault_values["codex"])
+        self.assertEqual(list(self.root.rglob("*")), [])
+
+    def test_disconnect_storage_failure_cancels_requests_and_reports_vault_failure(self):
+        self.login()
+        connection = Mock(sock=None)
+        self.connection._connections.add(connection)
+        self.vault.save.side_effect = CredentialStoreError("synthetic-private-backend-error")
+        with self.assertRaises(CodexError):
+            self.connection.disconnect()
+        self.assertFalse(self.connection.public_state()["connected"])
+        self.assertTrue(self.connection.public_state()["storage_error"])
+        self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
+        connection.close.assert_called()
+        with patch.object(self.connection, "_json") as network:
+            with self.assertRaises(CodexError):
+                self.connection.request(PAYLOAD, 5)
+        network.assert_not_called()
+        self.vault.delete.assert_not_called()
+        self.vault.save.side_effect = self.vault_values.__setitem__
+        self.connection.disconnect()
+        self.assertFalse(self.connection.public_state()["storage_error"])
+        self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
+
+    def test_disconnect_after_locked_start_cannot_claim_unknown_grant_was_revoked(self):
+        self.vault.load.side_effect = CredentialStoreError("synthetic-private-backend-error")
+        self.connection.start()
+        self.vault.save.side_effect = CredentialStoreError("synthetic-private-backend-error")
+        with self.assertRaises(CodexError):
+            self.connection.disconnect()
+        self.assertTrue(self.connection.public_state()["revocation_unconfirmed"])
+        self.assertFalse(self.connection.public_state()["connected"])
+
+    def test_legacy_plaintext_credentials_are_never_read_migrated_or_deleted(self):
+        legacy = self.root / "auth" / "codex" / "connection.json"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('{"access_token":"synthetic-legacy-secret"}')
+        original = legacy.read_bytes()
+        self.connection.start()
+        self.assertFalse(self.connection.public_state()["connected"])
+        self.assertEqual(legacy.read_bytes(), original)
+        self.login()
+        self.assertEqual(legacy.read_bytes(), original)
+        legacy.unlink()
         if hasattr(os, "mkfifo"):
-            os.mkfifo(self.connection._path)
+            os.mkfifo(legacy)
             self.connection.start()
-            self.assertFalse(self.connection.public_state()["connected"])
-            self.connection._path.unlink()
+            self.assertTrue(self.connection.public_state()["connected"])
+            legacy.unlink()
         if os.name != "nt":
             target = self.root / "unrelated-private-file"
             target.write_text("DO NOT READ")
-            self.connection._path.symlink_to(target)
+            legacy.symlink_to(target)
             self.connection.start()
-            self.assertFalse(self.connection.public_state()["connected"])
-            with self.assertRaises(CodexError):
-                self.connection.begin_login(CALLBACK)
+            self.assertTrue(self.connection.public_state()["connected"])
+            self.connection.begin_login(CALLBACK)
+            self.assertTrue(legacy.is_symlink())
             self.assertEqual(target.read_text(), "DO NOT READ")
 
     def test_network_errors_are_fixed_safe_messages_and_requests_are_not_retried(self):

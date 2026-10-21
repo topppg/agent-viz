@@ -57,7 +57,8 @@ from the repo root down to that file's directory. Closer files add to or overrid
   `uv sync`. Python 3.13 locally (`.python-version`); the package supports 3.12+.
 - `uv run ruff check .` and `uv run ruff format --check .` must pass (config in `pyproject.toml`). Never silence a
   rule inline without a one-line reason.
-- Runtime dependencies are limited to `PyJWT[crypto]` for verified ChatGPT sign-in (owner-approved).
+- Runtime dependencies are limited to `PyJWT[crypto]` for verified ChatGPT sign-in and `keyring`
+  for native OS credential storage (both owner-approved).
   Keep other integrations on the standard library; dev tooling goes in the `dev` dependency group.
   Type hints everywhere; avoid `Any`.
 - Prefer one simple current implementation. No backward-compatibility shims, speculative abstractions or generic

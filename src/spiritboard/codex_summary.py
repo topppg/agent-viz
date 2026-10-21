@@ -7,11 +7,8 @@ import hashlib
 import http.client
 import json
 import math
-import os
 import secrets
 import socket
-import stat
-import tempfile
 import threading
 import time
 import uuid
@@ -19,6 +16,8 @@ from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
 import jwt
+
+from .credentials import CredentialStore, CredentialStoreError
 
 MODEL = "gpt-6-luna"
 EFFORT = "medium"
@@ -58,8 +57,7 @@ class CodexConnection:
     """Own one app-specific registration, never a discovered Codex account."""
 
     def __init__(self, directory: Path):
-        self.directory = directory / "auth" / "codex"
-        self._path = self.directory / "connection.json"
+        self._store = CredentialStore(directory)
         self._lock = threading.RLock()
         self._operation = threading.Lock()
         self._connections: set[http.client.HTTPSConnection] = set()
@@ -67,6 +65,7 @@ class CodexConnection:
         self._record: dict = {}
         self._pending: dict | None = None
         self._error: str | None = None
+        self._storage_error = False
         self._revocation_unconfirmed = False
         self._closed = False
         self._validated = False
@@ -96,8 +95,13 @@ class CodexConnection:
                     else record
                 )
                 self._validated = False
+                self._storage_error = False
                 self._error = None
-            except (OSError, ValueError, TypeError):
+            except CredentialStoreError:
+                self._record = {}
+                self._storage_error = True
+                self._error = "ChatGPT secure credential storage needs attention."
+            except (OSError, ValueError, TypeError, RecursionError):
                 self._record = {}
                 self._error = (
                     "Saved ChatGPT sign-in could not be read safely. Reconnect in settings."
@@ -111,9 +115,12 @@ class CodexConnection:
                 self._error = "ChatGPT sign-in expired. Start sign-in again."
             return {
                 "available": True,
-                "connected": bool(self._record.get("access_token")) and not self._closed,
+                "connected": bool(self._record.get("access_token"))
+                and not self._closed
+                and not self._storage_error,
                 "pending": pending,
                 "error": self._error,
+                "storage_error": self._storage_error,
                 "revocation_unconfirmed": self._revocation_unconfirmed,
                 "model": MODEL,
                 "effort": EFFORT,
@@ -139,7 +146,12 @@ class CodexConnection:
         with self._lock:
             if self._closed:
                 raise CodexError("ChatGPT connection is closed.")
+            if self._storage_error:
+                self._restore(registration_only=True)
+                if self._storage_error:
+                    raise CodexError("ChatGPT secure credential storage needs attention.")
             self._generation += 1
+            self._pending = None
             generation = self._generation
             host = self._record.get("host_id") or "urn:uuid:" + str(uuid.uuid4())
             self._record["host_id"] = host
@@ -272,6 +284,8 @@ class CodexConnection:
             with self._lock:
                 generation = self._generation
                 self._check_generation(generation)
+                if self._storage_error:
+                    raise CodexError("ChatGPT secure credential storage needs attention.")
                 if not self._record.get("access_token"):
                     raise CodexError("Connect ChatGPT in settings to generate summaries.")
             try:
@@ -326,6 +340,9 @@ class CodexConnection:
     def disconnect(self) -> None:
         with self._lock:
             refresh, client = self._record.get("refresh_token"), self._record.get("client_id")
+            self._revocation_unconfirmed = (
+                self._revocation_unconfirmed or bool(refresh and client) or self._storage_error
+            )
             self._generation += 1
             generation = self._generation
             self._pending = None
@@ -335,15 +352,17 @@ class CodexConnection:
                 for key in ("host_id", "client_id", "subject")
                 if key in self._record
             }
-            self._save_record()
-            self._error = None
-            for connection in tuple(self._connections):
-                if connection.sock is not None:
-                    try:
-                        connection.sock.shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
-                connection.close()
+            try:
+                self._save_record()
+                self._error = None
+            finally:
+                for connection in tuple(self._connections):
+                    if connection.sock is not None:
+                        try:
+                            connection.sock.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                    connection.close()
         if refresh and client:
             try:
                 deadline = time.monotonic() + 5
@@ -393,32 +412,12 @@ class CodexConnection:
         raise CodexError(safe) from None
 
     def _read_record(self) -> dict:
-        if (
-            self.directory.is_symlink()
-            or self.directory.parent.is_symlink()
-            or self._path.is_symlink()
-        ):
-            raise ValueError("Invalid private storage")
-        try:
-            flags = (
-                os.O_RDONLY
-                | getattr(os, "O_NONBLOCK", 0)
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_BINARY", 0)
-            )
-            fd = os.open(self._path, flags)
-        except FileNotFoundError:
+        raw = self._store.load("codex")
+        if raw is None:
             return {}
-        with os.fdopen(fd, "rb") as handle:
-            info = os.fstat(handle.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
-                raise ValueError("Invalid private storage")
-            if os.name != "nt" and info.st_mode & 0o077:
-                raise ValueError("Unsafe private storage permissions")
-            data = handle.read(MAX_BYTES + 1)
-            if len(data) > MAX_BYTES:
-                raise ValueError("Invalid private storage")
-            record = json.loads(data)
+        if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_BYTES:
+            raise ValueError("Invalid saved credentials")
+        record = json.loads(raw)
         if not isinstance(record, dict) or not _text(record.get("host_id"), 128):
             raise ValueError("Invalid connection")
         if "client_id" in record and (
@@ -438,32 +437,15 @@ class CodexConnection:
 
     def _save_record(self, record: dict | None = None) -> None:
         try:
-            self._write_record(record)
-        except OSError:
-            raise CodexError("ChatGPT private storage could not be written safely.") from None
-
-    def _write_record(self, record: dict | None) -> None:
-        if self.directory.parent.is_symlink() or self.directory.is_symlink():
-            raise CodexError("ChatGPT private storage could not be written safely.")
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.directory.is_symlink() or self._path.is_symlink():
-            raise CodexError("ChatGPT private storage could not be written safely.")
-        if os.name != "nt":
-            self.directory.parent.chmod(0o700)
-            self.directory.chmod(0o700)
-        temporary: str | None = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=self.directory, delete=False) as handle:
-                temporary = handle.name
-                os.chmod(temporary, 0o600)
-                handle.write(json.dumps(self._record if record is None else record).encode("utf-8"))
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self._path)
-            temporary = None
-        finally:
-            if temporary is not None:
-                Path(temporary).unlink(missing_ok=True)
+            raw = json.dumps(self._record if record is None else record, allow_nan=False)
+            if len(raw.encode("utf-8")) > MAX_BYTES:
+                raise CodexError("ChatGPT saved credentials exceeded the safety limit.")
+            self._store.save("codex", raw)
+            self._storage_error = False
+        except CredentialStoreError:
+            self._storage_error = True
+            self._error = "ChatGPT secure credential storage needs attention."
+            raise CodexError(self._error) from None
 
     def _discover(self, deadline: float, generation: int) -> dict:
         if self._discovery:

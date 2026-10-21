@@ -141,6 +141,20 @@ const link=find(n=>n.tagName==='a' && n.href==='https://chatgpt.com/#settings');
 assert.ok(link); assert.equal(link.rel,'noopener noreferrer');
 """)
 
+    def test_secure_storage_failures_are_clear_without_showing_provider_details(self) -> None:
+        self.run_browser(r"""
+state.providers.openrouter.storage_error=true;
+state.providers.codex.storage_error=true;
+state.providers.openrouter.error='private-backend-detail';
+await open();
+assert.ok(body.textContent.includes('Secure storage is unavailable'));
+assert.ok(body.textContent.includes('Set up or unlock your system credential store'));
+assert.ok(!body.textContent.includes('private-backend-detail'));
+assert.equal(connect('openrouter').disabled,true);
+consent().checked=true; await change(consent());
+assert.equal(connect('openrouter').disabled,false);
+""")
+
     def test_main_view_is_short_and_advanced_options_start_collapsed(self) -> None:
         self.run_browser(r"""
 await open();

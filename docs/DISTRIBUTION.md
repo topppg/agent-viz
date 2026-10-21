@@ -3,8 +3,14 @@
 Spiritboard is a local application, not a hosted dashboard. The Python package contains the
 collector, command, and browser assets. End users do not need Node.js, a source checkout, an API
 key, or a separate web server. Python 3.12 or newer is required; `uv` can manage Python for you.
-The installer also resolves `PyJWT[crypto]` and its cryptography dependencies for verified
-ChatGPT sign-in. No Codex CLI or Node.js runtime is needed for that connection.
+The installer also resolves `PyJWT[crypto]` for verified ChatGPT sign-in and `keyring` for
+native credential storage, along with their platform dependencies. No Codex CLI or Node.js
+runtime is needed for that connection.
+
+Saving provider connections requires macOS Keychain, Windows Credential Manager, or an unlocked
+Linux Secret Service collection on a D-Bus user session. A headless Linux machine may need a
+desktop keyring service before it can save credentials. Monitoring and demo mode do not require
+one. Spiritboard never selects a plaintext, null, third-party, or chained storage fallback.
 
 ## Install from GitHub today
 
