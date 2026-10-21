@@ -390,6 +390,14 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  cols()[59].listeners.click(); await tick();
  assert.equal(ids['past-bar'].hidden, true);
  assert.ok(rows().length > 1);
+ // Direct API usage has no dollar receipt; never call it free or ChatGPT plan usage.
+ for (const provider of ['openai', 'anthropic']) {
+   stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:true,status:'ready',provider,api_calls:1,subscription_calls:0,known_cost_usd:0,actual_cost_usd:null,unknown_cost_calls:1}})});
+   assert.ok(ids['ai-status'].textContent.includes(provider === 'openai' ? 'OpenAI API' : 'Anthropic'));
+   assert.ok(ids['ai-status'].textContent.includes('cost unavailable'));
+   assert.ok(!ids['ai-status'].textContent.includes('$0.0000 spent'));
+   assert.ok(!ids['ai-status'].textContent.includes('plan calls'));
+ }
  // Summaries off and empty chart.
  stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:false},activity:{bucket_seconds:10,buckets:60,end:now,runs:{}}})});
  assert.ok(ids['ai-status'].textContent.includes('summaries off'));

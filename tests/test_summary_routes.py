@@ -88,12 +88,33 @@ class SummaryRouteTests(unittest.TestCase):
         key = "sk-or-invented-secret-never-real"
         status, headers, body = self.post("/api/summaries/openrouter/key", {"key": key})
         self.assertEqual(status, 200)
-        self.manager.set_key.assert_called_once_with(key)
+        self.manager.set_key.assert_called_once_with(key, provider="openrouter")
         self.assertNotIn(key, str(headers) + body.decode())
         self.manager.set_key.side_effect = ValueError(key)
         status, _, body = self.post("/api/summaries/openrouter/key", {"key": key})
         self.assertEqual(status, 409)
         self.assertNotIn(key, body.decode())
+
+    def test_direct_api_key_and_provider_selection_routes_are_bounded(self):
+        for name in ("anthropic", "openai"):
+            with self.subTest(provider=name):
+                key = "sk-synthetic-never-real"
+                status, _, body = self.post(f"/api/summaries/{name}/key", {"key": key})
+                self.assertEqual(status, 200)
+                self.manager.set_key.assert_called_with(key, provider=name)
+                self.assertNotIn(key, body.decode())
+                self.assertEqual(self.post("/api/summaries/provider", {"provider": name})[0], 200)
+                self.manager.set_provider.assert_called_with(name)
+        self.assertEqual(self.post("/api/summaries/custom/key", {"key": "secret"})[0], 400)
+        self.assertEqual(
+            self.post(
+                "/api/summaries/openai/key", {"key": "secret", "url": "https://evil.invalid"}
+            )[0],
+            400,
+        )
+        self.assertEqual(
+            self.post("/api/summaries/provider", {"provider": "openai", "url": "private"})[0], 400
+        )
 
     def test_validated_callbacks_allow_cross_site_navigation_but_never_other_mutations(self):
         for provider in ("openrouter", "codex"):

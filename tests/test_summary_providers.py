@@ -83,6 +83,55 @@ class ProviderTests(unittest.TestCase):
             self.providers.request("openrouter", {}, 1)
         self.factory.assert_not_called()
 
+    def test_api_connections_are_explicit_isolated_and_preferred_after_save(self) -> None:
+        self.providers.set_key(_KEY)
+        for name, key in (
+            ("anthropic", "sk-ant-api03-synthetic-never-real"),
+            ("openai", "sk-synthetic-openai-never-real"),
+        ):
+            with self.subTest(provider=name):
+                self.providers.set_key(key, provider=name)
+                state = self.providers.public_state()
+                self.assertEqual(state["preferred_provider"], name)
+                self.assertTrue(state["providers"][name]["connected"])
+                self.assertEqual(self.providers.routes()[0], name)
+                self.assertEqual(self.providers.billing_kind(name), "api")
+                with patch(
+                    "spiritboard.api_summaries.APIKeyConnection.request", return_value={}
+                ) as call:
+                    self.assertEqual(self.providers.request(name, {"messages": []}, 2), {})
+                    call.assert_called_once_with({"messages": []}, 2)
+                self.assertNotIn(key, json.dumps(state))
+                self.assertEqual(SummaryProviders(self.directory).routes()[0], name)
+
+    def test_choose_provider_requires_connection_and_survives_restart(self) -> None:
+        with self.assertRaises(ProviderAuthError):
+            self.providers.set_provider("anthropic")
+        self.providers.set_key(_KEY)
+        self.providers.set_key("sk-synthetic-openai-never-real", provider="openai")
+        revision = self.providers.revision
+        self.providers.set_provider("openrouter")
+        self.assertGreater(self.providers.revision, revision)
+        self.assertEqual(self.providers.routes(), ["openrouter", "openai"])
+        restored = SummaryProviders(self.directory)
+        self.assertEqual(restored.public_state()["preferred_provider"], "openrouter")
+        self.assertEqual(restored.routes(), ["openrouter", "openai"])
+        for name in ("unknown", "codex", [], None):
+            with self.subTest(provider=name), self.assertRaises(ProviderAuthError):
+                self.providers.set_provider(name)
+
+    def test_direct_api_disconnect_stays_blocked_after_vault_failure(self) -> None:
+        self.providers.set_key("sk-synthetic-openai-never-real", provider="openai")
+        with patch(
+            "spiritboard.api_summaries.CredentialStore.delete",
+            side_effect=CredentialStoreError("private"),
+        ):
+            with self.assertRaises(ProviderAuthError):
+                self.providers.disconnect("openai")
+        self.assertEqual(self.providers.routes(), [])
+        self.assertEqual(SummaryProviders(self.directory).routes(), [])
+        self.assertNotIn("private", json.dumps(self.providers.public_state()))
+
     def test_start_is_once_and_public_state_only_has_safe_cached_fields(self) -> None:
         self.providers.start()
         self.providers.start()
@@ -90,7 +139,7 @@ class ProviderTests(unittest.TestCase):
         with patch.object(self.codex, "request", side_effect=AssertionError("no request")):
             state = self.providers.public_state()
         self.assertNotIn("must-not-leak", json.dumps(state))
-        self.assertEqual(state["policy"], "openrouter-first")
+        self.assertEqual(state["policy"], "preferred-first")
         self.assertEqual(state["providers"]["codex"]["effort"], "medium")
         self.assertEqual(state["providers"]["codex"]["model"], "gpt-6-luna")
         self.assertEqual(state["providers"]["openrouter"]["model"], "deepseek/deepseek-v4-flash")
@@ -100,7 +149,13 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(self.providers.routes(), ["openrouter"])
         preferences = self.directory / "summary-settings.json"
         self.assertEqual(
-            json.loads(preferences.read_text()), {"version": 1, "enabled": True, "blocked": []}
+            json.loads(preferences.read_text()),
+            {
+                "version": 1,
+                "enabled": True,
+                "blocked": [],
+                "preferred_provider": "openrouter",
+            },
         )
         self.assertNotIn(_KEY, preferences.read_text())
         if os.name == "posix":
@@ -345,7 +400,8 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(json.loads(preferences.read_text())["blocked"], [])
         restarted = SummaryProviders(self.directory)
         restarted.start()
-        self.assertEqual(restarted.routes(), ["openrouter", "codex"])
+        self.assertEqual(restarted.public_state()["preferred_provider"], "codex")
+        self.assertEqual(restarted.routes(), ["codex", "openrouter"])
 
     def test_pausing_before_callback_prevents_exchange(self) -> None:
         self.providers.begin("codex", "http://localhost:8767/callback")

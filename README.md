@@ -174,23 +174,26 @@ says so.
 
 ## Optional goal summaries
 
-Open **AI summaries** in the dashboard. Read the excerpt-sharing notice, then
-connect OpenRouter or choose **Continue with ChatGPT**. No existing agent-account
-credentials are borrowed. You can also paste an OpenRouter key into the local
-settings panel. These connections and your summary setting survive restarts.
-Saved keys and ChatGPT tokens use macOS Keychain, Windows Credential Manager,
+Open **AI summaries** in the dashboard. Read the excerpt-sharing notice, choose
+a provider, then sign in or add a key. OpenRouter supports sign-in or an API key;
+Anthropic and OpenAI support API keys. **Continue with ChatGPT** uses an eligible
+Plus or Pro account; Enterprise workspaces are not supported by that sign-in route.
+No existing agent-account credentials are borrowed. These connections and your
+summary setting survive restarts. Saved keys and ChatGPT tokens use macOS Keychain, Windows Credential Manager,
 or Linux Secret Service—not plaintext files. If secure storage is unavailable,
 Spiritboard asks you to set it up or unlock it; it never falls back to a file.
 
 Each eligible session gets one line describing its overall goal. Claude's own
-recaps are used as they are, at no cost. Other sessions use
-`deepseek/deepseek-v4-flash` on OpenRouter first, falling back to `gpt-6-luna`
-with medium reasoning through your explicitly connected ChatGPT account.
-Connect either or both; pause summaries or disconnect at any time.
+recaps are used as they are, at no cost. Other sessions use your preferred
+provider first: `deepseek/deepseek-v4-flash` on OpenRouter, `gpt-6-luna` with
+medium reasoning through ChatGPT or OpenAI API, or `claude-haiku-5-5` through
+Anthropic API. If needed, another explicitly connected provider can be tried.
+Pause summaries or disconnect at any time.
 
-OpenRouter uses your API credits; ChatGPT uses your plan allowance and its
-limits. The header separates known API charges from ChatGPT plan calls rather
-than treating plan usage as free. Excerpts are redacted on a best-effort basis,
+API-key connections use separate API billing; ChatGPT sign-in uses your plan
+allowance and its limits. The header separates known API charges, API calls
+with unknown cost, and ChatGPT plan calls rather than treating usage as free.
+Excerpts are redacted on a best-effort basis,
 not guaranteed safe for confidential work. Read the [summary guide](docs/SUMMARIES.md).
 
 For a terminal-only setup, `spiritboard --summaries` accepts
