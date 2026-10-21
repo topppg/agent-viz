@@ -122,9 +122,23 @@ assert.equal(popups[0].opener,null);
 assert.ok(popups[0].location.href.startsWith('https://openrouter.ai/auth?'));
 assert.equal(disconnect('openrouter').textContent,'Cancel sign-in');
 assert.ok(body.textContent.includes('Waiting for sign-in'));
+assert.equal(connect('codex').disabled,true);
+assert.equal(key().disabled,true);
 await click(disconnect('openrouter'));
 assert.equal(posts.at(-1).data.provider,'openrouter');
 assert.equal(connect('openrouter').hidden,false);
+""")
+
+    def test_remote_revocation_warning_is_fixed_and_visible(self) -> None:
+        self.run_browser(r"""
+state.providers.codex.revocation_unconfirmed=true;
+state.providers.codex.error='upstream-private-detail';
+await open();
+assert.ok(body.textContent.includes('Signed out locally'));
+assert.ok(body.textContent.includes('revocation was not confirmed'));
+assert.ok(!body.textContent.includes('upstream-private-detail'));
+const link=find(n=>n.tagName==='a' && n.href==='https://chatgpt.com/#settings');
+assert.ok(link); assert.equal(link.rel,'noopener noreferrer');
 """)
 
     def test_keys_clear_on_submit_and_close_and_errors_never_render_raw_data(self) -> None:

@@ -3,6 +3,8 @@
 Spiritboard is a local application, not a hosted dashboard. The Python package contains the
 collector, command, and browser assets. End users do not need Node.js, a source checkout, an API
 key, or a separate web server. Python 3.12 or newer is required; `uv` can manage Python for you.
+The installer also resolves `PyJWT[crypto]` and its cryptography dependencies for verified
+ChatGPT sign-in. No Codex CLI or Node.js runtime is needed for that connection.
 
 ## Install from GitHub today
 
@@ -14,7 +16,9 @@ uvx --from git+https://github.com/topppg/spiritboard@main spiritboard
 
 This installs into uv's isolated tool cache and opens the local dashboard. Keep the terminal
 running; Ctrl-C stops Spiritboard, not the agents being observed. Nothing is uploaded and model
-summaries are off unless explicitly enabled. Fetching the package itself requires internet access.
+summaries are off unless explicitly enabled (a saved choice is restored on later launches).
+Provider connections are optional and configured in the local **AI summaries** panel.
+Fetching the package itself requires internet access.
 The GitHub repository, package, and installed command are all named `spiritboard`.
 
 For an installed command you can use repeatedly:

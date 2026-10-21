@@ -116,7 +116,11 @@ def serve_dashboard(args: argparse.Namespace) -> int:
             open_dashboard(url, enabled=not args.no_open)
             return 0
 
-        api_key = summary_key(args.openrouter_key_file) if args.summaries else None
+        api_key = (
+            summary_key(args.openrouter_key_file)
+            if args.summaries and (args.openrouter_key_file or os.environ.get("OPENROUTER_API_KEY"))
+            else None
+        )
         store = Store(args.data_dir / "events.sqlite3", stale_after=args.stale_after)
         resources.callback(store.close)
         # Bind before scanning any native sources or starting optional API calls.
@@ -129,6 +133,12 @@ def serve_dashboard(args: argparse.Namespace) -> int:
             server = Collector(store, token, port=0)
         resources.callback(server.server_close)
         resources.callback(server.stopping.set)
+        from .summary_providers import SummaryProviders
+
+        providers = SummaryProviders(
+            args.data_dir, demo=args.demo, session_key=api_key, enabled=args.summaries
+        )
+        server.summary_providers = providers
         # Serve and publish before the first scan, so a second launch can verify this board
         # within its startup wait even when the scan is slow.
         threading.Thread(
@@ -152,22 +162,21 @@ def serve_dashboard(args: argparse.Namespace) -> int:
             server.monitor = monitor
             resources.callback(monitor.stop)
             monitor.scan_once()
-        summarizer = None
-        if args.summaries:
-            from .summaries import Summarizer
+        from .summaries import Summarizer
 
-            summarizer = Summarizer(
-                lambda: list(monitor.profiles) if monitor else [],
-                store,
-                api_key,
-                state_path=args.data_dir / "summaries.sqlite3",
-            )
-            server.summarizer = summarizer
-            resources.callback(summarizer.stop)
+        summarizer = Summarizer(
+            lambda: list(monitor.profiles) if monitor else [],
+            store,
+            providers=providers,
+            state_path=args.data_dir / "summaries.sqlite3",
+        )
+        server.summarizer = summarizer
+        resources.callback(summarizer.stop)
+        resources.callback(providers.close)
+        providers.start()
         if monitor:
             monitor.start()
-        if summarizer:
-            summarizer.start()
+        summarizer.start()
         print(f"Spiritboard local dashboard: {server.url}", flush=True)
         print("Read-only native observation; Ctrl-C stops only this dashboard.", flush=True)
         if monitor:
@@ -176,12 +185,11 @@ def serve_dashboard(args: argparse.Namespace) -> int:
                 "private paths and content omitted from logs.",
                 flush=True,
             )
-        if summarizer:
-            print(
-                "DS4F summaries enabled: bounded context leaves this machine via OpenRouter; "
-                "Claude recaps are used locally.",
-                flush=True,
-            )
+        print(
+            "AI summaries: connect OpenRouter or ChatGPT in the dashboard; "
+            "only explicitly enabled providers receive context.",
+            flush=True,
+        )
         if args.demo:
             from .demo import run_demo
 
@@ -249,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument(
         "--summaries",
         action="store_true",
-        help="opt in to sending bounded redacted activity context to OpenRouter DS4F",
+        help="enable connected summaries; use an OpenRouter key from the environment if supplied",
     )
     serve.add_argument(
         "--openrouter-key-file",

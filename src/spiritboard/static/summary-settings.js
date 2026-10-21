@@ -54,6 +54,13 @@
     status.setAttribute('aria-live', 'polite');
     const modelNode = element('p', model, 'summary-settings-model');
     const descriptionNode = element('p', description, 'summary-settings-help');
+    const revocation = element('p', 'Signed out locally. Remote revocation was not confirmed. Disconnect Spiritboard in ', 'summary-settings-error');
+    const accountSettings = element('a', 'ChatGPT settings');
+    accountSettings.href = 'https://chatgpt.com/#settings';
+    accountSettings.target = '_blank';
+    accountSettings.rel = 'noopener noreferrer';
+    revocation.append(accountSettings);
+    revocation.hidden = true;
     const actions = element('div', '', 'summary-settings-actions');
     const connect = element('button', name === 'codex' ? 'Continue with ChatGPT' : `Connect ${title}`);
     connect.type = 'button';
@@ -64,14 +71,14 @@
     disconnect.dataset.summaryDisconnect = name;
     disconnect.hidden = true;
     actions.append(connect, disconnect);
-    section.append(titleNode, status, modelNode, descriptionNode, actions);
+    section.append(titleNode, status, modelNode, descriptionNode, revocation, actions);
     const install = element('p', '', 'summary-settings-help');
     install.hidden = true;
     if (name === 'codex') {
       install.textContent = 'ChatGPT sign-in is unavailable in this installation. Check the local service setup.';
       section.append(install);
     }
-    providers[name] = { section, status, connect, disconnect, install };
+    providers[name] = { section, status, connect, disconnect, install, revocation };
   }
 
   const keyForm = element('form', '', 'summary-settings-key');
@@ -111,6 +118,7 @@
     const demo = settings.demo === true;
     notice.textContent = demo ? 'Synthetic demo: provider sign-in and summaries are disabled. No provider calls are made.' : settings.enabled ? `Summaries enabled · ${settings.active_provider === 'openrouter' ? 'OpenRouter' : settings.active_provider === 'codex' ? 'ChatGPT' : 'waiting for a connected provider'}` : 'Summaries paused. Local monitoring stays on.';
     consent.disabled = busy || demo;
+    const pending = Object.values(settings.providers || {}).some(value => value.pending === true);
     let connected = false;
     for (const name of ['openrouter', 'codex']) {
       const value = settings.providers?.[name] || {};
@@ -120,7 +128,8 @@
       nodes.status.textContent = demo ? 'Disabled in demo' : value.pending ? 'Waiting for sign-in…' : value.error ? 'Connection needs attention. Disconnect and try again.' : value.connected ? 'Connected' : available ? 'Not connected' : 'Unavailable';
       nodes.status.dataset.state = value.connected ? 'connected' : value.pending ? 'pending' : 'disconnected';
       nodes.connect.hidden = value.connected === true || value.pending === true;
-      nodes.connect.disabled = busy || demo || !available || !consent.checked;
+      nodes.connect.disabled = busy || demo || pending || !available || !consent.checked;
+      nodes.revocation.hidden = demo || name !== 'codex' || value.revocation_unconfirmed !== true;
       nodes.disconnect.hidden = !value.connected && !value.pending && !value.error;
       nodes.disconnect.textContent = value.pending ? 'Cancel sign-in' : 'Disconnect';
       nodes.disconnect.disabled = busy || demo;
@@ -128,8 +137,8 @@
     }
     toggle.checked = settings.enabled === true;
     toggle.disabled = busy || demo || (!connected && !toggle.checked);
-    key.disabled = busy || demo;
-    saveKey.disabled = busy || demo || !consent.checked;
+    key.disabled = busy || demo || pending;
+    saveKey.disabled = busy || demo || pending || !consent.checked;
   }
 
   async function request(path, data) {

@@ -173,11 +173,16 @@
   function renderAi() {
     const ai = state.snapshot.ai || {};
     const host = $("ai-status"); host.replaceChildren();
-    if (!ai.enabled) { host.append(node("span", "summaries off", "muted")); host.title = "Start with --summaries to opt in to OpenRouter summaries"; return; }
+    if (!ai.enabled) { host.append(node("span", "summaries off", "muted")); host.title = "Open AI summaries to connect a provider or resume summaries"; return; }
     const spent = `$${(ai.known_cost_usd ?? ai.actual_cost_usd ?? 0).toFixed(4)}${ai.unknown_cost_calls ? "+" : ""}`;
-    host.append(node("span", `✦ summaries ${ai.status === "error" ? "error" : "on"}`, "ai-mark"),
-      node("span", ` · ${spent} spent · ${ai.calls || 0} calls`, "muted"));
-    host.title = ai.error || "Opt-in: bounded redacted context is sent to OpenRouter";
+    const usage = [];
+    if (ai.api_calls !== 0) usage.push(`${spent} spent · ${ai.api_calls ?? ai.calls ?? 0} API calls`);
+    if (ai.subscription_calls) usage.push(`${ai.subscription_calls} ChatGPT plan calls`);
+    if (!usage.length) usage.push("no provider calls yet");
+    const provider = ai.provider === "codex" ? "ChatGPT" : ai.provider === "openrouter" ? "OpenRouter" : "";
+    host.append(node("span", `✦ summaries ${ai.status === "error" ? "error" : "on"}${provider ? ` · ${provider}` : ""}`, "ai-mark"),
+      node("span", ` · ${usage.join(" · ")}`, "muted"));
+    host.title = ai.error || "Opt-in: bounded redacted context goes only to connected providers; ChatGPT uses plan allowance, not a reported USD charge";
   }
   function renderWarnings() {
     const raw = state.snapshot.source_errors || [];
@@ -595,6 +600,7 @@
   $("search").addEventListener("input", () => { if (state.snapshot) renderTable(); });
   $("refresh").addEventListener("click", refresh);
   document.addEventListener("keydown", (event) => {
+    if (document.querySelector?.("dialog[open]")) return;
     const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(event.target?.tagName);
     if (event.key === "Escape") { if (typing) event.target.blur(); else selectRun(null); return; }
     if (typing || event.metaKey || event.ctrlKey || event.altKey) return;

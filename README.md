@@ -48,8 +48,8 @@ Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run
 Spiritboard from anywhere. No repo checkout or API key is needed; uv manages
-the isolated Python environment (Python 3.12+). There are no runtime package
-dependencies.
+the isolated Python environment (Python 3.12+), including the small JWT and
+cryptography dependencies used to verify ChatGPT sign-in.
 
 See your own agents. Supported Codex, Claude, opencode, Pi and DeepSeek Harness storage
 is discovered automatically, without opening authentication files or tables:
@@ -137,18 +137,25 @@ says so.
 
 ## Optional goal summaries
 
-```sh
-spiritboard --summaries --openrouter-key-file /absolute/path/to/private.env
-```
+Open **AI summaries** in the dashboard. Read the excerpt-sharing notice, then
+connect OpenRouter or choose **Continue with ChatGPT**. No existing agent-account
+credentials are borrowed. You can also paste an OpenRouter key into the local
+settings panel. These connections and your summary setting survive restarts.
 
-Each active session gets one line describing its overall goal. Claude's own
-recaps are used as they are, at no cost. Other sessions are summarized by
-`deepseek/deepseek-v4-flash` through OpenRouter, from their title, recap and your
-requests, and refreshed only when those change. Excerpts are redacted on a
-best-effort basis before they leave the machine, and the header shows known
-spend. Read the [summary guide](docs/SUMMARIES.md) before using this on
-confidential work. The key can also come from `OPENROUTER_API_KEY`; it is never
-served to the browser.
+Each eligible session gets one line describing its overall goal. Claude's own
+recaps are used as they are, at no cost. Other sessions use
+`deepseek/deepseek-v4-flash` on OpenRouter first, falling back to `gpt-6-luna`
+with medium reasoning through your explicitly connected ChatGPT account.
+Connect either or both; pause summaries or disconnect at any time.
+
+OpenRouter uses your API credits; ChatGPT uses your plan allowance and its
+limits. The header separates known API charges from ChatGPT plan calls rather
+than treating plan usage as free. Excerpts are redacted on a best-effort basis,
+not guaranteed safe for confidential work. Read the [summary guide](docs/SUMMARIES.md).
+
+For a terminal-only setup, `spiritboard --summaries` accepts
+`OPENROUTER_API_KEY` or `--openrouter-key-file /absolute/path/to/private.env`.
+Launch-provided keys stay in memory and are never served to the browser.
 
 Stop an existing board before changing its launch settings. A second command
 with different options refuses to reuse it, rather than silently ignoring your

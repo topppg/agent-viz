@@ -24,6 +24,8 @@ ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
+    "/summary-settings.js": ("summary-settings.js", "text/javascript; charset=utf-8"),
+    "/summary-settings.css": ("summary-settings.css", "text/css; charset=utf-8"),
     "/favicon.svg": ("favicon.svg", "image/svg+xml"),
     "/fonts/space-grotesk.woff2": ("fonts/space-grotesk.woff2", "font/woff2"),
     "/fonts/space-mono-400.woff2": ("fonts/space-mono-400.woff2", "font/woff2"),
@@ -45,6 +47,7 @@ class Collector(ThreadingHTTPServer):
         host: str = "127.0.0.1",
         monitor=None,
         summarizer=None,
+        summary_providers=None,
     ):
         if host != "127.0.0.1":
             raise ValueError("only IPv4 loopback is supported")
@@ -54,6 +57,7 @@ class Collector(ThreadingHTTPServer):
         self.token = token
         self.monitor = monitor
         self.summarizer = summarizer
+        self.summary_providers = summary_providers
         self.stopping = threading.Event()
         self._activity: tuple[int, dict] | None = None
         self.focus_lock = threading.Lock()
@@ -146,16 +150,20 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _safe_origin(self):
-        host = self.headers.get("Host", "")
-        allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
-        if host not in allowed:
+        if not self._safe_host():
             return False
+        allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
         origin = self.headers.get("Origin")
         if origin and origin not in {f"http://{value}" for value in allowed}:
             return False
         if self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}:
             return False
         return True
+
+    def _safe_host(self) -> bool:
+        host = self.headers.get("Host", "")
+        allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
+        return host in allowed
 
     def _headers(self, content_type, length=None):
         self.send_header("Content-Type", content_type)
@@ -183,6 +191,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._safe_origin():
             self.close_connection = True
             self._json(403, {"error": "untrusted host or origin"})
+            return
+        if urlsplit(self.path).path.startswith("/api/summaries/"):
+            self._summary_action()
             return
         route = FOCUS_ROUTE.fullmatch(urlsplit(self.path).path)
         if route:
@@ -221,6 +232,104 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(200, result)
 
+    def _summary_action(self) -> None:
+        if not self.headers.get("Origin") or self.headers.get("X-Spiritboard") != "summaries":
+            self.close_connection = True
+            self._json(403, {"error": "same-origin dashboard request required"})
+            return
+        manager = self.server.summary_providers
+        if manager is None:
+            self.close_connection = True
+            self._json(503, {"error": "summary settings are unavailable"})
+            return
+        try:
+            if (
+                self.headers.get("Transfer-Encoding")
+                or self.headers.get_content_type() != "application/json"
+                or urlsplit(self.path).query
+            ):
+                raise ValueError
+            size = int(self.headers.get("Content-Length", "-1"))
+            if not 0 < size <= 4096:
+                raise ValueError
+            self.connection.settimeout(3)
+            raw = self.rfile.read(size)
+            if len(raw) != size:
+                raise ValueError
+            body = parse_json(raw)
+            if not isinstance(body, dict):
+                raise ValueError
+        except (ValueError, TypeError, OSError, RecursionError):
+            self.close_connection = True
+            self._json(400, {"error": "bounded JSON request required"})
+            return
+        path = urlsplit(self.path).path
+        try:
+            if path in {"/api/summaries/openrouter/connect", "/api/summaries/codex/connect"}:
+                if body:
+                    raise ValueError
+                provider = path.split("/")[3]
+                host = "localhost" if provider == "openrouter" else "127.0.0.1"
+                callback = (
+                    f"http://{host}:{self.server.server_port}/api/summaries/{provider}/callback"
+                )
+                result = manager.begin(provider, callback)
+            elif path == "/api/summaries/openrouter/key" and set(body) == {"key"}:
+                manager.set_key(body["key"])
+                result = manager.public_state()
+            elif path == "/api/summaries/disconnect" and set(body) == {"provider"}:
+                manager.disconnect(body["provider"])
+                result = manager.public_state()
+            elif path == "/api/summaries/enabled" and set(body) == {"enabled"}:
+                manager.set_enabled(body["enabled"])
+                result = manager.public_state()
+            else:
+                self._json(400, {"error": "invalid summary action"})
+                return
+        except Exception:
+            # Never reflect provider authentication exception data to the browser.
+            self._json(409, {"error": "summary action failed; check connection settings"})
+            return
+        self._json(200, result)
+
+    def _summary_callback(self, parsed) -> None:
+        if not self._safe_host():
+            self._json(403, {"error": "untrusted host"})
+            return
+        manager = self.server.summary_providers
+        if manager is None:
+            self._json(503, {"error": "summary settings are unavailable"})
+            return
+        try:
+            if len(parsed.query) > 8192:
+                raise ValueError
+            query = parse_qs(parsed.query, keep_blank_values=True, max_num_fields=8)
+            if set(query) - {"state", "code", "error", "error_description", "client_id", "scope"}:
+                raise ValueError
+            if any(len(values) != 1 for values in query.values()):
+                raise ValueError
+            state = query.get("state", [""])[0]
+            code = query.get("code", [""])[0]
+            if not state or (not code and "error" not in query):
+                raise ValueError
+            provider = parsed.path.split("/")[3]
+            manager.complete(
+                provider,
+                state,
+                code,
+                client_id=query.get("client_id", [None])[0],
+                error=query.get("error", [None])[0],
+            )
+        except Exception:
+            self._json(
+                400, {"error": "sign-in was not completed; start again from summary settings"}
+            )
+            return
+        self.send_response(303)
+        self._headers("text/plain; charset=utf-8", 0)
+        self.send_header("Location", self.server.url)
+        self.end_headers()
+
     def _focus(self, run_id: str):
         # A custom header forces a CORS preflight, which this server never grants.
         if not self.headers.get("Origin") or self.headers.get("X-Spiritboard") != "focus":
@@ -246,10 +355,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json(502, {"error": "could not open the app"})
 
     def do_GET(self):
+        parsed = urlsplit(self.path)
+        if parsed.path in {
+            "/api/summaries/openrouter/callback",
+            "/api/summaries/codex/callback",
+        }:
+            # Only these state-validated loopback callbacks accept cross-site navigation.
+            self._summary_callback(parsed)
+            return
         if not self._safe_origin():
             self._json(403, {"error": "untrusted host or origin"})
             return
-        parsed = urlsplit(self.path)
         path = parsed.path
         route = FOCUS_ROUTE.fullmatch(path)
         if route:
@@ -270,6 +386,12 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif path == "/api/snapshot":
             self._json(200, self.server.snapshot())
+        elif path == "/api/summaries/settings":
+            manager = self.server.summary_providers
+            if manager is None:
+                self._json(503, {"error": "summary settings are unavailable"})
+            else:
+                self._json(200, manager.public_state())
         elif path == "/api/events":
             self._stream(parsed.query)
         elif path.startswith("/api/runs/") and path.endswith("/events"):

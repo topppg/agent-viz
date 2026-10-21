@@ -29,7 +29,16 @@ class StaticTests(unittest.TestCase):
     def test_assets_are_local_and_required_controls_exist(self):
         parser = Assets()
         parser.feed((STATIC / "index.html").read_text())
-        self.assertEqual(set(parser.references), {"/favicon.svg", "/style.css", "/app.js"})
+        self.assertEqual(
+            set(parser.references),
+            {
+                "/favicon.svg",
+                "/style.css",
+                "/app.js",
+                "/summary-settings.css",
+                "/summary-settings.js",
+            },
+        )
         self.assertTrue(
             {
                 "runs",
@@ -135,7 +144,7 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(harnessButtons.find(b => b.textContent.includes('codex · work')).textContent.includes('▲ noisy'));
  assert.ok(ids.flux.children.some(x => x.className === 'col'));
  assert.ok(ids.flux.attrs['aria-label'].includes('codex · work'));
- assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 calls'));
+ assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 API calls'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
  // Harness filter.
  harnessButtons.find(b => b.textContent.includes('claude · personal')).listeners.click();
