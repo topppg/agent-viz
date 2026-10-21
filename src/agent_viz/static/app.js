@@ -6,7 +6,7 @@
   const PALETTE = ["#7aa2f7", "#5eead4", "#c3a6ff", "#f0a07a", "#e6c07b", "#94e2d5", "#f5a3c7", "#a3be8c"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   const MAX_ROWS = 300;
-  const state = { snapshot: null, selected: null, view: "active", order: [], colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false };
+  const state = { snapshot: null, selected: null, view: "active", order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false };
   const node = (tag, text, className) => {
     const el = document.createElement(tag);
     if (text !== undefined && text !== null) el.textContent = String(text);
@@ -300,7 +300,10 @@
       (children.get(run.run_id) || []).filter((c) => visible.has(c.run_id)).forEach((c) => { const b = rank(c, next); value.rank = Math.min(value.rank, b.rank); value.seen = Math.max(value.seen, b.seen); });
       ranks.set(run.run_id, value); return value;
     };
-    const compare = (a, b) => rank(a).rank - rank(b).rank || rank(b).seen - rank(a).seen || a.run_id.localeCompare(b.run_id);
+    const live = (a, b) => rank(a).rank - rank(b).rank || rank(b).seen - rank(a).seen || a.run_id.localeCompare(b.run_id);
+    // While a run is open, keep the order from before it opened so rows don't jump; unseen runs go after.
+    const frozen = (run) => state.frozen.get(run.run_id) ?? Infinity;
+    const compare = state.selected ? (a, b) => frozen(a) - frozen(b) || live(a, b) : live;
     renderHiddenNote(runs, direct);
     state.order = [];
     if (!runs.length) { host.append(node("p", "No agents yet. Start the synthetic demo or configure a local source profile. This dashboard never starts agents.", "empty")); return; }
@@ -321,6 +324,7 @@
     };
     runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare)
       .forEach((r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id)));
+    if (!state.selected) state.frozen = new Map(state.order.map((id, i) => [id, i]));
     if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
     if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
