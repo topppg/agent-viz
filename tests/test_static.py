@@ -82,7 +82,8 @@ const fs = require('fs'), vm = require('vm'), assert = require('assert');
 let document;
 class Element {
   constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.value = ''; this.hidden = false; this._text = ''; this.options = []; this.style = { setProperty(k, v) { this[k] = v; } }; this.attrs = {};
-    this.classList = { toggle: (c) => { this.className = (this.className || '').includes(c) ? '' : c; } }; }
+    this.classList = { toggle: (c, force) => { const on = force ?? !(this.className || '').includes(c); this.className = on ? c : ''; } }; }
+  getAttribute(key) { return this.attrs[key]; }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(c => typeof c === 'string' ? c : c.textContent).join(''); }
   append(...items) { this.children.push(...items); }
@@ -279,6 +280,21 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.equal(expanded(), 'root');
  docListeners.keydown({key:'j', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
  assert.equal(expanded(), 'ask');
+ docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
+ assert.equal(detail(), undefined);
+ // The header menu closes on Escape without closing the open agent, and focus returns to its button.
+ rows().find(r => r.dataset.runId === 'root').listeners.click(); await tick();
+ ids.more.listeners.click();
+ assert.equal(ids.more.getAttribute('aria-expanded'), 'true');
+ docListeners.keydown({key:'Escape', target:ids.refresh, preventDefault(){}});
+ assert.equal(ids.more.getAttribute('aria-expanded'), 'false');
+ assert.equal(document.activeElement, ids.more);
+ assert.equal(expanded(), 'root');
+ // Choosing an action closes the menu without stranding focus on a hidden button.
+ ids.more.listeners.click();
+ ids['top-actions'].listeners.click({target:{closest: () => ids.refresh}});
+ assert.equal(ids.more.getAttribute('aria-expanded'), 'false');
+ assert.equal(document.activeElement, ids.more);
  docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
  assert.equal(detail(), undefined);
  // An open session keeps the list order still; closing it restores live sorting.
