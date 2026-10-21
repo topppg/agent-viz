@@ -35,7 +35,7 @@ jobs:
       - name: Test installed wheel and source distribution away from checkout
         run: |
           for package in "$GITHUB_WORKSPACE"/dist/*.whl "$GITHUB_WORKSPACE"/dist/*.tar.gz; do
-            uv run --isolated --no-project --no-config --directory "$RUNNER_TEMP" --with "$package" python - <<'PY'
+            uv run --no-cache --isolated --no-project --no-config --directory "$RUNNER_TEMP" --with "$package" python - <<'PY'
           import importlib.metadata
           import importlib.resources
           import pathlib
@@ -58,7 +58,7 @@ jobs:
               assert not list(pathlib.Path(directory).iterdir()), "CLI inspection created local data"
           print(f"Installed Spiritboard {distribution.version}: CLI and dashboard assets passed")
           PY
-            uv run --isolated --no-project --no-config --directory "$RUNNER_TEMP" \
+            uv run --no-cache --isolated --no-project --no-config --directory "$RUNNER_TEMP" \
               --with "$package" --with pytest==9.1.1 \
               pytest "$GITHUB_WORKSPACE/tests/test_cli_process.py" --import-mode=importlib -q
           done
