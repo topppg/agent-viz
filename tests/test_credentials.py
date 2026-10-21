@@ -108,6 +108,22 @@ def test_namespaces_separate_providers_and_canonical_roots(tmp_path, native_cred
     assert all(str(tmp_path) not in service for service, _ in native_credentials.values)
 
 
+def test_direct_api_provider_namespaces_are_independent(tmp_path, native_credentials) -> None:
+    store = CredentialStore(tmp_path)
+    names = ("openrouter", "codex", "openai", "anthropic")
+    for name in names:
+        assert store.load(name) is None
+        store.save(name, "synthetic-" + name)
+    store.delete("openai")
+    assert store.load("openai") is None
+    for name in names:
+        if name != "openai":
+            assert store.load(name) == "synthetic-" + name
+    for name in names:
+        store.delete(name)
+    assert not native_credentials.values
+
+
 @pytest.mark.parametrize("value", ["", "x" * 262145, "🔐" * 70000, None, 123])
 def test_reject_oversized_or_invalid_payload_before_keychain(tmp_path, native_credentials, value):
     with pytest.raises(CredentialStoreError):
