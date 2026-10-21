@@ -130,6 +130,16 @@ class CliProcessTests(unittest.TestCase):
                 timeout=8,
             )
             self.assertEqual(conflict.returncode, 1)
+            if "different options" not in conflict.stdout:
+                try:
+                    health = self.request(metadata["url"], "/api/health")
+                except OSError as error:
+                    health = type(error).__name__
+                owner_output = self.stop(process)
+                self.fail(
+                    f"Conflict {extra!r}: {conflict.stdout!r}; health={health!r}; "
+                    f"owner output={owner_output!r}"
+                )
             self.assertIn("different options", conflict.stdout)
             self.assertNotIn("Traceback", conflict.stderr)
         prune = subprocess.run(
