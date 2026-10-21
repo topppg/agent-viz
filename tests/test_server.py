@@ -260,3 +260,62 @@ class LocalConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LivenessSnapshotTests(unittest.TestCase):
+    def test_runs_carry_checked_liveness(self):
+        from agent_viz.model import now
+
+        class Monitor:
+            profiles = []
+
+            def public_state(self):
+                return {
+                    "profiles": [
+                        {"id": "cl", "kind": "claude", "label": "Claude", "include_text": True},
+                        {"id": "cx", "kind": "codex", "label": "Codex", "include_text": True},
+                        {"id": "cu", "kind": "codex", "label": "Unknown", "include_text": True},
+                    ],
+                    "source_errors": {},
+                    "source_stats": [],
+                    "automatic_discovery": False,
+                    "live": {"cl": ["s1"], "cx": ["t1"], "cu": None},
+                }
+
+        store = Store()
+        self.addCleanup(store.close)
+        base = {
+            "source": "claude",
+            "account": "a",
+            "name": "n",
+            "state": "idle",
+            "last_seen": now(),
+        }
+        store.observe({**base, "run_id": "cl:s1", "session_id": "cl:observed"})
+        store.observe(
+            {
+                **base,
+                "run_id": "cl:s1:agent:x",
+                "session_id": "cl:observed",
+                "parent_run_id": "cl:s1",
+            }
+        )
+        store.observe({**base, "run_id": "cl:s2", "session_id": "cl:observed"})
+        codex = {**base, "source": "codex"}
+        store.observe({**codex, "run_id": "cx:t1", "session_id": "cx:observed"})
+        store.observe({**codex, "run_id": "cx:t2", "session_id": "cx:observed"})
+        store.observe({**codex, "run_id": "cu:t3", "session_id": "cu:observed"})
+        server = Collector(store, TOKEN, monitor=Monitor())
+        self.addCleanup(server.server_close)
+        live = {run["run_id"]: run.get("live", "absent") for run in server.snapshot()["runs"]}
+        self.assertEqual(
+            live,
+            {
+                "cl:s1": True,
+                "cl:s1:agent:x": True,
+                "cl:s2": False,
+                "cx:t1": True,
+                "cx:t2": False,
+                "cu:t3": None,
+            },
+        )

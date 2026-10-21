@@ -92,6 +92,15 @@ read from the sibling `agent-<id>.meta.json` (bounded, symlinks not followed),
 and their goal is the first prompt the parent sent. Both are text, so a profile
 with `"include_text": false` keeps the generic name and hides the prompt.
 
+Every few seconds the monitor checks which native sessions a live local process
+still owns: Claude through `sessions/<pid>.json` matched against the live
+process start time (`.key` files there are never opened), Codex through the
+`thread-writer-locks/<thread>.lock` files a codex process holds open (`lsof`).
+A session confirmed to have no owner shows as **closed**. When the check cannot
+run (no `sessions/` or lock directory, no `lsof`, a lookup error, or transcripts
+synced from another machine) the dashboard falls back to transcript evidence
+and never says closed.
+
 ## Bounds and limitations
 
 Each scan selects at most 5,000 recent JSONL files per profile by default (a

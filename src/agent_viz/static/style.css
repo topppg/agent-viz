@@ -28,7 +28,7 @@ p { margin: 0; }
 @keyframes blink { 50% { opacity: 0; } }
 .counts { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .counts strong { font-weight: 700; }
-.g-running { color: var(--run); } .g-needs, .g-waiting { color: var(--wait); } .g-quiet, .g-idle, .g-unknown { color: var(--muted); } .g-failed { color: var(--err); } .g-done { color: var(--muted); }
+.g-running { color: var(--run); } .g-needs, .g-waiting { color: var(--wait); } .g-quiet, .g-idle, .g-unknown, .g-closed { color: var(--muted); } .g-failed { color: var(--err); } .g-done { color: var(--muted); }
 .ai-status { border: 1px solid #2a2e38; border-radius: 4px; padding: 2px 8px; font-size: 12px; }
 #connection { color: var(--muted); font-size: 12px; }
 #connection.connected { color: var(--run); }
@@ -79,6 +79,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 20px 24px; display: flex; fle
 .run-row.needs { background: #1a160c; }
 .run-row.needs.selected { background: #2a2210; }
 .run-row.quiet { color: var(--muted); font-style: italic; animation: flicker 4s ease-in-out infinite; }
+.run-row.closed { color: var(--muted); }
+.closed-line { color: var(--muted); }
 .run-row.done { color: #a9aebb; }
 .run-row.context { opacity: .65; }
 .run-row.sub .status { padding-left: calc(var(--depth, 1) * 18px); font-weight: 400; }

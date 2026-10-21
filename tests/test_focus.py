@@ -414,3 +414,52 @@ class FocusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LivenessTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.base = Path(self.folder.name)
+        self.addCleanup(self.folder.cleanup)
+
+    def test_claude_live_sessions_need_matching_process_start(self):
+        root = self.base / ".claude-work"
+        write_session(root, 111, CLAUDE_ID)
+        write_session(root, 222, OTHER_ID)
+        (root / "sessions" / "111.secret.key").write_text("SECRET")
+        profile = SourceProfile("claude-work", "claude", "Claude · work", str(root))
+        ps_output = f"  111 {START}\n  222 Mon Oct 19 01:00:00 2026\n"
+        with patch.object(focus, "_run", return_value=(0, ps_output)) as run:
+            self.assertEqual(focus.live_sessions(profile), frozenset({CLAUDE_ID}))
+        self.assertEqual(run.call_args.args[0][-1], "111,222")
+        self.assertEqual(run.call_args.args[1]["TZ"], "UTC")
+        with patch.object(focus, "_run", return_value=None):
+            self.assertIsNone(focus.live_sessions(profile))
+        missing = SourceProfile("claude-none", "claude", "None", str(self.base / "absent"))
+        self.assertIsNone(focus.live_sessions(missing))
+
+    def test_codex_live_sessions_from_held_thread_locks(self):
+        root = self.base / "codex-work"
+        locks = root / "thread-writer-locks"
+        locks.mkdir(parents=True)
+        for name in (
+            "01a1aaaa-0000-7000-8000-000000000001",
+            "01a1bbbb-0000-7000-8000-000000000002",
+        ):
+            (locks / f"{name}.lock").touch()
+        (locks / ".coordination.lock").touch()
+        profile = SourceProfile("codex-work", "codex", "Codex · work", str(root))
+        lsof = (
+            f"p3233\nccodex\nf12\nn{locks}/01a1aaaa-0000-7000-8000-000000000001.lock\n"
+            f"p4000\nctail\nf3\nn{locks}/01a1bbbb-0000-7000-8000-000000000002.lock\n"
+        )
+        with patch.object(focus.shutil, "which", return_value="/usr/sbin/lsof"):
+            with patch.object(focus, "_run", return_value=(0, lsof)):
+                live = focus.live_sessions(profile)
+            self.assertEqual(live, frozenset({"01a1aaaa-0000-7000-8000-000000000001"}))
+            with patch.object(focus, "_run", return_value=(1, "")):
+                self.assertEqual(focus.live_sessions(profile), frozenset())
+        with patch.object(focus.shutil, "which", return_value=None):
+            self.assertIsNone(focus.live_sessions(profile))
+        older = SourceProfile("codex-old", "codex", "Old", str(self.base / "no-locks"))
+        self.assertIsNone(focus.live_sessions(older))

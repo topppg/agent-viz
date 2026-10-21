@@ -80,6 +80,17 @@ class Collector(ThreadingHTTPServer):
         for run in data["runs"]:
             if run["run_id"] in summaries:
                 run["ai_summary"] = summaries[run["run_id"]]
+        kinds = {p["id"]: p["kind"] for p in profiles}
+        live = observed.get("live", {})
+        for run in data["runs"]:
+            profile_id = run["session_id"].removesuffix(":observed")
+            if run.get("mode") != "observation" or profile_id not in kinds:
+                continue
+            owners = live.get(profile_id)
+            native = run["run_id"].removeprefix(profile_id + ":")
+            # Claude subagents run inside their parent's process.
+            owner = native.split(":agent:")[0] if kinds[profile_id] == "claude" else native
+            run["live"] = None if owners is None else owner in owners
         # Every SSE client asks once a second; one aggregate per second is enough.
         now_second = int(time.time())
         if self._activity is None or self._activity[0] != now_second:
