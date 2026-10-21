@@ -1,159 +1,126 @@
 # Spiritboard
 
-A small local dashboard for understanding what your agents are doing, right now.
+**Your agents. One board.**
 
-**Status: working local prototype with a first spectral terminal theme.**
-This is a local-first observer, not a hosted service. It does not change native
-accounts or install hooks. Observation is local by default. Optional DS4F summaries send
-bounded, best-effort-redacted task excerpts to OpenRouter when explicitly enabled.
+Open it and immediately know which agents need your attention, what they're
+doing, and where to continue.
 
-The first version should answer four questions immediately:
+Spiritboard is a local dashboard for every coding agent you run. Claude Code and
+Codex sessions from your terminals, your desktop apps and each of your accounts
+appear side by side, with what each one is working on, whether it is running,
+waiting for you or gone, and a button that takes you straight to it.
 
-1. Which agent runs are active?
-2. What is each one trying to do, and doing now?
-3. Which agent spawned which subagents?
-4. Is a run working, waiting, finished, or simply no longer reporting?
+It only reads what the agents already write to disk. It never starts, steers or
+stops an agent, and nothing leaves your machine unless you turn on summaries.
 
-## Start here
+## What you see
 
-- [Source profiles, privacy, and native-format limits](docs/SOURCES.md)
-- [Optional DS4F summaries, privacy, caching, and actual costs](docs/SUMMARIES.md)
-- [Validation record and current boundaries](docs/VALIDATION.md)
-- [Functional specification and build order](docs/FUNCTIONAL_SPEC.md)
-- [Reference projects and lessons](docs/REFERENCES.md)
-- [Pinned upstream checkouts](references.lock.json)
+- **Every harness at once.** Each storage profile (personal and work accounts,
+  the default CLI folders, the desktop apps) is a harness with its own colour,
+  live events per minute, and a 10-minute activity chart stacked by harness.
+- **Where to put your attention.** Every session has one status:
 
-Seven shallow upstream clones live in `references/`. They are independent research
-checkouts, excluded from this project's Git history, not dependencies or vendored
-source. Their existing licenses and notices remain intact. Nothing from them has
-been installed or executed.
+  | Status | Meaning |
+  | --- | --- |
+  | ◐ **needs you** | Waiting for your approval. |
+  | ↩ **your turn** | Finished its turn in the last 30 minutes and is waiting for your next direction. |
+  | ● **running** | Working, including while it waits on a tool or a subagent. |
+  | ◌ **open · idle** | Still open in a terminal or app, idle for longer. |
+  | ○ **quiet** | No recent activity, and liveness could not be checked. Quiet never means failed. |
+  | ■ **closed** | No running process owns the session any more. |
+  | ✓ **done** | An SDK run reported that it finished. |
 
-## Run the working demo
+- **What each one is doing.** The session's own title (your `/rename`, Claude's
+  generated title, or the Codex thread name), its goal, your latest request and
+  the agent's latest reply or commentary. Subagents sit under their parent,
+  named by the task the parent gave them.
+- **Jump in.** Open a session in the terminal or app that runs it (cmux, tmux,
+  iTerm2, Terminal, VS Code, the ChatGPT or Claude desktop app), or copy a
+  resume command when it is closed.
 
-Python 3.12+ and [uv](https://docs.astral.sh/uv/) are required; there are **no runtime
-package dependencies**. From this directory:
+Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w`
+/ `e` switch between active, needs-you and all.
 
-```sh
-uv run spiritboard serve --demo --data-dir .spiritboard/demo --port 8766
-```
+## Quick start
 
-Open [the local dashboard](http://127.0.0.1:8766). Press Ctrl-C in that terminal
-to stop it. This is an observer, so stopping it does not stop any real agents.
+Python 3.12+ and [uv](https://docs.astral.sh/uv/) are required; there are no
+runtime package dependencies.
 
-The invented scenario uses the real SDK, HTTP collector, SQLite journal, and
-browser event stream. It creates a coordinator, two same-name workers, a nested
-recovery task, and one deliberately silent worker. Four runs finish; the silent
-run stays working with stale telemetry. It is **not** silently marked failed.
-Tool operations and the approval are simulated; no real tools or models run.
-Rerunning a demo appends fresh identities rather than overwriting earlier runs.
-
-## Observe Codex and Claude across profiles
-
-Start the dashboard; supported Codex and Claude storage profiles are discovered
-automatically without opening authentication files. New supported profiles are
-picked up on later scans:
+See your own agents. Supported Codex and Claude storage folders are discovered
+automatically, without opening authentication files:
 
 ```sh
 uv run spiritboard serve --data-dir .spiritboard/live --port 8767
 ```
 
-For a manually selected set of sources instead:
+Then open <http://127.0.0.1:8767>. Stopping the dashboard never stops an agent.
+
+Or try an invented scenario with no real agents, tools or models:
 
 ```sh
-uv run spiritboard discover --write-config .spiritboard/profiles.json
-uv run spiritboard serve --config .spiritboard/profiles.json --data-dir .spiritboard/live --port 8767
+uv run spiritboard serve --demo --data-dir .spiritboard/demo --port 8766
 ```
 
-Open [the local source dashboard](http://127.0.0.1:8767). Transcripts not modified in the last 7 days
-are skipped without being read; change this with `--max-age-days N` (`0` reads
-everything). The configuration
-writer refuses to overwrite an existing file. You can select a subset on initial
-discovery with repeated `--label 'exact discovered label'` arguments, or edit
-your private configuration. Use `--no-discovery` for an SDK-only collector.
-Discovery covers supported standard/named storage layouts and environment
-selectors, not every possible custom directory or every signed-in account.
+## Sources and privacy
 
-Multiple account directories are independent sources: native IDs are namespaced
-by profile, so equal IDs or agent names never merge across profiles. A label is
-not proof of the currently authenticated account. No login switching is performed.
+- **Discovery.** The standard `~/.claude` and `~/.codex` folders, named variants
+  such as `~/.claude-work` or `~/.codex-switch/profiles/*`, and `CLAUDE_CONFIG_DIR`
+  / `CODEX_HOME`. To choose sources yourself, write a private config and pass it:
 
-Native sources are **read-only transcript observations**, not an authoritative
-process inventory. State is visibly marked inferred, with last-evidence time.
-They can show recent and historical sessions; hundreds of observed runs do not mean hundreds of
-currently running processes. A stopped output stream is not a completion signal.
+  ```sh
+  uv run spiritboard discover --write-config .spiritboard/profiles.json
+  uv run spiritboard serve --config .spiritboard/profiles.json --data-dir .spiritboard/live
+  ```
 
-Task/message text is shown by default: the bounded latest request and activity excerpts.
-Set `"include_text": false` for a profile in the ignored config to hide it. Those
-excerpts can contain private information and remain in local history.
-Do not record or share a live-source dashboard without reviewing its contents.
+  An explicit config replaces automatic discovery, so list every folder you want.
+  Equal session IDs or names never merge across profiles, and a profile label is
+  not proof of which account is signed in.
+- **Text.** Task and reply excerpts are shown by default. Set
+  `"include_text": false` on a profile to hide them. Excerpts can contain private
+  information and stay in local history, so review the board before recording or
+  sharing it.
+- **History window.** Transcripts not modified in the last 7 days are skipped
+  without being read; change it with `--max-age-days N` (`0` reads everything).
+- **Liveness.** Every few seconds Spiritboard checks which sessions a live local
+  process still owns, from Claude's `sessions/<pid>.json` and the Codex thread
+  locks. A session is only marked closed when that check can run.
 
-## What works now
-
-- Browser view: an agent table (harness colour, status, tree, current activity or goal
-  summary, events/min, last seen), per-harness event rates with a 10-minute
-  stacked chart, active/needs-you/all views, harness filter, search and keyboard
-  navigation. Clicking a row opens it in place: goal, current activity, request
-  or task, parent and subagent links, and a collapsed event history in which
-  repeated events are grouped.
-- Checked liveness: a session no live local process owns shows as **closed**
-  and offers its resume command; an open session that has been idle a while shows
-  as **open · idle**. Without a reliable check, quiet stays quiet.
-- Open in app: an opened native row offers **↗ open in cmux / tmux / iTerm /
-  Terminal / VS Code / ChatGPT …** to bring the session's window forward, or, when
-  no live process owns the session, **⧉ copy resume command**. See below.
-- Explicit SDK lifecycle and independent tool/model operation outcomes, with
-  separate work state and telemetry freshness.
-- Codex and Claude multi-profile discovery, namespaced identities, and available
-  native subagent relationships; unsupported or missing evidence stays inferred.
-- Recent working branches first, including parents with active descendants;
-  source cards, evidence-window filters, and Git-log-inspired delegation rails.
-- Optional cached DS4F one-line briefs with reported provider charges, persistent
-  request accounting, and explicit stale/unknown-cost warnings.
-- SQLite persistence, initial browser snapshots, live updates, reconnect recovery,
-  duplicate protection, sequence-gap warnings, and terminal-state protection.
-- Bounded SDK buffers, delivery diagnostics, retries with stable IDs, synchronous
-  methods and asynchronous flush/close helpers.
-- Loopback-only serving, ingestion token, Host/Origin checks, local assets, safe
-  text rendering, and no remote telemetry or raw-payload capture by default.
+What is read, and the bounds on it, are in the [source guide](docs/SOURCES.md).
 
 ## Open a session in its app
 
-Opening a native Codex or Claude row looks up, only then, which local process owns
-the session and how to show it: a cmux panel, a tmux pane (and its terminal app),
-an iTerm2 session, an Apple Terminal tab, or the owning GUI app (VS Code, Ghostty,
-ChatGPT, Claude desktop …). On Linux, tmux panes and `wmctrl` windows are
-supported. Anything else shows no button.
+Opening a row looks up which local process owns the session and how to show it:
+a cmux panel, a tmux pane, an iTerm2 session, an Apple Terminal tab, or the
+owning app's window (VS Code, Ghostty, ChatGPT, Claude desktop). On Linux, tmux
+panes and `wmctrl` windows are supported.
 
-The button only **activates a window**. It never types into, signals, kills or
-otherwise controls an agent, and helper output is never shown in the browser. The
-first iTerm2/Terminal use can trigger a macOS automation permission prompt. When no
-live process is found, the dashboard offers a resume command (for example
-`claude --resume <id>` with the profile's `CLAUDE_CONFIG_DIR`) to copy and run
-yourself; the server never runs it. Resume is not offered while the session might
-still be running elsewhere, since resuming it would fork the conversation. What is
-inspected is listed in the [source guide](docs/SOURCES.md#opening-a-sessions-app).
+The button only brings a window forward. It never types into, signals or
+controls an agent. The first iTerm2 or Terminal use can trigger a macOS
+automation prompt. For a closed session it offers a resume command, such as
+`claude --resume <id>` with the profile's `CLAUDE_CONFIG_DIR`, for you to copy
+and run; Spiritboard never runs it, and never offers it while the session might
+still be running elsewhere.
 
 ## Optional goal summaries
 
 ```sh
-uv run spiritboard serve --port 8767 \
-  --data-dir .spiritboard/live --summaries \
-  --openrouter-key-file /absolute/path/to/private.env
+uv run spiritboard serve --data-dir .spiritboard/live --port 8767 \
+  --summaries --openrouter-key-file /absolute/path/to/private.env
 ```
 
-Alternatively supply `OPENROUTER_API_KEY` in the environment. Never put a key in
-source control or a command argument. The key is not served to the browser.
-Each active session gets one line describing its overall goal. Claude recaps
-are used directly; other sessions are summarized from titles, recaps and the
-user's requests, refreshed only when those change. Summaries never establish
-process liveness. Enabling them permits external excerpts even when native text
-display is off, and redaction cannot recognize every secret. There is no spend
-cap; known spend is shown in the header. See the [summary guide](docs/SUMMARIES.md)
-before enabling this on confidential work.
+Each active session gets one line describing its overall goal. Claude's own
+recaps are used as they are, at no cost. Other sessions are summarized by
+`deepseek/deepseek-v4-flash` through OpenRouter, from their title, recap and your
+requests, and refreshed only when those change. Excerpts are redacted on a
+best-effort basis before they leave the machine, and the header shows known
+spend. Read the [summary guide](docs/SUMMARIES.md) before using this on
+confidential work. The key can also come from `OPENROUTER_API_KEY`; it is never
+served to the browser.
 
-## Small SDK example
+## Report from your own agents
 
-Start `serve` with its default data directory first, then:
+A small SDK lets any Python agent report runs, subagents, activity and tool calls
+to the same board:
 
 ```python
 from pathlib import Path
@@ -171,83 +138,59 @@ with Client("http://127.0.0.1:8766", token, account="example") as client:
     print("Delivered:", delivered, client.diagnostics)
 ```
 
-The observer does not infer progress from hidden reasoning. Activity text is
-application-supplied or explicitly enabled native excerpts. Use `heartbeat()`
-during long quiet work when using the manual SDK. Failed delivery never changes
-the application result; inspect `flush()` and `diagnostics` to detect loss.
-
-## Validation
-
-```sh
-uv run ruff check . && uv run ruff format --check .
-uv run pytest
-node --check src/spiritboard/static/app.js
-uv build
-```
-
-The initial functional checkpoint passed **63 tests** on Python 3.12 and 3.14, including
-the synthetic HTTP demo, four-profile adapter fixtures, state/identity rules,
-reconnect/reset behavior, browser DOM safety, and local HTTP access checks. Node
-is optional for running Python tests but required for the additional DOM test;
-check for skips before claiming that coverage.
-
-Real read-only acceptance loaded all four personal/work profiles. A 50-file
-selection per profile produced 199 observations and 85 parent links with no
-source errors; a separate CLI/HTTP check using 30 files produced 119 observations
-and 57 parent links. Counts are time- and window-dependent, not a benchmark or
-an active-process count. No private transcript fixture is committed.
-
-The wheel and source distribution build successfully. Installation and browser
-asset presence were checked from a temporary environment outside this checkout.
-Browser testing verified the synthetic tree, recovered error detail, state filter,
-refresh recovery, and an empty browser error log. See the validation record for
-limits, including the untested ten-minute performance target.
-
-The automatic-discovery and summary update passes **98 tests** on the current
-Python environment, JavaScript syntax validation, and package builds. Local
-acceptance found seven storage profiles and over 700 retained observations with
-no reported source errors. These are storage/profile counts, not verified
-accounts or live-process counts. One initial live DS4F request summarized three
-runs for a total reported charge of **$0.00008050196**; subsequent opt-in refreshes
-have their own accounting in the dashboard. Tests use mocked provider responses.
+Start `serve` with its default data directory first. Use `heartbeat()` during
+long quiet work. Failed delivery never changes your application's result; check
+`flush()` and `diagnostics` to detect loss.
 
 ## Local storage and cleanup
 
-The selected `--data-dir` contains `events.sqlite3`, a private ingestion token,
-and, when summaries are enabled, `summaries.sqlite3` for cached briefs/accounting.
-Source config, validation databases, and build products are ignored by Git.
-Retention is manual in this prototype, not automatic:
+The `--data-dir` holds `events.sqlite3`, a private ingestion token and, with
+summaries on, `summaries.sqlite3`. Source config and local data are ignored by
+Git. Retention is manual:
 
 ```sh
 uv run spiritboard prune --data-dir .spiritboard/live --older-than-days 7
 ```
 
-This deletes only eligible old observer records, never native transcripts. It
-retains active SDK runs and parents needed by retained children. Stop the
-collector before cleanup; do not run a second collector against the same data
-directory. There is no remote control or native-history deletion endpoint.
+This deletes only old observer records, never your agents' transcripts. Stop the
+dashboard first, and do not run two against the same data directory.
 
-## Product direction
+## Development
 
-Keep the Python SDK, local collector, and browser view small. Native Codex/Claude
-sources were brought forward into the first functional version at the user's
-request. Further framework integrations remain future work. Do not require a
-particular model, cloud account, or paid summarizer.
+```sh
+uv run ruff check . && uv run ruff format --check .
+uv run pytest
+node --check src/spiritboard/static/app.js
+```
 
-The visual direction is **ghostly, terminal-like, and captivating**: quiet dark
-surfaces, crisp monospace labels, restrained spectral accents, and clear motion
-when something actually changes. The first theme now uses original inline SVG,
-local CSS, and Git-like nodes/rails. The rails represent observed delegation,
-not Git commits or invented merge relationships. Further visual refinement is open.
+Node is optional for the Python tests but runs the browser DOM test; check for
+skips before relying on that coverage. Contribution rules, including worktrees
+and one change per PR, are in [AGENTS.md](AGENTS.md).
 
-A deterministic synthetic scenario should exercise the real event pipeline and
-be safe to record for GitHub and X. Demo mode must be visibly labeled; recordings
-must not expose private prompts, repository paths, credentials, or real tasks.
+More detail: [sources](docs/SOURCES.md), [summaries](docs/SUMMARIES.md),
+[validation record](docs/VALIDATION.md), [functional specification](docs/FUNCTIONAL_SPEC.md)
+and [reference projects](docs/REFERENCES.md). The `references/` folder holds
+shallow research checkouts of other projects, excluded from Git history and never
+installed, executed or copied.
+
+## Direction
+
+Spiritboard stays a small local observer: one board for every agent harness you
+use, which tells you at a glance what each agent is working on and which one
+needs you. It is not a cost or process monitor, and it does not launch, steer or
+approve agents.
+
+The look is ghostly rather than spooky: dark terminal surfaces, crisp monospace,
+mint for activity, amber for attention, violet for summaries, and motion only
+when something actually changes. Labels stay literal (needs you, your turn,
+closed, open in cmux) so the board needs no vocabulary of its own.
+
+Next: more harnesses and framework adapters, exact tab focus for Ghostty once a
+released version exposes it, and a demo scenario that is safe to record.
 
 ## Boundaries
 
-This is an observer, not an agent framework, task scheduler, or remote control
-panel. It will not kill, steer, or approve actions in the first version; opening a
-session's app only brings an existing window forward. A pretty
-dashboard must never hide lost events or pretend that an unresponsive agent has
-definitely failed.
+This is an observer, not an agent framework, task scheduler or remote control.
+It never kills, steers or approves actions; opening a session's app only brings
+an existing window forward. A clear board must never hide lost events or claim
+that an unresponsive agent has failed.
