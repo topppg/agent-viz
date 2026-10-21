@@ -211,6 +211,10 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  // A live session offers to open its app; the POST carries the custom header.
  const control = (key) => flatten(detail()).find(x => x.dataset.focusKey === key);
  assert.equal(control('open-app').textContent, '↗ open in cmux');
+ // The open button sits in the title row, beside the session name.
+ const head = flatten(detail()).find(x => x.className === 'detail-head');
+ assert.ok(flatten(head).includes(control('open-app')));
+ assert.ok(flatten(head).some(x => x.tagName === 'h3'));
  control('open-app').listeners.click(); await tick();
  assert.deepEqual(posts, [{url:'/api/runs/orphan/focus', headers:{'X-Spiritboard':'focus'}}]);
  assert.ok(detail().textContent.includes('opened'));

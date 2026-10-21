@@ -432,9 +432,27 @@
     const parent = byId.get(run.parent_run_id);
     const harness = harnessOf(run);
     const main = node("div", null, "detail-main");
+    const head = node("div", null, "detail-head");
     const title = node("div", null, "detail-title");
     title.append(node("h3", nameOf(run)), node("span", `${status.glyph} ${status.text}`, `pill g-${status.key}`));
-    main.append(title);
+    const actions = node("div", null, "detail-actions");
+    actions.append(...targetControls(run));
+    const links = node("div", null, "detail-links");
+    const history = node("button", state.historyOpen ? "hide history" : "history ▸", "link"); history.type = "button"; history.dataset.focusKey = "history";
+    history.addEventListener("click", () => { state.historyOpen = !state.historyOpen; if (state.historyOpen && !state.events.length) loadEvents(true); else renderTable(); });
+    const close = node("button", "esc close", "link"); close.type = "button"; close.addEventListener("click", () => selectRun(null));
+    links.append(history, close);
+    head.append(title, actions, links);
+    const meta = node("p", null, "detail-meta"); meta.setAttribute("aria-label", "Session");
+    const fact = (key, ...content) => { const item = node("span"); if (key) item.append(node("span", key, "k")); item.append(...content); meta.append(item); return item; };
+    const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(harness.key);
+    fact("", swatch, harness.label);
+    if (run.app) fact("in", run.app);
+    if (run.project) fact("project", run.project);
+    fact(terminal.has(run.state) || status.key === "closed" ? "ran for" : "running for", age(run.started_at, time(run.ended_at) || serverNow()));
+    const seen = node("span", seenText(run.last_seen)); seen.dataset.seen = run.last_seen || "";
+    fact("last seen", seen);
+    main.append(head, meta);
     if (status.turn) {
       const turn = node("p", `↩ finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
       turn.append(node("span", ` · continue it in ${harness.label}`, "needs-where"));
@@ -473,24 +491,7 @@
       } else field("parent", "not yet available");
     }
     main.append(fields);
-    const side = node("aside", null, "detail-side"); side.setAttribute("aria-label", "Session");
-    const facts = node("dl", null, "side-facts");
-    const fact = (title, ...content) => { const dd = node("dd"); dd.append(...content); facts.append(node("dt", title), dd); return dd; };
-    const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(harness.key);
-    fact("harness", swatch, harness.label);
-    if (run.app) fact("app", run.app);
-    if (run.project) fact("project", run.project);
-    fact(terminal.has(run.state) || status.key === "closed" ? "ran for" : "running for", age(run.started_at, time(run.ended_at) || serverNow()));
-    fact("last seen", seenText(run.last_seen)).dataset.seen = run.last_seen || "";
-    const actions = node("div", null, "detail-actions");
-    actions.append(...targetControls(run));
-    const links = node("div", null, "side-links");
-    const history = node("button", state.historyOpen ? "hide history" : "history ▸", "link"); history.type = "button"; history.dataset.focusKey = "history";
-    history.addEventListener("click", () => { state.historyOpen = !state.historyOpen; if (state.historyOpen && !state.events.length) loadEvents(true); else renderTable(); });
-    const close = node("button", "esc close", "link"); close.type = "button"; close.addEventListener("click", () => selectRun(null));
-    links.append(history, close);
-    side.append(node("span", "session", "label"), facts, actions, links);
-    host.append(main, side);
+    host.append(main);
     if (state.historyOpen) host.append(historyList(run));
     return host;
   }
