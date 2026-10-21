@@ -16,6 +16,7 @@ from socketserver import TCPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import focus
+from .harnesses import HARNESSES
 from .model import MAX_EVENT_BYTES, parse_json
 
 STATIC = Path(__file__).parent / "static"
@@ -110,8 +111,8 @@ class Collector(ThreadingHTTPServer):
                 continue
             owners = live.get(profile_id)
             native = run["run_id"].removeprefix(profile_id + ":")
-            # Claude subagents run inside their parent's process.
-            owner = native.split(":agent:")[0] if kinds[profile_id] == "claude" else native
+            # A subagent can run inside its parent's process (Claude).
+            owner = HARNESSES[kinds[profile_id]].owner(native)
             run["live"] = None if owners is None else owner in owners
         # Every SSE client asks once a second; one aggregate per second is enough.
         now_second = int(time.time())

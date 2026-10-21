@@ -20,7 +20,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .sources import SourceProfile, _claude, _codex, _recent_files, _records, codex_titles
+from .harnesses import HARNESSES, Goal
+from .sources import SourceProfile
+from .transcripts import redact
 
 MODEL = "deepseek/deepseek-v4-flash"
 HOST = "openrouter.ai"
@@ -32,7 +34,6 @@ INSERT_SUMMARY = (
     "INSERT OR REPLACE INTO summaries"
     "(run_id,fingerprint,text,generated_at,request_id,cost,title,origin) VALUES(?,?,?,?,?,?,?,?)"
 )
-RECAP_SUFFIX = re.compile(r"\s*\(disable recaps in /config\)\s*$", re.I)
 INSTRUCTION_MARKERS = (
     "<environment_context",
     "<permissions instructions",
@@ -53,30 +54,6 @@ INSTRUCTION_MARKERS = (
 )
 
 
-def _clean(value: object, limit: int = 1200) -> str:
-    if not isinstance(value, str):
-        return ""
-    value = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", value)
-    value = re.sub(r"(?i)\bBearer\s+\S+", "[redacted token]", value)
-    value = re.sub(
-        r"\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,}|AIza[A-Za-z0-9_-]{15,})",
-        "[redacted key]",
-        value,
-    )
-    value = re.sub(
-        r"(?i)\b(?:api[_ -]?key|access[_ -]?token|password|secret)\s*[:=]\s*[\"']?[^\s\"',;}]+",
-        "[redacted credential]",
-        value,
-    )
-    value = re.sub(
-        r"\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
-        "[redacted email]",
-        value,
-    )
-    value = re.sub(r"(?<![\w:])(?:[A-Za-z]:[\\/]|~?/)[^\s\"'<>),;]*", "[local path]", value)
-    return re.sub(r"\s+", " ", value).strip()[:limit]
-
-
 def _plain(content: object) -> str:
     if isinstance(content, str):
         return content
@@ -91,58 +68,10 @@ def _plain(content: object) -> str:
     return ""
 
 
-def _goal(rows: list[dict], kind: str) -> dict:
+def _goal(context: Goal) -> dict:
     """Goal context: titles, recaps and the user's requests, not tools or reasoning."""
-    users, assistant, custom, ai_title, recap, recap_at, last_user_at = [], "", "", "", "", "", ""
-    for row in rows:
-        role, content = None, None
-        stamp = row.get("timestamp") if isinstance(row.get("timestamp"), str) else ""
-        if kind == "codex":
-            payload = row.get("payload")
-            if not isinstance(payload, dict):
-                continue
-            if row.get("type") == "compacted" and isinstance(payload.get("message"), str):
-                recap, recap_at = _clean(payload["message"], 600), stamp
-                continue
-            if row.get("type") == "event_msg" and payload.get("type") in {
-                "user_message",
-                "agent_message",
-            }:
-                role = "user" if payload["type"] == "user_message" else "assistant"
-                content = payload.get("message")
-            elif row.get("type") == "response_item" and payload.get("type") == "message":
-                if payload.get("channel") == "analysis":
-                    continue
-                role, content = payload.get("role"), payload.get("content")
-        else:
-            if row.get("type") == "custom-title":
-                custom = _clean(row.get("customTitle"), 120) or custom
-                continue
-            if row.get("type") == "ai-title":
-                ai_title = _clean(row.get("aiTitle"), 120) or ai_title
-                continue
-            if row.get("type") == "system" and row.get("subtype") == "away_summary":
-                recap, recap_at = (
-                    _clean(RECAP_SUFFIX.sub("", str(row.get("content") or "")), 600),
-                    stamp,
-                )
-                continue
-            # Skill bodies, compaction summaries and slash/bash-mode echoes are not requests.
-            if row.get("isMeta") or row.get("isCompactSummary"):
-                continue
-            if row.get("type") in {"user", "assistant"}:
-                message = row.get("message")
-                if isinstance(message, dict):
-                    role, content = row["type"], message.get("content")
-                    if (
-                        role == "user"
-                        and isinstance(content, list)
-                        and any(
-                            isinstance(block, dict) and block.get("type") == "tool_result"
-                            for block in content
-                        )
-                    ):
-                        continue
+    users, assistant, last_user_at = [], "", ""
+    for role, content, stamp in context.messages:
         if role not in {"user", "assistant"}:
             continue
         raw = _plain(content)
@@ -150,7 +79,7 @@ def _goal(rows: list[dict], kind: str) -> dict:
             role == "user" and raw.lstrip().startswith("<")
         ):
             continue
-        cleaned = _clean(raw, 400)
+        cleaned = redact(raw, 400)
         if not cleaned:
             continue
         if role == "user":
@@ -160,9 +89,9 @@ def _goal(rows: list[dict], kind: str) -> dict:
         else:
             assistant = cleaned
     return {
-        "title": custom or ai_title,
-        "recap": recap,
-        "recap_at": recap_at,
+        "title": context.title,
+        "recap": context.recap,
+        "recap_at": context.recap_at,
         "last_user_at": last_user_at,
         "users": users,
         "assistant": assistant,
@@ -176,9 +105,9 @@ def _goal_text(goal: dict) -> str:
     lines = [f"title: {goal['title']}"] if goal["title"] else []
     if goal["recap"]:
         lines.append(f"recap: {goal['recap']}")
-    lines += [f"user: {_clean(u, 300)}" for u in picked]
+    lines += [f"user: {redact(u, 300)}" for u in picked]
     if goal["assistant"]:
-        lines.append(f"assistant (latest): {_clean(goal['assistant'], 200)}")
+        lines.append(f"assistant (latest): {redact(goal['assistant'], 200)}")
     return "\n".join(lines)[:2000]
 
 
@@ -199,11 +128,11 @@ def _stamp(value: object) -> float:
 
 def _sdk_text(run: dict) -> str:
     raw = "\n".join(str(run.get(key, "")) for key in ("task", "activity"))
-    return "" if any(marker in raw.lower() for marker in INSTRUCTION_MARKERS) else _clean(raw, 1000)
+    return "" if any(marker in raw.lower() for marker in INSTRUCTION_MARKERS) else redact(raw, 1000)
 
 
 def _sdk_key(run: dict) -> str:
-    return _clean(str(run.get("task", "")), 1000)
+    return redact(str(run.get("task", "")), 1000)
 
 
 def _fingerprint(key: str) -> str:
@@ -350,8 +279,8 @@ class Summarizer:
     def _candidates(self) -> list[dict]:
         """Runs whose goal context changed and are due for a summary.
 
-        A Claude recap newer than the latest user request is stored directly with
-        no request. Everything else is returned for one batched provider call.
+        A harness recap (Claude's) newer than the latest user request is stored
+        directly with no request. Everything else is returned for one batched provider call.
         """
         current = time.time()
         with self.lock:
@@ -371,7 +300,7 @@ class Summarizer:
         native = {
             run["run_id"]: run
             for run in runs
-            if run.get("source") in {"codex", "claude"} and run.get("mode") == "observation"
+            if run.get("source") in HARNESSES and run.get("mode") == "observation"
         }
         goals = {}
         if native:
@@ -379,29 +308,21 @@ class Summarizer:
                 wanted = {key for key in native if key.startswith(profile.id + ":")}
                 if not wanted:
                     continue
-                titles = (
-                    codex_titles(Path(profile.root).expanduser().resolve())
-                    if profile.kind == "codex"
-                    else {}
-                )
+                harness = HARNESSES[profile.kind]
+                root = Path(profile.root).expanduser().resolve()
+                titles = harness.titles(root) if harness.titles else {}
                 found = set()
-                root = Path(profile.root).expanduser().resolve() / (
-                    "sessions" if profile.kind == "codex" else "projects"
-                )
-                for path in _recent_files(root, 250):
+                for session in harness.inventory(root, 250, None, False)[0]:
                     try:
-                        records = _records(path)
-                        observation = (_codex if profile.kind == "codex" else _claude)(
-                            profile, records, path.stat().st_mtime
-                        )
+                        observation = harness.observe(profile, session)
                         if observation and observation["run_id"] in native:
                             found.add(observation["run_id"])
-                            goal = _goal(records, profile.kind)
+                            goal = _goal(harness.goal(session))
                             # Titles go to the provider, so they are redacted like other text.
                             native_title = titles.get(observation.get("native_id", ""), "")
-                            goal["title"] = _clean(native_title, 120) or goal["title"]
+                            goal["title"] = redact(native_title, 120) or goal["title"]
                             goal["free"] = (
-                                profile.kind == "claude"
+                                harness.free_recaps
                                 and bool(goal["recap"])
                                 and goal["recap_at"] >= goal["last_user_at"]
                             )
@@ -442,7 +363,7 @@ class Summarizer:
                         None,
                         0.0,
                         title,
-                        "claude-recap",
+                        f"{run['source']}-recap",
                     )
                 )
                 continue
@@ -547,7 +468,7 @@ class Summarizer:
             raw_id
             if isinstance(raw_id, str)
             and re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", raw_id)
-            and _clean(raw_id, 200) == raw_id
+            and redact(raw_id, 200) == raw_id
             else None
         )
         with self.lock:
@@ -578,7 +499,7 @@ class Summarizer:
                 value = result[f"r{i + 1}"]
                 if not isinstance(value, str) or not value.strip() or len(value) > 1000:
                     raise ValueError("Invalid summary value")
-                cleaned = _clean(value, 160)
+                cleaned = redact(value, 160)
                 if not cleaned:
                     raise ValueError("Empty summary value")
                 values.append(
@@ -642,7 +563,7 @@ class Summarizer:
                         "title": title or "",
                         "origin": origin or "model",
                         "generated_at": stamp,
-                        "model": MODEL if origin != "claude-recap" else None,
+                        "model": MODEL if (origin or "model") == "model" else None,
                         "stale": stale,
                         "request_id": request_id,
                         "actual_cost_usd": cost,
