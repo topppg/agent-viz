@@ -64,6 +64,10 @@ New harnesses plug in as one module each (see [the source guide](docs/SOURCES.md
   iTerm2, Terminal, VS Code, the ChatGPT, Claude or DeepSeek Harness app), or copy a
   resume command when it is closed.
 
+![An open session with its summary, latest request and an open in Ghostty button beside the title](docs/session-open.png)
+
+<sub>Synthetic data: invented sessions, projects and activity.</sub>
+
 Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w`
 / `e` switch between active, needs-you and all. Click a table heading to sort by
 that column, click again to reverse it, and a third time to restore the default
