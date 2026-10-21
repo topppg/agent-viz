@@ -36,7 +36,12 @@
     return `${Math.floor(seconds / 86400)}d`;
   };
   function showError(message) { $("error").hidden = !message; $("error").textContent = message || ""; }
-  function setConnection(text, connected) { $("connection").textContent = text; $("connection").className = connected ? "connected" : "muted"; }
+  let connection = ["Connecting…", false];
+  function setConnection(text, connected) { connection = [text, connected]; showConnection(); }
+  function showConnection() {
+    if (state.past) { $("connection").textContent = "past · not live"; $("connection").className = "past"; return; }
+    $("connection").textContent = connection[0]; $("connection").className = connection[1] ? "connected" : "muted";
+  }
   function accountOf(run) { return typeof run.account === "object" ? (run.account?.label || run.account?.id || "unknown") : (run.account || "unknown"); }
   function sourceOf(run) { return typeof run.source === "object" ? (run.source?.kind || run.source?.label || "unknown") : (run.source || "unknown"); }
 
@@ -180,6 +185,7 @@
     $("counts").replaceChildren(...counts.map(([key, glyph, value, text]) => {
       const item = node("span"); item.append(node("span", glyph, `g-${key}`), " ", node("strong", value), ` ${text}`); return item;
     }));
+    if (state.past) $("counts").append(node("span", `at ${new Date(state.past.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`, "counts-at"));
   }
   function renderAi() {
     const ai = state.snapshot.ai || {};
@@ -300,6 +306,7 @@
   backButton.addEventListener("click", backToLive);
   $("past-bar").replaceChildren(pastText, backButton);
   function renderPast() {
+    showConnection();
     $("past-bar").hidden = !state.past;
     if (!state.past) return;
     const when = new Date(state.past.at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });

@@ -363,6 +363,8 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(ids['past-bar'].textContent.startsWith('Viewing '));
  assert.ok(ids['past-bar'].textContent.includes('4m ago'));
  assert.ok(ids['past-bar'].textContent.includes('⟲ back to live'));
+ assert.equal(ids.connection.textContent, 'past · not live');
+ assert.ok(ids.counts.textContent.includes('at '));
  assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan']);
  assert.ok(rows()[0].textContent.includes('Earlier step'));
  assert.equal(control('open-app').disabled, true);
@@ -376,6 +378,8 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  flatten(ids['past-bar']).find(x => x.tagName === 'button').listeners.click(); await tick();
  assert.equal(ids['past-bar'].hidden, true);
  assert.ok(rows().length > 1);
+ assert.equal(ids.connection.textContent, 'live');
+ assert.ok(!ids.counts.textContent.includes('at '));
  assert.equal(control('open-app').disabled, undefined);
  // L returns to live, and so does the newest bar.
  cols()[10].listeners.click(); await tick();
