@@ -29,7 +29,7 @@ class StaticTests(unittest.TestCase):
     def test_assets_are_local_and_required_controls_exist(self):
         parser = Assets()
         parser.feed((STATIC / "index.html").read_text())
-        self.assertEqual(set(parser.references), {"/style.css", "/app.js"})
+        self.assertEqual(set(parser.references), {"/favicon.svg", "/style.css", "/app.js"})
         self.assertTrue(
             {
                 "runs",

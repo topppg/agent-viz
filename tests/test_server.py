@@ -60,7 +60,7 @@ class ServerTests(unittest.TestCase):
         )
 
     def test_health_assets_and_empty_snapshot(self):
-        for path in ("/", "/app.js", "/style.css", "/api/health", "/api/snapshot"):
+        for path in ("/", "/app.js", "/style.css", "/favicon.svg", "/api/health", "/api/snapshot"):
             status, headers, data = self.request("GET", path)
             self.assertEqual(status, 200, path)
             self.assertEqual(headers["Cache-Control"], "no-store")

@@ -273,12 +273,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "invalid event query"})
                 return
             self._json(200, data)
-        elif path in {"/", "/app.js", "/style.css"}:
-            name = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}[path]
+        elif path in {"/", "/app.js", "/style.css", "/favicon.svg"}:
+            name = "index.html" if path == "/" else path[1:]
             content_types = {
                 "index.html": "text/html; charset=utf-8",
                 "app.js": "text/javascript; charset=utf-8",
                 "style.css": "text/css; charset=utf-8",
+                "favicon.svg": "image/svg+xml",
             }
             try:
                 data = (STATIC / name).read_bytes()
