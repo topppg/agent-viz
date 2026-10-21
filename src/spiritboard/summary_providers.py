@@ -193,9 +193,9 @@ class SummaryProviders:
         return {
             "available": available,
             "connected": connected and name not in self._blocked,
-            "pending": name in self._pending
-            and (state.get("pending") is True or name in self._completing),
+            "pending": name in self._pending,
             "error": error,
+            "revocation_unconfirmed": state.get("revocation_unconfirmed") is True,
             "model": _MODELS[name],
             **({"effort": "medium"} if name == "codex" else {}),
         }

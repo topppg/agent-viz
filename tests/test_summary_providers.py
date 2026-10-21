@@ -202,6 +202,35 @@ class ProviderTests(unittest.TestCase):
             exchange.assert_called_once()
         self.assertEqual(self.providers.routes(), ["openrouter"])
 
+    def test_expired_provider_flow_still_exposes_manager_cancel_state(self) -> None:
+        with patch("spiritboard.openrouter_auth.time.monotonic", return_value=100):
+            self.providers.begin("openrouter", _CALLBACK)
+        with patch("spiritboard.openrouter_auth.time.monotonic", return_value=701):
+            self.assertTrue(self.providers.public_state()["providers"]["openrouter"]["pending"])
+        self.providers.disconnect("openrouter")
+        self.assertFalse(self.providers.public_state()["providers"]["openrouter"]["pending"])
+
+    def test_revocation_warning_is_allowlisted_without_upstream_details(self) -> None:
+        self.providers.start()
+        state = self.codex.public_state()
+        state.update(
+            {
+                "revocation_unconfirmed": True,
+                "error": "upstream private credential text",
+                "refresh_token": "must-not-leak",
+            }
+        )
+        with patch.object(self.codex, "public_state", return_value=state):
+            public = self.providers.public_state()
+        self.assertTrue(public["providers"]["codex"]["revocation_unconfirmed"])
+        self.assertNotIn("private credential", json.dumps(public))
+        self.assertNotIn("must-not-leak", json.dumps(public))
+        state["revocation_unconfirmed"] = "true"
+        with patch.object(self.codex, "public_state", return_value=state):
+            self.assertFalse(
+                self.providers.public_state()["providers"]["codex"]["revocation_unconfirmed"]
+            )
+
     def test_failed_disconnect_is_tombstoned_before_teardown_and_survives_restart(self) -> None:
         self.codex.connected = True
         self.providers.start()
