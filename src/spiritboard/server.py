@@ -5,6 +5,8 @@ from __future__ import annotations
 import hmac
 import json
 import re
+import socket
+import sys
 import threading
 import time
 import uuid
@@ -22,7 +24,8 @@ FOCUS_ROUTE = re.compile(r"/api/runs/([^/]{1,768})/focus")
 
 class Collector(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    # On Windows SO_REUSEADDR lets a second socket bind a listening port; bind exclusively.
+    allow_reuse_address = sys.platform != "win32"
 
     def __init__(
         self,
@@ -49,6 +52,8 @@ class Collector(ThreadingHTTPServer):
 
     def server_bind(self) -> None:
         # HTTPServer's reverse-DNS lookup can stall; this server only binds numeric loopback.
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         TCPServer.server_bind(self)
         self.server_name, self.server_port = self.server_address[:2]
 

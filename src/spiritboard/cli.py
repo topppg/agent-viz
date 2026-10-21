@@ -18,7 +18,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from . import __version__
-from .launcher import Instance, LaunchError, default_data_dir
+from .launcher import Instance, LaunchError, default_data_dir, running_url
 from .server import Collector
 from .sources import discover_profiles, load_profiles
 from .store import Store
@@ -86,8 +86,8 @@ def serve_dashboard(args: argparse.Namespace) -> int:
         if profiles is not None
         else None
     )
+    discovery = profiles is None and not args.no_discovery and not args.demo
     settings = {
-        "port": args.port,
         "demo": args.demo,
         "no_discovery": args.no_discovery,
         "watch": args.watch,
@@ -103,13 +103,15 @@ def serve_dashboard(args: argparse.Namespace) -> int:
         "demo_delay": args.demo_delay,
         "limit_per_profile": args.limit_per_profile,
         "max_age_days": args.max_age_days,
-        "codex_home": os.environ.get("CODEX_HOME"),
-        "claude_config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
+        # Discovery selectors only matter when discovery runs.
+        "codex_home": os.environ.get("CODEX_HOME") if discovery else None,
+        "claude_config_dir": os.environ.get("CLAUDE_CONFIG_DIR") if discovery else None,
     }
     with ExitStack() as resources:
         instance = resources.enter_context(Instance(args.data_dir, settings))
         if not instance.owner:
-            url = instance.existing_url()
+            # Port 0 asks for any free port, so it never pins the running board's port.
+            url = instance.existing_url(port=args.port or None)
             print(f"Spiritboard is already running: {url}", flush=True)
             open_dashboard(url, enabled=not args.no_open)
             return 0
@@ -118,16 +120,25 @@ def serve_dashboard(args: argparse.Namespace) -> int:
         store = Store(args.data_dir / "events.sqlite3", stale_after=args.stale_after)
         resources.callback(store.close)
         # Bind before scanning any native sources or starting optional API calls.
+        token = token_for(args.data_dir)
         try:
-            server = Collector(
-                store, token_for(args.data_dir), port=8766 if args.port is None else args.port
-            )
+            server = Collector(store, token, port=8766 if args.port is None else args.port)
         except OSError as error:
             if args.port is not None or error.errno != errno.EADDRINUSE:
                 raise
-            server = Collector(store, token_for(args.data_dir), port=0)
+            server = Collector(store, token, port=0)
         resources.callback(server.server_close)
         resources.callback(server.stopping.set)
+        # Serve and publish before the first scan, so a second launch can verify this board
+        # within its startup wait even when the scan is slow.
+        threading.Thread(
+            target=server.serve_forever,
+            kwargs={"poll_interval": 0.2},
+            name="spiritboard-http",
+            daemon=True,
+        ).start()
+        resources.callback(server.shutdown)
+        instance.publish(server.url, server.instance_id)
         monitor = None
         if args.config or args.watch or (not args.no_discovery and not args.demo):
             from .monitor import Monitor
@@ -157,7 +168,6 @@ def serve_dashboard(args: argparse.Namespace) -> int:
             monitor.start()
         if summarizer:
             summarizer.start()
-        instance.publish(server.url, server.instance_id)
         print(f"Spiritboard local dashboard: {server.url}", flush=True)
         print("Read-only native observation; Ctrl-C stops only this dashboard.", flush=True)
         if monitor:
@@ -194,7 +204,8 @@ def serve_dashboard(args: argparse.Namespace) -> int:
             daemon=True,
         ).start()
         try:
-            server.serve_forever(poll_interval=0.2)
+            while not server.stopping.wait(1):
+                pass
         except KeyboardInterrupt:
             pass
     return 0
@@ -259,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         help="select an exact discovered profile label; repeat for several",
     )
     demo = sub.add_parser("demo", help="send a synthetic scenario to an existing local collector")
-    demo.add_argument("--url", default="http://127.0.0.1:8766")
+    demo.add_argument("--url", help="collector URL; default: the dashboard running on --data-dir")
     demo.add_argument("--data-dir", type=Path)
     demo.add_argument("--delay", type=float, default=0.5)
     prune = sub.add_parser(
@@ -301,7 +312,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "demo":
             from .demo import run_demo
 
-            result = run_demo(args.url, token_for(args.data_dir), args.delay)
+            url = args.url or running_url(args.data_dir)
+            result = run_demo(url, token_for(args.data_dir), args.delay)
             print(
                 json.dumps(
                     {"runs": result["runs"], "delivered": result["delivered"], "synthetic": True}
@@ -311,6 +323,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "prune":
             if not math.isfinite(args.older_than_days) or args.older_than_days <= 0:
                 raise ValueError("retention period must be positive")
+            history = args.data_dir / "events.sqlite3"
+            if not history.is_file() and not (args.data_dir / "instance.lock").is_file():
+                raise LaunchError("No dashboard history exists in that --data-dir.")
             with Instance(args.data_dir, {"operation": "prune"}) as instance:
                 if not instance.owner:
                     raise LaunchError("Stop the dashboard before pruning its local history.")

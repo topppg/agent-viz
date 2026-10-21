@@ -144,11 +144,12 @@ A small SDK lets any Python agent report runs, subagents, activity and tool call
 to the same board:
 
 ```python
-from spiritboard.launcher import default_data_dir
+from spiritboard.launcher import default_data_dir, running_url
 from spiritboard.sdk import Client
 
-token = (default_data_dir() / "token").read_text().strip()
-with Client("http://127.0.0.1:8766", token, account="example") as client:
+data = default_data_dir()
+token = (data / "token").read_text().strip()
+with Client(running_url(data), token, account="example") as client:
     with client.run("Coordinator", "Inspect an invented change") as root:
         with root.child("Reviewer", "Check the example") as child:
             child.activity("Checking the invented test fixture")
@@ -159,8 +160,9 @@ with Client("http://127.0.0.1:8766", token, account="example") as client:
     print("Delivered:", delivered, client.diagnostics)
 ```
 
-Start `spiritboard --no-discovery --port 8766` first (SDK only). If you choose
-another port or data directory, use that URL and token path. Use `heartbeat()` during
+Start `spiritboard` first; `running_url` finds it on whichever port it bound. With
+another `--data-dir`, pass that directory instead. `spiritboard demo` uses the same
+lookup to send its synthetic scenario to the running board. Use `heartbeat()` during
 long quiet work. Failed delivery never changes your application's result; check
 `flush()` and `diagnostics` to detect loss.
 

@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 _STARTUP_WAIT = 5.0
+_REPLACE_ATTEMPTS = 20
 _POLL_INTERVAL = 0.1
 _PROBE_TIMEOUT = 0.5
 _MAX_METADATA = 8192
@@ -22,6 +23,16 @@ _MAX_METADATA = 8192
 
 class LaunchError(Exception):
     """A launch failure whose message is safe to show without local details."""
+
+
+def running_url(directory: Path) -> str:
+    """URL of the verified dashboard that owns ``directory``; never creates the directory."""
+    if not (Path(directory) / "instance.lock").is_file():
+        raise LaunchError("No dashboard is running with this data directory. Start one first.")
+    with Instance(directory, {}) as instance:
+        if instance.owner:
+            raise LaunchError("No dashboard is running with this data directory. Start one first.")
+        return instance.existing_url(match_settings=False)
 
 
 def default_data_dir(*, demo: bool = False) -> Path:
@@ -261,7 +272,14 @@ class Instance:
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, self.directory / "instance.json")
+            for attempt in range(_REPLACE_ATTEMPTS):
+                try:
+                    os.replace(temporary, self.directory / "instance.json")
+                    break
+                except PermissionError:
+                    if attempt == _REPLACE_ATTEMPTS - 1:
+                        raise
+                    time.sleep(_POLL_INTERVAL)
             self._instance_id = instance_id
         except OSError:
             raise LaunchError("Dashboard connection details could not be stored safely.") from None
@@ -269,7 +287,7 @@ class Instance:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
 
-    def existing_url(self) -> str:
+    def existing_url(self, *, match_settings: bool = True, port: int | None = None) -> str:
         """Return an existing dashboard only after matching its private instance identity."""
         if self._descriptor is None or self.owner:
             raise LaunchError("There is no other dashboard instance to reuse.")
@@ -277,15 +295,20 @@ class Instance:
         while time.monotonic() < deadline:
             try:
                 metadata = self._metadata()
-                url, port = _validated_url(metadata.get("url"))
+                url, instance_port = _validated_url(metadata.get("url"))
                 instance_id = str(metadata["instance_id"])
                 settings = json.dumps(metadata.get("settings"), sort_keys=True, allow_nan=False)
                 timeout = min(_PROBE_TIMEOUT, max(0.001, deadline - time.monotonic()))
-                verified = _health_matches(port, instance_id, timeout)
+                verified = _health_matches(instance_port, instance_id, timeout)
             except (LaunchError, OSError, ValueError, TypeError):
                 verified = False
             if verified:
-                if settings != self._settings:
+                if port is not None and port != instance_port:
+                    raise LaunchError(
+                        f"This data directory's dashboard runs on port {instance_port}, "
+                        f"not {port}. Use that port, stop it first, or choose another --data-dir."
+                    )
+                if match_settings and settings != self._settings:
                     raise LaunchError(
                         "A dashboard already uses this data directory with different options. "
                         "Use its existing options, stop it first, or choose another --data-dir."

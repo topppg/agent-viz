@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from spiritboard.launcher import Instance, LaunchError, default_data_dir
+from spiritboard.launcher import Instance, LaunchError, default_data_dir, running_url
 
 
 @contextlib.contextmanager
@@ -169,6 +169,24 @@ class InstanceTests(unittest.TestCase):
                         self.assertEqual(client.existing_url(), url)
                 self.assertEqual(server.paths, ["/api/health"])
                 self.assertTrue((self.directory / "instance.json").exists())
+
+    def test_requested_port_must_match_and_demo_lookup_ignores_settings(self):
+        with health_server(self.instance_id) as (server, url):
+            with Instance(self.directory, self.settings) as owner:
+                owner.publish(url, self.instance_id)
+                port = int(url.rsplit(":", 1)[1])
+                with Instance(self.directory, self.settings) as client:
+                    self.assertEqual(client.existing_url(port=port), url)
+                with Instance(self.directory, self.settings) as client:
+                    with self.assertRaisesRegex(LaunchError, f"runs on port {port}"):
+                        client.existing_url(port=port + 1)
+                self.assertEqual(running_url(self.directory), url)
+
+    def test_running_url_never_creates_a_missing_directory(self):
+        missing = Path(self.temporary.name) / "missing"
+        with self.assertRaisesRegex(LaunchError, "No dashboard is running"):
+            running_url(missing)
+        self.assertFalse(missing.exists())
 
     def test_settings_conflict_does_not_reuse_or_remove_owner_state(self):
         with health_server(self.instance_id) as (_, url):
