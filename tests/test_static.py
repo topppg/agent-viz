@@ -106,7 +106,7 @@ const runs = [run('child','root','Child'), run('root',null,'Root'), run('ask','r
   run('done',null,'Finished',{state:'completed',summary:'All good',health:'unknown'}), run('ancient',null,'Ancient',{last_seen:old,health:'stale'}),
   {...run('sdk-run',null,'SDK worker'),session_id:'s1',source:'sdk',account:'demo',inferred:false,health:'fresh'}];
 const snapshot = { stream_id:'journal-a', cursor:1, runs, server_time:now, stale_after_seconds:15,
-  profiles:[{id:'codex-work',kind:'codex',label:'work'},{id:'claude-personal',kind:'claude',label:'personal'},{id:'codex-empty',kind:'codex',label:'Empty profile'}],
+  profiles:[{id:'codex-work',kind:'codex',label:'work'},{id:'claude-personal',kind:'claude',label:'personal'},{id:'codex-empty',kind:'codex',label:'Empty profile'},{id:'grokbot-mac',kind:'grokbot',label:'Grok Bot'},{id:'dsh-home',kind:'dsh',label:'DeepSeek Harness'}],
   source_errors:{unavailable:'Source unavailable'}, ai:{enabled:true,status:'ready',calls:2,actual_cost_usd:.0021,known_cost_usd:.0021,unknown_cost_calls:0,summaries:[]},
   activity:{bucket_seconds:10,buckets:60,end:now,runs:{root:[...new Array(59).fill(0),40],'sdk-run':[...new Array(54).fill(0),1,1,1,1,1,2]}} };
 const pastIso = new Date(Date.parse(now) - 290000).toISOString();
@@ -149,10 +149,13 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  const harnessButtons = ids.harnesses.children.filter(x => x.tagName === 'button');
  assert.equal(harnessButtons.length, 3);
  assert.ok(!ids.harnesses.textContent.includes('Empty profile'));
- assert.ok(ids.harnesses.textContent.includes('1 idle harness · pick one in the harness filter'));
- assert.ok(harnessButtons.find(b => b.textContent.includes('codex · work')).textContent.includes('▲ noisy'));
+ // Labels that already name the tool are not prefixed with its kind.
+ assert.ok([...ids['harness-filter'].children].some(o => o.textContent === 'Grok Bot'));
+ assert.ok(![...ids['harness-filter'].children].some(o => /grokbot ·|dsh ·/.test(o.textContent)));
+ assert.ok(ids.harnesses.textContent.includes('3 idle harnesses · pick one in the harness filter'));
+ assert.ok(harnessButtons.find(b => b.textContent.includes('Codex · work')).textContent.includes('▲ noisy'));
  assert.ok(ids.flux.children.some(x => x.className === 'col'));
- assert.ok(ids.flux.attrs['aria-label'].includes('codex · work'));
+ assert.ok(ids.flux.attrs['aria-label'].includes('Codex · work'));
  assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 API calls'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
  // Header sorting reverses on a second click and keeps children with their parent.
@@ -179,7 +182,7 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.equal(headers.status.attrs['aria-pressed'], 'false');
  assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask','child','orphan','sdk-run']);
  // Harness filter.
- harnessButtons.find(b => b.textContent.includes('claude · personal')).listeners.click();
+ harnessButtons.find(b => b.textContent.includes('Claude · personal')).listeners.click();
  assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan']);
  ids['harness-filter'].value = ''; ids['harness-filter'].listeners.change();
  // Views.
@@ -213,7 +216,7 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  const after = ids.runs.children.indexOf(rows().find(r => r.dataset.runId === 'orphan')) + 1;
  assert.equal(ids.runs.children[after], detail());
  assert.ok(detail().textContent.includes('Original task'));
- assert.ok(detail().textContent.includes('claude · personal'));
+ assert.ok(detail().textContent.includes('Claude · personal'));
  assert.ok(detail().textContent.includes('not yet available'));
  assert.ok(requests.includes('/api/runs/orphan/events?after=0&limit=100'));
  // A live session offers to open its app; the POST carries the custom header.
@@ -329,7 +332,7 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(deskRow.textContent.includes('Desktop title'));
  assert.ok(!deskRow.textContent.includes('Old generated title'));
  assert.ok(flatten(deskRow).some(x => x.className === 'note' && x.textContent === 'Claude desktop'));
- assert.equal(flatten(deskRow).find(x => (x.className || '').includes('harness-cell')).title, 'claude · personal · Claude desktop');
+ assert.equal(flatten(deskRow).find(x => (x.className || '').includes('harness-cell')).title, 'Claude · personal · Claude desktop');
  assert.equal(rows().find(r => r.dataset.runId === 'shelved'), undefined);
  assert.ok(ids.counts.textContent.includes('1 needs you'));
  deskRow.listeners.click(); await tick();
