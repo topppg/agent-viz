@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="350" viewBox="0 0 1000 350" role="img" aria-labelledby="title description">
+  <title id="title">Spiritboard's local architecture</title>
+  <desc id="description">Read-only harness files and optional SDK events enter a local collector and SQLite history. The browser dashboard connects over loopback. Only explicitly enabled summaries send context to a chosen external provider.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#b79cff"/></marker>
+  </defs>
+  <rect width="1000" height="350" rx="14" fill="#0d0b14"/>
+  <g fill="#14111e" stroke="#56446e" stroke-width="1.5">
+    <rect x="24" y="36" width="232" height="66" rx="8"/>
+    <rect x="24" y="154" width="232" height="66" rx="8"/>
+    <rect x="365" y="92" width="248" height="84" rx="8"/>
+    <rect x="742" y="100" width="232" height="66" rx="8"/>
+    <rect x="365" y="264" width="248" height="62" rx="8" stroke-dasharray="5 4"/>
+  </g>
+  <g fill="none" stroke="#b79cff" stroke-width="1.5" marker-end="url(#arrow)">
+    <path d="M 256 69 H 304 V 116 H 365"/>
+    <path d="M 256 187 H 304 V 152 H 365"/>
+    <path d="M 613 133 H 742"/>
+    <path d="M 489 176 V 264" stroke-dasharray="5 5" marker-start="url(#arrow)"/>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">
+    <g fill="#ece8f6" font-size="17">
+      <text x="140" y="64">Harness files</text>
+      <text x="140" y="181">SDK events</text>
+      <text x="489" y="126">Local collector</text>
+      <text x="858" y="139">Browser dashboard</text>
+      <text x="489" y="302">Summary provider</text>
+    </g>
+    <g fill="#bdb5d0" font-size="13">
+      <text x="140" y="86">across storage profiles</text>
+      <text x="140" y="203">optional, local only</text>
+      <text x="489" y="151">+ SQLite history</text>
+      <text x="308" y="50">read-only</text>
+      <text x="307" y="218">local events</text>
+      <text x="678" y="115">loopback</text>
+    </g>
+    <text x="632" y="218" fill="#f5a3e0" font-size="13">explicit opt-in only</text>
+    <text x="632" y="239" fill="#9a93ad" font-size="12">context out / summaries back</text>
+  </g>
+</svg>
