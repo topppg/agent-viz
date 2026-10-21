@@ -302,7 +302,7 @@ class Summarizer:
             if self.status == "stopped":
                 self.status = "ready"
             self.thread = threading.Thread(
-                target=self._loop, name="agent-viz-summaries", daemon=True
+                target=self._loop, name="spiritboard-summaries", daemon=True
             )
             self.thread.start()
 

@@ -118,7 +118,7 @@ class Monitor:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="agent-viz-sources", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="spiritboard-sources", daemon=True)
         self._thread.start()
 
     def _run(self) -> None:

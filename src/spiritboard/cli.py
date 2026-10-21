@@ -66,7 +66,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     serve = sub.add_parser("serve", help="start the loopback-only dashboard")
     serve.add_argument("--port", type=int, default=8766)
-    serve.add_argument("--data-dir", type=Path, default=Path(".agent-viz/local"))
+    serve.add_argument("--data-dir", type=Path, default=Path(".spiritboard/local"))
     serve.add_argument(
         "--watch", action="store_true", help="observe discovered native profile files read-only"
     )
@@ -113,12 +113,12 @@ def main(argv=None):
     )
     demo = sub.add_parser("demo", help="send a synthetic scenario to an existing local collector")
     demo.add_argument("--url", default="http://127.0.0.1:8766")
-    demo.add_argument("--data-dir", type=Path, default=Path(".agent-viz/local"))
+    demo.add_argument("--data-dir", type=Path, default=Path(".spiritboard/local"))
     demo.add_argument("--delay", type=float, default=0.5)
     prune = sub.add_parser(
         "prune", help="delete old observer history only; never native transcripts"
     )
-    prune.add_argument("--data-dir", type=Path, default=Path(".agent-viz/local"))
+    prune.add_argument("--data-dir", type=Path, default=Path(".spiritboard/local"))
     prune.add_argument("--older-than-days", type=float, required=True)
     args = parser.parse_args(argv)
     try:
@@ -210,7 +210,7 @@ def main(argv=None):
         server = Collector(
             store, token_for(args.data_dir), port=args.port, monitor=monitor, summarizer=summarizer
         )
-        print(f"Agent Viz local dashboard: {server.url}", flush=True)
+        print(f"Spiritboard local dashboard: {server.url}", flush=True)
         print("Read-only native observation; no login verification or remote control.", flush=True)
         if monitor:
             print(
@@ -239,7 +239,7 @@ def main(argv=None):
                 except Exception:
                     print("Synthetic demo failed; check local delivery diagnostics.", flush=True)
 
-            threading.Thread(target=emit_demo, name="agent-viz-demo", daemon=True).start()
+            threading.Thread(target=emit_demo, name="spiritboard-demo", daemon=True).start()
         try:
             server.serve_forever(poll_interval=0.2)
         except KeyboardInterrupt:
@@ -256,6 +256,7 @@ def main(argv=None):
     except (ValueError, OSError, TypeError):
         # Error strings from source files can contain private paths/content.
         print(
-            "Unable to start or configure Agent Viz. Check local paths, port, and argument values."
+            "Unable to start or configure Spiritboard. "
+            "Check local paths, port, and argument values."
         )
         return 1

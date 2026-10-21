@@ -1,6 +1,6 @@
 # Optional goal summaries
 
-With `--summaries`, Agent Viz shows one line per active session describing the
+With `--summaries`, Spiritboard shows one line per active session describing the
 **overall problem or goal** it is working on, not its latest step. Summaries do
 not establish whether an agent is alive or whether its work succeeded; the
 dashboard keeps the original status evidence next to them.
@@ -45,7 +45,7 @@ provider. Enabling summaries authorizes excerpts independently of the local
 
 The provider is told to treat all excerpts as untrusted data. Replies must be
 JSON with exactly the requested IDs; only plain text up to 160 characters is kept.
-Agent Viz never executes provider output or changes the original task or status.
+Spiritboard never executes provider output or changes the original task or status.
 
 ## Cost reporting
 
@@ -62,13 +62,13 @@ text. Keep it inside the ignored local data directory.
 ## Python integration
 
 ```python
-from agent_viz.summaries import Summarizer
+from spiritboard.summaries import Summarizer
 
 summaries = Summarizer(
     profiles_provider=lambda: profiles,
     store=store,
     api_key=key_loaded_securely_by_the_application,
-    state_path=".agent-viz/summaries.sqlite3",
+    state_path=".spiritboard/summaries.sqlite3",
 )
 summaries.start()
 summaries.stop()

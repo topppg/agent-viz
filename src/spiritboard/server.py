@@ -196,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _focus(self, run_id: str):
         # A custom header forces a CORS preflight, which this server never grants.
-        if not self.headers.get("Origin") or self.headers.get("X-Agent-Viz") != "focus":
+        if not self.headers.get("Origin") or self.headers.get("X-Spiritboard") != "focus":
             self.close_connection = True
             self._json(403, {"error": "same-origin dashboard request required"})
             return
@@ -232,7 +232,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, self.server.focus_target(run_id).public())
         elif path == "/api/health":
-            self._json(200, {"ok": True, "service": "agent-viz", "version": 1})
+            self._json(200, {"ok": True, "service": "spiritboard", "version": 1})
         elif path == "/api/snapshot":
             self._json(200, self.server.snapshot())
         elif path == "/api/events":

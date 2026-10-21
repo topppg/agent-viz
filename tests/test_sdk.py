@@ -5,7 +5,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from agent_viz.sdk import Client
+from spiritboard.sdk import Client
 
 
 class CaptureServer:

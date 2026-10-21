@@ -11,8 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
-from agent_viz.sources import SourceProfile, codex_titles
-from agent_viz.summaries import (
+from spiritboard.sources import SourceProfile, codex_titles
+from spiritboard.summaries import (
     MODEL,
     Summarizer,
     _clean,
@@ -81,8 +81,8 @@ class SummariesTests(unittest.TestCase):
         path = self.root / "session_index.jsonl"
         os.mkfifo(path)
         code = (
-            "import sys; from agent_viz.sources import SourceProfile; "
-            "from pathlib import Path; from agent_viz.sources import codex_titles; "
+            "import sys; from spiritboard.sources import SourceProfile; "
+            "from pathlib import Path; from spiritboard.sources import codex_titles; "
             "assert codex_titles(Path(sys.argv[1])) == {}"
         )
         result = subprocess.run(
@@ -115,10 +115,10 @@ class SummariesTests(unittest.TestCase):
         opened = MagicMock()
         opened.__enter__.return_value = stream
         with (
-            patch("agent_viz.sources.os.open", return_value=123) as open_file,
-            patch("agent_viz.sources.os.fdopen", return_value=opened),
+            patch("spiritboard.sources.os.open", return_value=123) as open_file,
+            patch("spiritboard.sources.os.fdopen", return_value=opened),
             patch(
-                "agent_viz.sources.os.fstat",
+                "spiritboard.sources.os.fstat",
                 return_value=SimpleNamespace(st_mode=stat.S_IFIFO, st_size=100),
             ),
         ):
@@ -140,7 +140,7 @@ class SummariesTests(unittest.TestCase):
 
     def test_success_actual_cost_and_opaque_ids(self):
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", return_value=self.response()) as request:
+        with patch("spiritboard.summaries._request", return_value=self.response()) as request:
             instance.tick()
         state = instance.public_state()
         self.assertEqual(state["calls"], 1)
@@ -156,7 +156,7 @@ class SummariesTests(unittest.TestCase):
 
     def test_unchanged_context_never_repolled(self):
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", return_value=self.response()) as request:
+        with patch("spiritboard.summaries._request", return_value=self.response()) as request:
             instance.tick()
             self.age_calls(instance)
             instance.tick()
@@ -165,7 +165,7 @@ class SummariesTests(unittest.TestCase):
 
     def test_minimum_interval_even_changed_text(self):
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", return_value=self.response()) as request:
+        with patch("spiritboard.summaries._request", return_value=self.response()) as request:
             instance.tick()
             self.store.snapshot.return_value["runs"][0]["task"] = "Write a regression test"
             instance.tick()
@@ -181,7 +181,7 @@ class SummariesTests(unittest.TestCase):
 
     def test_progress_alone_never_regenerates(self):
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", return_value=self.response()) as request:
+        with patch("spiritboard.summaries._request", return_value=self.response()) as request:
             instance.tick()
             self.age_calls(instance)
             instance.db.execute("UPDATE summaries SET generated_at='2020-01-01T00:00:00+00:00'")
@@ -199,7 +199,7 @@ class SummariesTests(unittest.TestCase):
                 self.make_run(last_seen="2000-01-01T00:00:00Z"),
             ]
         }
-        with patch("agent_viz.summaries._request") as request:
+        with patch("spiritboard.summaries._request") as request:
             instance.tick()
         request.assert_not_called()
 
@@ -233,7 +233,7 @@ class SummariesTests(unittest.TestCase):
         response = self.response(
             json.dumps({"r1": "Checking /Users/private/work for me@example.org " + secret})
         )
-        with patch("agent_viz.summaries._request", return_value=response) as request:
+        with patch("spiritboard.summaries._request", return_value=response) as request:
             instance.tick()
         sent = json.dumps(request.call_args.args[1])
         shown = json.dumps(instance.public_state())
@@ -247,7 +247,7 @@ class SummariesTests(unittest.TestCase):
     def test_timeout_records_unknown_cost_without_blocking(self):
         instance = self.summarizer()
         with patch(
-            "agent_viz.summaries._request", side_effect=TimeoutError("SECRET provider body")
+            "spiritboard.summaries._request", side_effect=TimeoutError("SECRET provider body")
         ) as request:
             instance.tick()
             self.age_calls(instance)
@@ -265,7 +265,7 @@ class SummariesTests(unittest.TestCase):
 
     def test_missing_cost_not_zero_and_paused(self):
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", return_value=self.response(cost=None)):
+        with patch("spiritboard.summaries._request", return_value=self.response(cost=None)):
             instance.tick()
         state = instance.public_state()
         self.assertIsNone(state["actual_cost_usd"])
@@ -276,13 +276,13 @@ class SummariesTests(unittest.TestCase):
         for cost in (True, float("nan"), float("inf"), -1, "0.001"):
             with self.subTest(cost=cost):
                 instance = self.summarizer()
-                with patch("agent_viz.summaries._request", return_value=self.response(cost=cost)):
+                with patch("spiritboard.summaries._request", return_value=self.response(cost=cost)):
                     instance.tick()
                 self.assertIsNone(instance.public_state()["actual_cost_usd"])
 
     def test_invalid_content_still_accounts_for_charge(self):
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", return_value=self.response("not JSON")):
+        with patch("spiritboard.summaries._request", return_value=self.response("not JSON")):
             instance.tick()
         state = instance.public_state()
         self.assertEqual(state["status"], "error")
@@ -299,7 +299,7 @@ class SummariesTests(unittest.TestCase):
         ):
             with self.subTest(content=content):
                 instance = self.summarizer()
-                with patch("agent_viz.summaries._request", return_value=self.response(content)):
+                with patch("spiritboard.summaries._request", return_value=self.response(content)):
                     instance.tick()
                 self.assertEqual(instance.public_state()["summaries"], [])
                 self.assertAlmostEqual(instance.public_state()["actual_cost_usd"], 0.00012)
@@ -307,7 +307,7 @@ class SummariesTests(unittest.TestCase):
     def test_persistent_ledger_and_cache_without_raw_text(self):
         path = self.root / "summaries.sqlite3"
         instance = self.summarizer(state_path=path)
-        with patch("agent_viz.summaries._request", return_value=self.response()):
+        with patch("spiritboard.summaries._request", return_value=self.response()):
             instance.tick()
         instance.db.close()
         self.instances.remove(instance)
@@ -327,7 +327,7 @@ class SummariesTests(unittest.TestCase):
         second = self.summarizer(state_path=path)
         self.assertEqual(second.public_state()["unknown_cost_calls"], 1)
         self.assertIsNone(second.public_state()["actual_cost_usd"])
-        with patch("agent_viz.summaries._request") as request:
+        with patch("spiritboard.summaries._request") as request:
             second.tick()
         request.assert_not_called()
 
@@ -476,7 +476,7 @@ class SummariesTests(unittest.TestCase):
         connection.getresponse.return_value.status = 302
         connection.getresponse.return_value.read.return_value = b"SECRET provider error"
         with patch(
-            "agent_viz.summaries.http.client.HTTPSConnection", return_value=connection
+            "spiritboard.summaries.http.client.HTTPSConnection", return_value=connection
         ) as factory:
             with self.assertRaisesRegex(ValueError, "Provider response unavailable"):
                 _request("not-real", {}, 20)
@@ -497,14 +497,14 @@ class SummariesTests(unittest.TestCase):
     def test_stop_never_dispatches_again(self):
         instance = self.summarizer()
         instance.stop()
-        with patch("agent_viz.summaries._request") as request:
+        with patch("spiritboard.summaries._request") as request:
             instance.tick()
         request.assert_not_called()
 
     def test_duplicate_tick_ignored_while_busy(self):
         instance = self.summarizer()
         instance.tick_lock.acquire()
-        with patch("agent_viz.summaries._request") as request:
+        with patch("spiritboard.summaries._request") as request:
             instance.tick()
         instance.tick_lock.release()
         request.assert_not_called()
@@ -520,7 +520,7 @@ class SummariesTests(unittest.TestCase):
 
     def test_explicit_provider_zero_is_known_not_missing(self):
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", return_value=self.response(cost=0)):
+        with patch("spiritboard.summaries._request", return_value=self.response(cost=0)):
             instance.tick()
         self.assertEqual(instance.public_state()["actual_cost_usd"], 0)
         self.assertEqual(instance.public_state()["unknown_cost_calls"], 0)
@@ -531,7 +531,7 @@ class SummariesTests(unittest.TestCase):
 
     def test_sdk_summary_stale_immediately_when_task_changes(self):
         instance = self.summarizer()
-        with patch("agent_viz.summaries._request", return_value=self.response()):
+        with patch("spiritboard.summaries._request", return_value=self.response()):
             instance.tick()
         self.assertFalse(instance.public_state()["summaries"][0]["stale"])
         self.store.snapshot.return_value["runs"][0]["task"] = "A completely new task"
@@ -574,7 +574,7 @@ class SummariesTests(unittest.TestCase):
         profile = self.claude_profile(rows)
         instance = self.summarizer()
         instance.profiles_provider = lambda: [profile]
-        with patch("agent_viz.summaries._request") as request:
+        with patch("spiritboard.summaries._request") as request:
             instance.tick()
         request.assert_not_called()
         entry = instance.public_state()["summaries"][0]
@@ -610,7 +610,7 @@ class SummariesTests(unittest.TestCase):
         profile = self.claude_profile(rows)
         instance = self.summarizer()
         instance.profiles_provider = lambda: [profile]
-        with patch("agent_viz.summaries._request", return_value=self.response()) as request:
+        with patch("spiritboard.summaries._request", return_value=self.response()) as request:
             instance.tick()
         sent = json.loads(request.call_args.args[1]["messages"][1]["content"])["r1"]
         for part in (

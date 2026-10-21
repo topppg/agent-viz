@@ -465,7 +465,7 @@
   }
   async function openApp(id) {
     let ok = false;
-    try { ok = (await fetch(`/api/runs/${encodeURIComponent(id)}/focus`, { method: "POST", cache: "no-store", headers: { "X-Agent-Viz": "focus" } })).ok; } catch (_) { ok = false; }
+    try { ok = (await fetch(`/api/runs/${encodeURIComponent(id)}/focus`, { method: "POST", cache: "no-store", headers: { "X-Spiritboard": "focus" } })).ok; } catch (_) { ok = false; }
     if (id !== state.selected) return;
     state.targetNote = ok ? "opened" : "could not open"; renderDetail();
   }

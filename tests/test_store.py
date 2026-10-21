@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_viz.model import now
-from agent_viz.store import Store
+from spiritboard.model import now
+from spiritboard.store import Store
 
 
 def event(
@@ -149,7 +149,7 @@ class StoreTests(unittest.TestCase):
 
     def test_prune_never_orphans_retained_descendants_or_deletes_active_sdk(self):
         old = (datetime.now(UTC) - timedelta(days=10)).isoformat()
-        with patch("agent_viz.store.now", return_value=old):
+        with patch("spiritboard.store.now", return_value=old):
             self.store.ingest(event(run="old-done"))
             self.store.ingest(event(2, "run.finished", {"state": "completed"}, run="old-done"))
             self.store.ingest(event(3, run="old-parent"))
@@ -257,7 +257,7 @@ class StoreTests(unittest.TestCase):
 
     def test_staleness_does_not_invent_a_terminal_state(self):
         self.store.ingest(event())
-        with patch("agent_viz.store.time.time", return_value=self.store.started_at + 100):
+        with patch("spiritboard.store.time.time", return_value=self.store.started_at + 100):
             row = self.store.snapshot()["runs"][0]
         self.assertEqual(row["health"], "stale")
         self.assertEqual(row["state"], "working")
