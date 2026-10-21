@@ -150,6 +150,17 @@ class CodexConnectionTests(unittest.TestCase):
         self.assertEqual(self.connection.public_state()["model"], MODEL)
         self.assertEqual(self.connection.public_state()["effort"], EFFORT)
 
+    def test_start_does_not_require_posix_nonblocking_flag(self):
+        with patch.dict(os.__dict__):
+            os.__dict__.pop("O_NONBLOCK", None)
+            self.connection.start()
+            self.assertFalse(self.connection.public_state()["connected"])
+            self.assertIsNone(self.connection.public_state()["error"])
+            self.login()
+            self.connection.start()
+            self.assertTrue(self.connection.public_state()["connected"])
+            self.assertIsNone(self.connection.public_state()["error"])
+
     def test_login_uses_fresh_pkce_state_and_nonce_without_browser_or_tokens(self):
         first = self.connection.begin_login(CALLBACK)["auth_url"]
         pending = self.connection._pending.copy()

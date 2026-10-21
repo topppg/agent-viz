@@ -400,7 +400,13 @@ class CodexConnection:
         ):
             raise ValueError("Invalid private storage")
         try:
-            fd = os.open(self._path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_NONBLOCK", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_BINARY", 0)
+            )
+            fd = os.open(self._path, flags)
         except FileNotFoundError:
             return {}
         with os.fdopen(fd, "rb") as handle:
