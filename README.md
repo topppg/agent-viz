@@ -89,7 +89,7 @@ Do not record or share a live-source dashboard without reviewing its contents.
 
 ## What works now
 
-- Browser view: an agent table (status, tree, harness, current activity or goal
+- Browser view: an agent table (harness colour, status, tree, current activity or goal
   summary, events/min, last seen), per-harness event rates with a 10-minute
   stacked chart, active/needs-you/all views, harness filter, search and keyboard
   navigation. Clicking a row opens it in place: goal, current activity, request

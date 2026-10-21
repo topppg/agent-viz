@@ -345,7 +345,8 @@
     const harness = harnessOf(run);
     const harnessCell = node("span", null, "cell harness-cell");
     const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(harness.key);
-    harnessCell.append(swatch, node("span", harness.label, "cell"));
+    harnessCell.title = harness.label; harnessCell.setAttribute("aria-label", harness.label);
+    harnessCell.append(swatch);
     const doing = doingOf(run, status);
     const doingCell = node("span", null, `cell doing ${doing.cls}`);
     doingCell.append(node("span", `${doing.mark} `, `mark${doing.ai ? " ai" : ""}`), doing.text);
@@ -356,7 +357,7 @@
     rateCell.append(node("span", rate, "num"), bar);
     const last = node("span", seenText(run.last_seen), "cell");
     last.dataset.seen = run.last_seen || "";
-    button.append(statusCell, agent, harnessCell, doingCell, rateCell, last);
+    button.append(harnessCell, statusCell, agent, doingCell, rateCell, last);
     button.addEventListener("click", () => selectRun(state.selected === run.run_id ? null : run.run_id));
     return button;
   }
