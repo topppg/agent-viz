@@ -42,6 +42,32 @@ def default_data_dir(*, demo: bool = False) -> Path:
     return result / "demo" if demo else result
 
 
+def _private_directory(directory: Path) -> None:
+    missing: list[Path] = []
+    parent = directory
+    while True:
+        try:
+            parent.lstat()
+            break
+        except FileNotFoundError:
+            missing.append(parent)
+            parent = parent.parent
+    # pathlib's parents=True ignores mode for parents, so create every missing level ourselves.
+    for path in reversed(missing):
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+    actual = directory.lstat()
+    if not stat.S_ISDIR(actual.st_mode):
+        raise LaunchError("The dashboard data directory must not be a symbolic link.")
+    if os.name == "posix" and actual.st_mode & 0o077:
+        raise LaunchError(
+            "Dashboard data needs a private directory with owner-only permissions. "
+            "Choose another --data-dir or secure the existing directory first."
+        )
+
+
 def _regular_descriptor(path: Path, *, create: bool = False) -> int:
     flags = os.O_RDWR | os.O_CREAT if create else os.O_RDONLY
     flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
@@ -172,9 +198,7 @@ class Instance:
             raise LaunchError("The dashboard instance lock is already in use.")
         self._instance_id = None
         try:
-            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-            if not stat.S_ISDIR(self.directory.lstat().st_mode):
-                raise LaunchError("The dashboard data directory must not be a symbolic link.")
+            _private_directory(self.directory)
             self._descriptor = _regular_descriptor(self.directory / "instance.lock", create=True)
             self.owner = _lock(self._descriptor)
             return self

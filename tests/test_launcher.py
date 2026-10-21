@@ -78,6 +78,25 @@ class DataDirectoryTests(unittest.TestCase):
                 with patch.dict(os.environ, {"LOCALAPPDATA": configured}):
                     self.assertEqual(default_data_dir(), Path.home() / "AppData/Local/spiritboard")
 
+    @unittest.skipUnless(os.name == "posix", "POSIX directory permissions")
+    def test_demo_first_creates_private_live_root_and_all_missing_parents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            configured = Path(temporary) / "missing" / "data"
+            with patch("spiritboard.launcher.sys.platform", "linux"):
+                with patch.dict(os.environ, {"XDG_DATA_HOME": str(configured)}):
+                    live = default_data_dir()
+                    demo = default_data_dir(demo=True)
+                    previous_umask = os.umask(0o022)
+                    try:
+                        with Instance(demo, {"demo": True}) as instance:
+                            self.assertTrue(instance.owner)
+                        with Instance(live, {"demo": False}) as instance:
+                            self.assertTrue(instance.owner)
+                    finally:
+                        os.umask(previous_umask)
+                    for directory in (configured.parent, configured, live, demo):
+                        self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
+
 
 class InstanceTests(unittest.TestCase):
     def setUp(self):
@@ -115,6 +134,30 @@ class InstanceTests(unittest.TestCase):
         self.assertTrue((self.directory / "instance.lock").is_file())
         with Instance(self.directory, self.settings) as later:
             self.assertTrue(later.owner)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory permissions")
+    def test_existing_public_data_directory_is_rejected_without_chmod_or_new_files(self):
+        for permissions in (0o755, 0o750, 0o710, 0o705, 0o701):
+            with self.subTest(permissions=oct(permissions)):
+                self.directory.mkdir(mode=0o700, exist_ok=True)
+                self.directory.chmod(permissions)
+                with self.assertRaisesRegex(LaunchError, "private"):
+                    with Instance(self.directory, self.settings):
+                        self.fail("Nonprivate data directory was accepted")
+                self.assertEqual(stat.S_IMODE(self.directory.stat().st_mode), permissions)
+                self.assertEqual(list(self.directory.iterdir()), [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory permissions")
+    def test_existing_public_ancestor_is_not_modified(self):
+        ancestor = Path(self.temporary.name) / "shared"
+        ancestor.mkdir(mode=0o755)
+        ancestor.chmod(0o755)
+        selected = ancestor / "private" / "state"
+        with Instance(selected, self.settings) as instance:
+            self.assertTrue(instance.owner)
+        self.assertEqual(stat.S_IMODE(ancestor.stat().st_mode), 0o755)
+        self.assertEqual(stat.S_IMODE(selected.parent.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(selected.stat().st_mode), 0o700)
 
     def test_verified_existing_process_is_reused_without_proxy(self):
         with health_server(self.instance_id) as (server, url):
@@ -225,7 +268,7 @@ class InstanceTests(unittest.TestCase):
                             client.existing_url()
 
     def test_stale_marker_is_ignored_when_lock_can_be_owned(self):
-        self.directory.mkdir()
+        self.directory.mkdir(mode=0o700)
         self.write_marker("not valid metadata")
         with Instance(self.directory, self.settings) as owner:
             self.assertTrue(owner.owner)
@@ -279,7 +322,7 @@ class InstanceTests(unittest.TestCase):
 
     @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO support required")
     def test_special_lock_and_marker_never_block(self):
-        self.directory.mkdir()
+        self.directory.mkdir(mode=0o700)
         lock = self.directory / "instance.lock"
         os.mkfifo(lock, 0o600)
         with self.assertRaises(LaunchError):
@@ -296,7 +339,7 @@ class InstanceTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX permissions and links")
     def test_symbolic_link_and_hardlinked_lock_are_rejected_without_target_changes(self):
-        self.directory.mkdir()
+        self.directory.mkdir(mode=0o700)
         target = Path(self.temporary.name) / "target"
         target.write_text("do not change")
         target.chmod(0o600)
