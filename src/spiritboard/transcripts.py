@@ -28,6 +28,8 @@ MAX_SMALL_FILE = 64 * 1024
 TEXT_HIDDEN = "Text hidden · enable include_text for this profile"
 # Marks the unread middle of a long transcript between its header and tail rows.
 READ_GAP = "spiritboard.read_gap"
+# Text parts that carry instructions or app context, never the user's own words.
+WRAPPED = ("<", "# AGENTS.md", "# Files mentioned by the user", "# Context from my IDE setup")
 REQUEST_HEADING = re.compile(r"^## My request(?: for Codex)?:[ \t]*$", re.M)
 MAX_ENTRIES = 30_000
 MAX_DEPTH = 7
@@ -309,14 +311,20 @@ def request_text(message: object, limit: int = 160) -> str:
     _, fork, directive = value.partition("</fork-boilerplate>")
     if fork:
         value = re.sub(r"^\s*Your directive:\s*", "", directive)
-        return "" if value.lstrip().startswith(("<", "# AGENTS.md")) else safe(value, limit)
+        return "" if value.lstrip().startswith(WRAPPED) else safe(value, limit)
     kept = []
     for part in parts(message):
         # Codex apps put files, IDE or browser context first and the request under a heading.
         part = REQUEST_HEADING.split(part)[-1]
-        if not part.lstrip().startswith(("<", "# AGENTS.md")):
+        if not part.lstrip().startswith(WRAPPED):
             kept.append(part)
     return safe(" ".join(kept), limit)
+
+
+def reply_text(message: object, limit: int = 160) -> str:
+    """The agent's own prose; wrapped system notices and raw markup are not replies."""
+    value = text(message, limit)
+    return "" if value.startswith("<") else value
 
 
 def valid_cwd(value: object) -> str:

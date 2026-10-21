@@ -588,7 +588,16 @@ class SourcesTests(unittest.TestCase):
                 "## My request for Codex:\nfix the parser"
             ],
         }
-        expected = {"files": "Ship the CV", "browser": "merge it", "ide": "fix the parser"}
+        cases["split"] = [
+            "# Files mentioned by the user:\n\n## a.pdf: /private/SECRET/a.pdf\n",
+            "do it",
+        ]
+        expected = {
+            "files": "Ship the CV",
+            "browser": "merge it",
+            "ide": "fix the parser",
+            "split": "do it",
+        }
         for name, parts in cases.items():
             content = [{"type": "input_text", "text": part} for part in parts]
             message = {"type": "message", "role": "user", "content": content}
@@ -607,6 +616,46 @@ class SourcesTests(unittest.TestCase):
         rows = {row["native_id"]: row for row in scan_profile(profile)}
         self.assertEqual({name: rows[name]["task"] for name in cases}, expected)
         self.assertNotIn("SECRET", json.dumps(list(rows.values())))
+
+    def test_markup_is_not_a_reply_in_any_harness(self):
+        claude = self.profile("claude", "claude-markup", text=True)
+        base = {"sessionId": "same", "timestamp": "2026-10-20T08:00:00Z"}
+        self.log(
+            claude,
+            "p/session.jsonl",
+            [
+                {**base, "type": "user", "message": {"content": "Draft the page"}},
+                {**base, "type": "assistant", "message": {"content": "Writing the page"}},
+                {
+                    **base,
+                    "type": "assistant",
+                    "message": {
+                        "content": "<!doctype html><html></html>",
+                        "stop_reason": "end_turn",
+                    },
+                },
+            ],
+        )
+        self.assertEqual(scan_profile(claude)[0]["activity"], "Writing the page")
+        codex = self.profile("codex", "codex-markup", text=True)
+        rows = self.codex()[:1] + [
+            {
+                "type": "response_item",
+                "timestamp": "2026-10-20T08:00:01Z",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Writing the page"}],
+                },
+            },
+            {
+                "type": "event_msg",
+                "timestamp": "2026-10-20T08:00:02Z",
+                "payload": {"type": "task_complete", "last_agent_message": "<!doctype html>"},
+            },
+        ]
+        self.log(codex, "run.jsonl", rows)
+        self.assertEqual(scan_profile(codex)[0]["activity"], "Writing the page")
 
     def test_codex_inter_agent_messages_are_not_replies(self):
         profile = self.profile("codex", "codex-agents", text=True)

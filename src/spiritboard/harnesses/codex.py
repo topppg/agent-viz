@@ -24,9 +24,9 @@ from ..transcripts import (
     observation,
     records,
     redact,
+    reply_text,
     request_text,
     safe,
-    text,
     utc_time,
     valid_cwd,
     walk_jsonl,
@@ -119,7 +119,7 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 state, activity, evidence = "working", "Turn started", str(event)
             elif event in {"task_complete", "turn_complete", "turn_aborted"}:
                 # An idle session reads best as its last reply, when text is allowed.
-                reply = text(p.get("last_agent_message")) if profile.include_text else ""
+                reply = reply_text(p.get("last_agent_message")) if profile.include_text else ""
                 reply = reply or last_reply
                 state, evidence = "idle", str(event)
                 activity = reply or "Turn ended · session may resume"
@@ -152,8 +152,7 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 if profile.include_text and event == "message":
                     # Only the agent's own prose: agent_message items are routed between agents
                     # and wrapped system notices are not replies.
-                    reply = text(p.get("content"))
-                    last_reply = reply if reply and not reply.startswith("<") else last_reply
+                    last_reply = reply_text(p.get("content")) or last_reply
                 activity = last_reply or "Model activity recorded"
         if state and (stamp is None or last_state_time is None or stamp >= last_state_time):
             out.update(

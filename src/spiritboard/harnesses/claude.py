@@ -31,6 +31,7 @@ from ..transcripts import (
     observation,
     records,
     redact,
+    reply_text,
     request_text,
     safe,
     small_json,
@@ -145,7 +146,7 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 isinstance(x, dict) and x.get("type") == "tool_use" for x in content
             )
             if profile.include_text:
-                last_reply = text(content) or last_reply
+                last_reply = reply_text(content) or last_reply
             if stop in {"end_turn", "stop_sequence", "max_tokens"}:
                 state, evidence = "idle", "assistant stop_reason"
                 activity = last_reply or "Turn ended · session may resume"
