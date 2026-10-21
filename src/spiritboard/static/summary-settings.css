@@ -1,0 +1,36 @@
+.summary-settings {
+  width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 40px);
+  overflow-y: auto; padding: 26px; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--panel); color: var(--text); box-shadow: 0 24px 100px #0009;
+  font-family: var(--sans);
+}
+.summary-settings::backdrop { background: #08060dc9; backdrop-filter: blur(4px); }
+.summary-settings-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.summary-settings-head h2 { color: var(--brand); font-size: 22px; letter-spacing: -.02em; }
+.summary-settings-intro { margin-top: 12px; color: var(--soft); }
+.summary-settings-notice { margin-top: 18px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); font-size: 13px; }
+.summary-settings-error { margin-top: 12px; padding: 10px 12px; border: 1px solid #713940; border-radius: 7px; color: #ffb5b5; }
+.summary-settings-consent, .summary-settings-toggle { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; }
+.summary-settings-consent { font-size: 13px; color: var(--soft); }
+.summary-settings input[type="checkbox"] { flex: none; min-height: 0; margin-top: 4px; accent-color: var(--run); }
+.summary-settings-toggle { font-weight: 600; }
+.summary-settings-help { color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+.summary-settings-toggle + .summary-settings-help { margin-top: 8px; }
+.summary-settings-provider { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
+.summary-settings-provider h3 { margin: 0; font-size: 16px; color: var(--bright); }
+.summary-provider-status { margin-top: 5px; color: var(--muted); font-size: 13px; }
+.summary-provider-status[data-state="connected"] { color: var(--run); }
+.summary-provider-status[data-state="pending"] { color: var(--wait); }
+.summary-settings-model { margin-top: 8px; font-family: var(--mono); color: var(--brand); font-size: 11.5px; overflow-wrap: anywhere; }
+.summary-settings-provider .summary-settings-help { margin-top: 6px; }
+.summary-settings-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.summary-settings-actions button:first-child, .summary-settings-key button { border-color: #665288; background: #241b35; }
+.summary-settings-key { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 16px; }
+.summary-settings-key label, .summary-settings-key p { grid-column: 1 / -1; }
+.summary-settings-key label { font-size: 12.5px; color: var(--soft); }
+.summary-settings-key input { min-width: 0; background: var(--bg); }
+.summary-settings a { color: var(--brand); text-underline-offset: 3px; }
+@media (max-width: 480px) {
+  .summary-settings { padding: 18px; }
+  .summary-settings-key { grid-template-columns: minmax(0, 1fr); }
+}
