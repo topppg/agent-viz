@@ -52,17 +52,18 @@ class CliProcessTests(unittest.TestCase):
         self.addCleanup(self.stop, process)
         return process
 
-    def stop(self, process: subprocess.Popen) -> None:
+    def stop(self, process: subprocess.Popen) -> str:
         if process.poll() is None:
             if os.name == "posix":
                 process.send_signal(signal.SIGINT)
             else:
                 process.terminate()
         try:
-            process.communicate(timeout=5)
+            output, _ = process.communicate(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
-            process.communicate(timeout=2)
+            output, _ = process.communicate(timeout=2)
+        return output
 
     def request(self, url: str, path: str) -> tuple[int, bytes]:
         parsed = urlsplit(url)
@@ -76,6 +77,7 @@ class CliProcessTests(unittest.TestCase):
 
     def ready(self, process: subprocess.Popen, data: Path) -> dict:
         deadline = time.monotonic() + 8
+        last_error = "no response"
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 self.fail(f"Dashboard exited before readiness: {process.communicate()[0]}")
@@ -84,10 +86,11 @@ class CliProcessTests(unittest.TestCase):
                 status, body = self.request(metadata["url"], "/api/health")
                 if status == 200 and json.loads(body)["instance_id"] == metadata["instance_id"]:
                     return metadata
-            except (OSError, ValueError, KeyError):
-                pass
+            except (OSError, ValueError, KeyError) as error:
+                last_error = type(error).__name__
             time.sleep(0.05)
-        self.fail("Synthetic collector did not become ready")
+        output = self.stop(process)
+        self.fail(f"Synthetic collector did not become ready ({last_error}). Output: {output}")
 
     def test_default_storage_reuse_assets_conflict_prune_and_restart(self):
         arguments = ["--no-discovery", "--no-open", "--port", "0"]
