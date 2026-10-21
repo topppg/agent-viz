@@ -28,7 +28,7 @@ _PENDING_ERROR = "OpenRouter sign-in expired or was replaced. Please start sign-
 _KEY_ERROR = "Enter a valid OpenRouter API key."
 
 
-class ProviderAuthError(Exception):
+class ProviderAuthError(ValueError):
     """An authentication failure with a fixed, safe public message."""
 
 
@@ -274,6 +274,12 @@ class OpenRouterConnection:
             except (LaunchError, OSError):
                 self._error = _STORAGE_ERROR
                 raise ProviderAuthError(_STORAGE_ERROR) from None
+
+    def close(self) -> None:
+        """Cancel pending authorization without removing the saved connection."""
+        with self._lock:
+            self._generation += 1
+            self._pending = None
 
     def public_state(self) -> dict[str, object]:
         with self._lock:

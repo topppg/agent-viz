@@ -203,7 +203,7 @@ class OpenRouterTests(unittest.TestCase):
         self.assertNotIn("private upstream", json.dumps(self.connection.public_state()))
 
     def test_inflight_exchange_cannot_override_disconnect_new_begin_or_manual_key(self) -> None:
-        for change in ("disconnect", "begin", "set_key"):
+        for change in ("disconnect", "begin", "set_key", "close"):
             with self.subTest(change=change):
                 query = self.begin()
                 ready = threading.Event()
@@ -238,6 +238,8 @@ class OpenRouterTests(unittest.TestCase):
                         self.connection.set_key(replacement)
                     elif change == "begin":
                         self.begin()
+                    elif change == "close":
+                        self.connection.close()
                     else:
                         self.connection.disconnect()
                     release.set()
@@ -262,6 +264,15 @@ class OpenRouterTests(unittest.TestCase):
             self.assertFalse(self.connection.public_state()["pending"])
             transport.assert_not_called()
         self.assertFalse((self.directory / "auth/openrouter.json").exists())
+
+    def test_close_cancels_pending_without_deleting_saved_connection(self) -> None:
+        self.connection.set_key(_KEY)
+        query = self.begin()
+        self.connection.close()
+        self.assertFalse(self.connection.public_state()["pending"])
+        self.assertEqual(OpenRouterConnection(self.directory).key(), _KEY)
+        with self.assertRaises(ProviderAuthError):
+            self.connection.complete(query["state"][0], "synthetic-code")
 
     def test_malformed_storage_is_safe_and_does_not_expose_content(self) -> None:
         saved = self.directory / "auth/openrouter.json"
