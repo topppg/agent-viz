@@ -97,8 +97,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .find { font-family: var(--mono); }
 .find input { width: 260px; max-width: 60vw; font-family: var(--sans); }
 #hidden-note { margin-left: auto; font-size: 13px; }
-.table-wrap { container-type: inline-size; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--table); }
-.table { min-width: 1110px; }
+.table-wrap { container-type: inline-size; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--table); }
 .row { display: grid; grid-template-columns: 76px 140px minmax(0, 1.4fr) minmax(0, 2.6fr) 112px 80px; gap: 14px; align-items: center; padding: 6px 14px; }
 .row.head { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .1em; padding-top: 7px; padding-bottom: 7px; }
 .row.head button { border: 0; border-radius: 3px; padding: 0; min-height: 24px; color: inherit; font: inherit; letter-spacing: inherit; white-space: nowrap; }
@@ -135,8 +134,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .seen { font-family: var(--mono); font-size: 13px; color: var(--muted); }
 .empty { color: var(--muted); padding: 14px; }
 
-/* The table scrolls sideways on narrow screens; keep the open session pinned to the visible width. */
-.expansion { position: sticky; left: 0; max-width: 100cqw; display: flex; flex-wrap: wrap; gap: 16px 32px; padding: 16px 20px 18px 38px; background: var(--detail); border-bottom: 1px solid var(--border); }
+.expansion { display: flex; flex-wrap: wrap; gap: 16px 32px; padding: 16px 20px 18px 38px; background: var(--detail); border-bottom: 1px solid var(--border); }
 .detail-main { flex: 999 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 .detail-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .detail-title h3 { margin: 0; min-width: 0; font-size: 21px; line-height: 1.3; font-weight: 600; letter-spacing: -.01em; color: var(--bright); overflow-wrap: break-word; }
@@ -181,9 +179,65 @@ kbd { font-family: var(--mono); font-size: 11.5px; background: #1d1830; border: 
 .keys .legend { margin-left: auto; color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) { .cursor, .run-row.quiet { animation: none; } }
+.top-actions { display: contents; }
+#more, #keys-toggle { display: none; }
+
+/* Below the full table width each agent becomes two lines: status, name and numbers, then what it is working on. */
+@container (max-width: 880px) {
+  .row.head { display: flex; flex-wrap: wrap; gap: 0 16px; }
+  .run-row { grid-template-columns: 8px auto minmax(0, 1fr) auto auto; grid-template-areas: "harness status agent rate seen" ". doing doing doing doing"; gap: 1px 10px; padding-top: 7px; padding-bottom: 7px; }
+  .run-row .harness-cell { grid-area: harness; }
+  .run-row .status { grid-area: status; }
+  .run-row .agent { grid-area: agent; }
+  .run-row .doing { grid-area: doing; font-size: 13.5px; }
+  .run-row .rate-cell { grid-area: rate; }
+  .run-row .rate-cell .bar { max-width: 32px; }
+  .run-row .seen { grid-area: seen; min-width: 28px; text-align: right; }
+  .run-row.sub .doing { padding-left: calc(var(--depth, 1) * 18px); }
+}
+
+/* Narrower than a full laptop screen: one-line header with actions behind a menu, compact toolbar. */
+@media (max-width: 1100px) {
+  .top { flex-wrap: nowrap; gap: 12px; padding: 10px 16px; }
+  .brand { gap: 8px; }
+  .brand .muted, .brand .cursor { display: none; }
+  .logo { font-size: 18px; }
+  .counts { flex-wrap: nowrap; gap: 12px; white-space: nowrap; }
+  #connection { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #more { display: block; flex: none; width: 32px; padding: 0; font-size: 16px; line-height: 1; }
+  .top-actions { display: none; position: absolute; top: calc(100% + 4px); right: 16px; z-index: 6; min-width: 220px; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .top-actions.open { display: flex; }
+  main, .keys { padding-left: 16px; padding-right: 16px; }
+  .toolbar { gap: 8px; }
+  .toolbar .label-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .find { flex: 1 1 180px; }
+  .find input { flex: 1; width: auto; min-width: 0; max-width: none; }
+  #hidden-note { flex-basis: 100%; margin-left: 0; }
+}
+@media (max-width: 560px) { .logo { display: none; } }
+
+/* Narrow or short: keep the header in view, fold the overview into chips and a sparkline, hide the shortcut list. */
+@media (max-width: 1100px), (max-height: 600px) {
+  .top { position: sticky; top: 0; z-index: 5; }
+  main { gap: 10px; padding-top: 12px; padding-bottom: 12px; }
+  .overview { gap: 10px; }
+  .harness-panel, .flux-panel { padding: 8px 10px; }
+  .harness-panel h2, .harness .sub, .harness .flag, .harness-idle { display: none; }
+  #harnesses { display: flex; flex-wrap: wrap; gap: 6px; }
+  .harness { display: flex; width: auto; gap: 7px; min-height: 28px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--bar); }
+  .harness .name { max-width: none; }
+  .harness .rate { font-size: 13px; }
+  .flux-panel { flex-direction: row; align-items: center; gap: 10px; }
+  .flux-panel .panel-head { order: 1; }
+  .flux-panel h2, #flux-note, .axis, .flux .dot, .flux .ymax { display: none; }
+  .flux { flex: 1; height: 36px; }
+  .keys { padding-top: 0; padding-bottom: 12px; }
+  #keys-toggle { display: flex; align-items: center; min-height: 0; padding: 0; border: 0; color: inherit; }
+  .keys > span { display: none; }
+  .keys.open > span { display: inline; }
+}
 @media (max-width: 640px) {
-  .top, main, .keys { padding-left: 16px; padding-right: 16px; }
-  #hidden-note, .keys .legend { margin-left: 0; }
+  .keys .legend { margin-left: 0; }
   .expansion { padding-left: 16px; }
   .ops li, .timeline li { grid-template-columns: 1fr; }
 }
