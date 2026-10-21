@@ -29,6 +29,8 @@ PS_LINE = re.compile(
     r"\s*(\d+)\s+(\S+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.+)"
 )
 TTY = re.compile(r"ttys?\d{1,4}|pts/\d{1,4}")
+START_LINE = re.compile(r"\s*(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d\d:\d\d:\d\d\s+\d{4})\s*")
+LOCK_FILE = re.compile(r"([0-9A-Za-z][0-9A-Za-z-]{7,79})\.lock")
 _PATH = r"/[A-Za-z0-9_./@+-]{1,255}"
 _ID = r"[A-Za-z0-9][A-Za-z0-9-]{0,63}"
 # Only these environment values are ever extracted; everything else is discarded.
@@ -286,6 +288,71 @@ def claude_pid(root: Path, session_id: str) -> tuple[bool, int | None]:
             continue
         return True, pid
     return True, None
+
+
+def live_sessions(profile: SourceProfile) -> frozenset[str] | None:
+    """Native session ids a live local process owns; None when that cannot be told."""
+    root = Path(profile.root).expanduser()
+    return _claude_live(root) if profile.kind == "claude" else _codex_live(root)
+
+
+def _claude_live(root: Path) -> frozenset[str] | None:
+    try:
+        with os.scandir(root / "sessions") as entries:
+            names = [e.name for e in entries if PID_FILE.fullmatch(e.name) and not e.is_symlink()]
+    except OSError:
+        return None
+    recorded: dict[int, tuple[str, str]] = {}
+    for name in names:
+        pid, data = int(name.removesuffix(".json")), _small_json(root / "sessions" / name)
+        session = data.get("sessionId") if data else None
+        start = data.get("procStart") if data else None
+        if data and data.get("pid") == pid and isinstance(session, str) and isinstance(start, str):
+            if SESSION_ID.fullmatch(session):
+                recorded[pid] = (session, " ".join(start.split()))
+    if not recorded:
+        return frozenset()
+    argv = ["ps", "-o", "pid=", "-o", "lstart=", "-p", ",".join(map(str, sorted(recorded)))]
+    result = _run(argv, {**os.environ, "TZ": "UTC", "LC_ALL": "C"})
+    if result is None:
+        return None
+    live = set()
+    for line in result[1].splitlines():
+        match = START_LINE.fullmatch(line)
+        # A recycled pid has a different start time, so the session is not live.
+        if match and int(match[1]) in recorded:
+            session, start = recorded[int(match[1])]
+            if " ".join(match[2].split()) == start:
+                live.add(session)
+    return frozenset(live)
+
+
+def _codex_live(root: Path) -> frozenset[str] | None:
+    """Codex holds ``thread-writer-locks/<thread>.lock`` open while a session is live."""
+    try:
+        with os.scandir(root / "thread-writer-locks") as entries:
+            locks = [e.path for e in entries if LOCK_FILE.fullmatch(e.name) and not e.is_symlink()]
+    except OSError:
+        return None
+    lsof = shutil.which("lsof")
+    if not locks:
+        return frozenset()
+    if not lsof:
+        return None
+    result = _run([lsof, "-F", "pcn", "--", *locks])
+    if result is None or result[0] not in {0, 1}:
+        return None
+    live, command = set(), ""
+    for line in result[1].splitlines():
+        if line.startswith("p"):
+            command = ""
+        elif line.startswith("c"):
+            command = line[1:]
+        elif line.startswith("n") and "codex" in command.lower():
+            match = LOCK_FILE.fullmatch(Path(line[1:]).name)
+            if match:
+                live.add(match[1])
+    return frozenset(live)
 
 
 def _rollout(root: Path, native: str) -> Path | None:

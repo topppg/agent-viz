@@ -250,6 +250,21 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(ids.counts.textContent.includes('3 needs you'));
  turnRow.listeners.click(); await tick();
  assert.ok(detail().textContent.includes('waiting for your next direction'));
+ // Checked liveness: no owning process means closed, never "your turn"; an open idle session stays visible.
+ const gone = run('gone', null, 'Gone', {state:'idle', live:false, activity:'Wrapped up the release'});
+ const hours = new Date(Date.now() - 2 * 3600000).toISOString();
+ const open = run('open', null, 'Open', {state:'idle', live:true, last_seen:hours});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open]})}); await tick();
+ const goneRow = rows().find(r => r.dataset.runId === 'gone');
+ assert.ok(goneRow.textContent.includes('■ closed'));
+ assert.ok(goneRow.textContent.includes('last said: Wrapped up the release'));
+ assert.ok(ids.counts.textContent.includes('1 needs you'));
+ assert.equal(rows().find(r => r.dataset.runId === 'open'), undefined);
+ ids.views.children[2].listeners.click();
+ assert.ok(rows().find(r => r.dataset.runId === 'open').textContent.includes('open · idle'));
+ ids.views.children[0].listeners.click();
+ goneRow.listeners.click(); await tick();
+ assert.ok(detail().textContent.includes('no running process owns this session'));
  // Summaries off and empty chart.
  stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:false},activity:{bucket_seconds:10,buckets:60,end:now,runs:{}}})});
  assert.ok(ids['ai-status'].textContent.includes('summaries off'));

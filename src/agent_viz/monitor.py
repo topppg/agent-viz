@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import threading
+import time
 
+from .focus import live_sessions
 from .sources import (
     DEFAULT_SCAN_LIMIT,
     MAX_SCAN_LIMIT,
@@ -11,6 +13,15 @@ from .sources import (
     discover_profiles,
     scan_profile,
 )
+
+LIVENESS_SECONDS = 5
+
+
+def _live_or_unknown(profile: SourceProfile) -> frozenset[str] | None:
+    try:
+        return live_sessions(profile)
+    except Exception:
+        return None
 
 
 class Monitor:
@@ -39,6 +50,8 @@ class Monitor:
             "source_stats": [],
             "automatic_discovery": self.automatic,
         }
+        self._live: dict[str, frozenset[str] | None] = {}
+        self._live_at = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -85,6 +98,10 @@ class Monitor:
                         selected_files=0,
                     )
                 stats.append(coverage)
+            # Process checks cost a ps/lsof call per profile; every few seconds is enough.
+            if time.monotonic() - self._live_at >= LIVENESS_SECONDS:
+                self._live = {p.id: _live_or_unknown(p) for p in profiles}
+                self._live_at = time.monotonic()
             # Publish a complete scan atomically for HTTP readers; no root paths.
             self.profiles = profiles
             self.counts, self.errors, self.source_stats = counts, errors, stats
@@ -93,6 +110,7 @@ class Monitor:
                 "source_errors": dict(errors),
                 "source_stats": [dict(s) for s in stats],
                 "automatic_discovery": self.automatic,
+                "live": dict(self._live),
             }
         return {"counts": counts, "errors": errors, "source_stats": stats}
 
@@ -127,4 +145,5 @@ class Monitor:
             "source_errors": dict(state["source_errors"]),
             "source_stats": [dict(s) for s in state["source_stats"]],
             "automatic_discovery": state["automatic_discovery"],
+            "live": dict(state.get("live", {})),
         }

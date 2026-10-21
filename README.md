@@ -95,6 +95,9 @@ Do not record or share a live-source dashboard without reviewing its contents.
   navigation. Clicking a row opens it in place: goal, current activity, request
   or task, parent and subagent links, and a collapsed event history in which
   repeated events are grouped.
+- Checked liveness: a session no live local process owns shows as **closed**
+  and offers its resume command; an open session that has been idle a while shows
+  as **open · idle**. Without a reliable check, quiet stays quiet.
 - Open in app: an opened native row offers **↗ open in cmux / tmux / iTerm /
   Terminal / VS Code / ChatGPT …** to bring the session's window forward, or, when
   no live process owns the session, **⧉ copy resume command**. See below.

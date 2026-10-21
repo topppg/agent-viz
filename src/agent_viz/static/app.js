@@ -58,11 +58,14 @@
     if (run.state === "completed") return { key: "done", glyph: "✓", text: `done${inferred}` };
     if (run.state === "failed") return { key: "failed", glyph: "✗", text: `failed${inferred}` };
     if (run.state === "cancelled") return { key: "done", glyph: "–", text: `cancelled${inferred}` };
+    // No live process owns it (checked, not guessed): the session has ended.
+    if (run.live === false) return { key: "closed", glyph: "■", text: `closed ${age(run.last_seen)}` };
     // An unanswered approval stops a transcript from changing; it still needs you.
     if (run.state === "waiting_user") return { key: "needs", glyph: "◐", text: `needs you${inferred}` };
     // A top-level session that recently finished its turn is waiting for your next direction.
     if (run.state === "idle" && !run.parent_run_id && serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW)
       return { key: "needs", turn: true, glyph: "↩", text: `your turn${inferred}` };
+    if (run.state === "idle" && run.live === true && !run.parent_run_id) return { key: "idle", glyph: "◌", text: `open · idle ${age(run.last_seen)}` };
     if (!["fresh", "observed"].includes(healthOf(run))) return { key: "quiet", glyph: "○", text: `quiet ${age(run.last_seen)}` };
     // Waiting on a tool or a child is ordinary work, not something for you.
     if (String(run.state).startsWith("waiting")) return { key: "running", glyph: "●", text: `running${inferred}` };
@@ -78,7 +81,7 @@
     const replied = run.activity && !run.activity.startsWith("Turn ended");
     const raw = status.turn && !replied ? run.task || run.activity : run.activity || run.task;
     if (!raw) return { mark: "›", text: run.inferred ? "text hidden · enable include_text" : "no activity reported", cls: "dim" };
-    if (status.key === "quiet") return { mark: "›", text: `last said: ${raw}`, cls: "dim" };
+    if (status.key === "quiet" || status.key === "closed") return { mark: "›", text: `last said: ${raw}`, cls: "dim" };
     return { mark: "›", text: raw, cls: status.key === "needs" ? "needs" : "" };
   }
   // Session titles (Claude ai-title, Codex thread name) come with summaries.
@@ -88,7 +91,8 @@
     if (state.view === "waiting") return status.key === "needs";
     if (state.view === "active") {
       if (terminal.has(run.state)) return false;
-      return status.key !== "quiet" || serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW;
+      // Long-idle open sessions, quiet and closed ones stay under "all" after 30 minutes.
+      return !["quiet", "closed", "idle"].includes(status.key) || serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW;
     }
     const window = Number($("window-filter").value);
     return !window || serverNow() - (time(run.last_seen) || 0) <= window;
@@ -387,6 +391,8 @@
       const turn = node("p", `↩ finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
       turn.append(node("span", ` · continue it in ${harnessOf(run).label}`, "needs-where"));
       host.append(turn);
+    } else if (status.key === "closed") {
+      host.append(node("p", `■ closed ${age(run.last_seen)} ago · no running process owns this session any more`, "closed-line"));
     } else if (status.key === "needs") {
       const needs = node("p", `◐ waiting on you for ${age(run.last_seen)}${run.activity ? ` · ${run.activity}` : ""}`, "needs-line");
       needs.append(node("span", ` · answer it in “${parent ? nameOf(parent) : nameOf(run)}”`, "needs-where"));
