@@ -6,7 +6,7 @@
   const PALETTE = ["#8fa8ff", "#c4b5fd", "#f0abfc", "#fda4af", "#7dd3fc", "#fdba74", "#a7f3d0", "#e9d5ff"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   const MAX_ROWS = 300;
-  const state = { snapshot: null, selected: null, view: "active", order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false };
+  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false };
   const node = (tag, text, className) => {
     const el = document.createElement(tag);
     if (text !== undefined && text !== null) el.textContent = String(text);
@@ -282,9 +282,24 @@
     const key = statusOf(run).key;
     return { needs: 0, running: 1, waiting: 2, idle: 3, unknown: 4, quiet: 5, failed: 6, done: 7 }[key] ?? 8;
   }
+  function sortValue(run) {
+    if (state.sort === "harness") return harnessOf(run).label.toLowerCase();
+    if (state.sort === "agent") return nameOf(run).toLowerCase();
+    if (state.sort === "doing") return doingOf(run, statusOf(run)).text.toLowerCase();
+    if (state.sort === "rate") return rateOf(run.run_id);
+    return time(run.last_seen) || 0;
+  }
+  function renderSort() {
+    document.querySelectorAll("[data-sort]").forEach((button) => {
+      const active = button.dataset.sort === state.sort;
+      button.setAttribute("aria-pressed", String(active));
+      button.dataset.arrow = active ? state.descending ? "▼" : "▲" : "";
+      button.setAttribute("aria-label", `${button.textContent.trim()}${active ? `, sorted ${state.descending ? "descending" : "ascending"}` : ", sort"}`);
+    });
+  }
   function tableKey() {
     return JSON.stringify([state.fingerprint, activity().end && Math.floor(time(activity().end) / 10000), state.view,
-      $("harness-filter").value, $("window-filter").value, $("search").value, state.selected, state.historyOpen,
+      $("harness-filter").value, $("window-filter").value, $("search").value, state.sort, state.descending, state.selected, state.historyOpen,
       state.events.length, state.eventBusy, state.more, state.target, state.targetNote, state.targetFallback, Math.floor(serverNow() / 60000)]);
   }
   function seenText(value) {
@@ -316,7 +331,13 @@
     const live = (a, b) => rank(a).rank - rank(b).rank || rank(b).seen - rank(a).seen || a.run_id.localeCompare(b.run_id);
     // While a run is open, keep the order from before it opened so rows don't jump; unseen runs go after.
     const frozen = (run) => state.frozen.get(run.run_id) ?? Infinity;
-    const compare = state.selected ? (a, b) => frozen(a) - frozen(b) || live(a, b) : live;
+    const sorted = (a, b) => {
+      const left = state.sort === "status" ? rank(a).rank : sortValue(a);
+      const right = state.sort === "status" ? rank(b).rank : sortValue(b);
+      const order = typeof left === "number" ? left - right : left.localeCompare(right);
+      return (state.descending ? -order : order) || a.run_id.localeCompare(b.run_id);
+    };
+    const compare = state.sort ? sorted : state.selected ? (a, b) => frozen(a) - frozen(b) || live(a, b) : live;
     renderHiddenNote(runs, direct);
     state.order = [];
     if (!runs.length) { host.append(node("p", "No agents yet. Start the synthetic demo or configure a local source profile. This dashboard never starts agents.", "empty")); return; }
@@ -600,6 +621,19 @@
   }
 
   [...$("views").children].forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+  document.querySelectorAll("[data-sort]").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.sort;
+    if (state.sort === key && state.descending !== ["rate", "seen"].includes(key)) {
+      state.sort = null;
+      state.descending = false;
+    } else {
+      state.descending = state.sort === key ? !state.descending : ["rate", "seen"].includes(key);
+      state.sort = key;
+    }
+    renderSort();
+    if (state.snapshot) renderTable();
+  }));
+  renderSort();
   $("harness-filter").addEventListener("change", render);
   $("window-filter").addEventListener("change", () => { if (state.snapshot) renderTable(); });
   $("search").addEventListener("input", () => { if (state.snapshot) renderTable(); });

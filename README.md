@@ -61,7 +61,9 @@ New harnesses plug in as one module each (see [the source guide](docs/SOURCES.md
   resume command when it is closed.
 
 Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w`
-/ `e` switch between active, needs-you and all.
+/ `e` switch between active, needs-you and all. Click a table heading to sort by
+that column, click again to reverse it, and a third time to restore the default
+attention order. Subagents stay under their parent while sorting.
 
 ## Quick start
 

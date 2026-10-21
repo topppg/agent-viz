@@ -86,9 +86,12 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .find input { width: 260px; max-width: 60vw; font-family: var(--sans); }
 #hidden-note { margin-left: auto; font-size: 13px; }
 .table-wrap { container-type: inline-size; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--table); }
-.table { min-width: 1040px; }
-.row { display: grid; grid-template-columns: 10px 140px minmax(0, 1.4fr) minmax(0, 2.6fr) 112px 80px; gap: 14px; align-items: center; padding: 6px 14px; }
+.table { min-width: 1110px; }
+.row { display: grid; grid-template-columns: 76px 140px minmax(0, 1.4fr) minmax(0, 2.6fr) 112px 80px; gap: 14px; align-items: center; padding: 6px 14px; }
 .row.head { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .1em; padding-top: 7px; padding-bottom: 7px; }
+.row.head button { border: 0; border-radius: 3px; padding: 0; min-height: 24px; color: inherit; font: inherit; letter-spacing: inherit; white-space: nowrap; }
+.row.head button:hover, .row.head button[aria-pressed="true"] { color: var(--bright); }
+.row.head button[aria-pressed="true"]::after { content: " " attr(data-arrow); color: var(--run); }
 .run-row { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; min-height: 0; }
 .run-row:hover { background: #15111f; }
 .run-row.selected { background: #1f1733; }
