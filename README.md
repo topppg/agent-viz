@@ -30,11 +30,13 @@ stops an agent, and nothing leaves your machine unless you turn on summaries.
   | ■ **closed** | No running process owns the session any more. |
   | ✓ **done** | An SDK run reported that it finished. |
 
-- **What each one is doing.** The session's own title (your `/rename`, Claude's
-  generated title, the Codex thread name, the opencode session title, a Pi `/name` or the
-  DeepSeek Harness title), its goal, your latest request and
+- **What each one is doing.** The session's own title (your `/rename`, the
+  Claude desktop app's title, Claude's generated title, the Codex thread name, the
+  opencode session title, a Pi `/name` or the DeepSeek Harness title), its goal,
+  your latest request and
   the agent's latest reply or commentary. Subagents sit under their parent,
-  named by the task the parent gave them.
+  named by the task the parent gave them. Sessions the Claude desktop app runs
+  are tagged **Claude desktop**; ones archived there never count as active.
 - **Jump in.** Open a session in the terminal or app that runs it (cmux, tmux,
   iTerm2, Terminal, VS Code, the ChatGPT, Claude or DeepSeek Harness app), or copy a
   resume command when it is closed.
@@ -119,15 +121,19 @@ What is read, and the bounds on it, are in the [source guide](docs/SOURCES.md).
 
 Opening a row looks up which local process owns the session and how to show it:
 a cmux panel, a tmux pane, an iTerm2 session, an Apple Terminal tab, or the
-owning app's window (VS Code, Ghostty, ChatGPT, Claude desktop, DeepSeek Harness). On Linux, tmux
-panes and `wmctrl` windows are supported.
+owning app's window (VS Code, Ghostty, ChatGPT, Claude desktop, DeepSeek Harness).
+A live Claude desktop session opens directly in the app with
+`claude://code/continue`; when the app's record of it is unknown, the app is just
+brought forward. On Linux, tmux panes and `wmctrl` windows are supported.
 
 The button only brings a window forward. It never types into, signals or
 controls an agent. The first iTerm2 or Terminal use can trigger a macOS
 automation prompt. For a closed session it offers a resume command, such as
 `claude --resume <id>` with the profile's `CLAUDE_CONFIG_DIR`, for you to copy
 and run; Spiritboard never runs it, and never offers it while the session might
-still be running elsewhere. DeepSeek Harness sessions offer no resume command.
+still be running elsewhere. DeepSeek Harness sessions offer no resume command. A
+closed Claude desktop session resumes in a terminal with the CLI, and its button
+says so.
 
 ## Optional goal summaries
 

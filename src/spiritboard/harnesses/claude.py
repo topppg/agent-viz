@@ -1,4 +1,8 @@
-"""Claude Code: ``projects/`` transcripts and ``sessions/<pid>.json`` process records."""
+"""Claude Code: ``projects/`` transcripts and ``sessions/<pid>.json`` process records.
+
+Sessions the Claude desktop app runs are ordinary Claude Code transcripts marked by their
+``entrypoint``; the app's ``local_*.json`` session records add titles and archive state.
+"""
 
 from __future__ import annotations
 
@@ -6,10 +10,14 @@ import json
 import os
 import re
 import stat
+import sys
+import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .. import processes
+from ..processes import Process
 from ..transcripts import (
     READ_FLAGS,
     Session,
@@ -38,6 +46,13 @@ TREES = ("projects",)
 PID_FILE = re.compile(r"\d{1,10}\.json")
 START_LINE = re.compile(r"\s*(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d\d:\d\d:\d\d\s+\d{4})\s*")
 RECAP_SUFFIX = re.compile(r"\s*\(disable recaps in /config\)\s*$", re.I)
+DESKTOP_APP = "Claude desktop"
+DESKTOP_BUNDLE = "com.anthropic.claudefordesktop"
+# The app itself, or the Claude Code build it bundles under Application Support.
+DESKTOP_PROCESS = re.compile(r"/Claude\.app/Contents/|/Application Support/Claude/claude-code/")
+# The app's own validator for claude://code/continue?session=…
+LOCAL_ID = re.compile(r"local_[A-Za-z0-9-]{1,64}")
+MAX_DESKTOP_FILES = 5_000
 
 
 def home_label(name: str) -> str | None:
@@ -75,6 +90,9 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
     )
     cwd = next((x["cwd"] for x in rows if isinstance(x.get("cwd"), str)), "")
     out = observation(profile, "Claude", native, safe(Path(cwd).name, 80), started)
+    entry = next((x["entrypoint"] for x in rows if isinstance(x.get("entrypoint"), str)), "")
+    if entry.startswith("claude-desktop"):
+        out["app"] = DESKTOP_APP
     if agent:
         out["parent_run_id"] = ns(profile, session)
         out["name"] = f"Claude subagent {agent[:8]}"
@@ -141,6 +159,8 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
     # A /rename beats Claude's generated title; subagents keep their parent-given name.
     if profile.include_text and not agent and (custom_title or ai_title):
         out["name"] = custom_title or ai_title
+        # Not stored; lets a desktop title outrank only the generated one.
+        out["title_source"] = "custom" if custom_title else "ai"
     out["last_seen"] = out["last_seen"] or mtime_iso(mtime)
     return out
 
@@ -304,6 +324,121 @@ def resume(root: Path, session_id: str) -> str:
     return resume_command(root, session_id, _cwd(transcript(root, session_id)))
 
 
+@dataclass(frozen=True)
+class DesktopSession:
+    local_id: str
+    title: str
+    archived: bool
+
+
+_desktop_lock = threading.Lock()
+_desktop_files: dict[str, tuple[tuple[int, int], tuple[str, DesktopSession] | None]] = {}
+
+
+def desktop_dir() -> Path | None:
+    if sys.platform != "darwin":
+        return None
+    return Path.home() / "Library" / "Application Support" / "Claude" / "claude-code-sessions"
+
+
+def _subdirs(folder: Path) -> list[Path]:
+    try:
+        with os.scandir(folder) as entries:
+            return [Path(e.path) for e in entries if e.is_dir(follow_symlinks=False)]
+    except OSError:
+        return []
+
+
+def _desktop_record(path: Path) -> tuple[str, DesktopSession] | None:
+    data = small_json(path)
+    if not data:
+        return None
+    local, cli = data.get("sessionId"), data.get("cliSessionId")
+    if not isinstance(local, str) or local != path.stem or not LOCAL_ID.fullmatch(local):
+        return None
+    if not isinstance(cli, str) or not SESSION_ID.fullmatch(cli):
+        return None
+    return cli, DesktopSession(local, safe(data.get("title"), 120), data.get("isArchived") is True)
+
+
+def desktop_sessions() -> dict[str, DesktopSession]:
+    """Claude Code session ID -> the desktop app's record, from ``<account>/<org>/local_*.json``.
+
+    Only names of that form are opened (bounded, no links); other files there are never read.
+    """
+    base = desktop_dir()
+    if base is None:
+        return {}
+    found: dict[str, DesktopSession] = {}
+    seen: set[str] = set()
+    with _desktop_lock:
+        for folder in [org for account in _subdirs(base) for org in _subdirs(account)]:
+            try:
+                with os.scandir(folder) as entries:
+                    files = [
+                        e
+                        for e in entries
+                        if LOCAL_ID.fullmatch(e.name.removesuffix(".json"))
+                        and e.name.endswith(".json")
+                        and e.is_file(follow_symlinks=False)
+                    ]
+            except OSError:
+                continue
+            for entry in files:
+                if len(seen) >= MAX_DESKTOP_FILES:
+                    break
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                seen.add(entry.path)
+                signature = (info.st_mtime_ns, info.st_size)
+                cached = _desktop_files.get(entry.path)
+                if cached is None or cached[0] != signature:
+                    cached = (signature, _desktop_record(Path(entry.path)))
+                    _desktop_files[entry.path] = cached
+                if cached[1]:
+                    found[cached[1][0]] = cached[1][1]
+        for path in set(_desktop_files) - seen:
+            del _desktop_files[path]
+    return found
+
+
+def enrich(profile: SourceProfile, rows: list[dict]) -> None:
+    """Mark desktop sessions, hide archived ones and prefer a /rename over the app's title."""
+    index = desktop_sessions()
+    for row in rows:
+        native = row.get("native_id", "")
+        desktop = index.get(native.partition(":agent:")[0])
+        if desktop is None:
+            continue
+        row["app"] = DESKTOP_APP
+        if desktop.archived:
+            row["archived"] = True
+        if (
+            profile.include_text
+            and desktop.title
+            and ":agent:" not in native
+            and row.get("title_source") != "custom"
+        ):
+            row["name"] = desktop.title
+
+
+def open_app(session_id: str, app: str, chain: list[Process]) -> tuple[str, tuple[str, ...]] | None:
+    """(label, argv) showing a live desktop session in the Claude app; None elsewhere.
+
+    ``claude://resume`` is not used: the app imports the CLI session as a new one.
+    """
+    if sys.platform != "darwin":
+        return None
+    if app != DESKTOP_APP and not any(DESKTOP_PROCESS.search(p.command) for p in chain):
+        return None
+    desktop = desktop_sessions().get(session_id)
+    if desktop and not desktop.archived and LOCAL_ID.fullmatch(desktop.local_id):
+        return "Claude", ("/usr/bin/open", f"claude://code/continue?session={desktop.local_id}")
+    return "Claude", ("/usr/bin/open", "-b", DESKTOP_BUNDLE)
+
+
 def goal_context(rows: list[dict]) -> Goal:
     messages: list[tuple[str, object, str]] = []
     custom = ai_title = recap = recap_at = ""
@@ -349,6 +484,8 @@ HARNESS = Harness(
     observe=observe,
     latest_request=latest_request,
     titles=None,
+    enrich=enrich,
+    open_app=open_app,
     live_sessions=live_sessions,
     owner=lambda native: native.partition(":agent:")[0],
     session_pid=session_pid,

@@ -242,9 +242,9 @@ def _window_step(env: dict[str, str]) -> Step | None:
     return Step((wmctrl, "-i", "-a", hex(int(env["WINDOWID"]))))
 
 
-def adapter(pid: int) -> Target:
+def adapter(pid: int, chain: list[Process] | None = None) -> Target:
     """Choose the most specific way to show the terminal or app hosting ``pid``."""
-    chain = _lineage(pid)
+    chain = _lineage(pid) if chain is None else chain
     if not chain:
         return UNSUPPORTED
     env = _environment(pid)
@@ -303,7 +303,13 @@ def resolve(run: dict[str, object] | None, profiles: list[SourceProfile]) -> Tar
     try:
         known, pid = harness.session_pid(root, session)
         if pid:
-            return adapter(pid)
+            chain = _lineage(pid)
+            app = run.get("app")
+            marker = app if isinstance(app, str) else ""
+            opened = harness.open_app(session, marker, chain) if harness.open_app else None
+            if opened:
+                return Target("focus", opened[0], steps=(Step(opened[1]),))
+            return adapter(pid, chain)
         # Resuming a session that is still running elsewhere would fork it.
         if not known or session != native or run.get("parent_run_id"):
             return UNSUPPORTED

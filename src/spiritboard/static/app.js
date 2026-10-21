@@ -58,6 +58,7 @@
     if (run.state === "completed") return { key: "done", glyph: "✓", text: `done${inferred}` };
     if (run.state === "failed") return { key: "failed", glyph: "✗", text: `failed${inferred}` };
     if (run.state === "cancelled") return { key: "done", glyph: "–", text: `cancelled${inferred}` };
+    if (run.archived) return { key: "closed", glyph: "■", text: `archived ${age(run.last_seen)}` };
     // No live process owns it (checked, not guessed): the session has ended.
     if (run.live === false) return { key: "closed", glyph: "■", text: `closed ${age(run.last_seen)}` };
     // An unanswered approval stops a transcript from changing; it still needs you.
@@ -90,7 +91,7 @@
     const status = statusOf(run);
     if (state.view === "waiting") return status.key === "needs";
     if (state.view === "active") {
-      if (terminal.has(run.state)) return false;
+      if (terminal.has(run.state) || run.archived) return false;
       // Long-idle open sessions, quiet and closed ones stay under "all" after 30 minutes.
       return !["quiet", "closed", "idle"].includes(status.key) || serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW;
     }
@@ -101,7 +102,7 @@
     const query = $("search").value.toLowerCase().trim();
     const harness = $("harness-filter").value;
     return inView(run) && (!harness || harnessOf(run).key === harness) &&
-      (!query || [run.name, run.ai_summary?.title, run.task, run.activity, run.ai_summary?.text, run.project, harnessOf(run).label].some((v) => String(v || "").toLowerCase().includes(query)));
+      (!query || [run.name, run.ai_summary?.title, run.task, run.activity, run.ai_summary?.text, run.project, run.app, harnessOf(run).label].some((v) => String(v || "").toLowerCase().includes(query)));
   }
 
   function activity() { return state.snapshot?.activity || { bucket_seconds: 10, buckets: 60, runs: {} }; }
@@ -157,7 +158,7 @@
   }
   function activeStatuses(runs) {
     // Same scope as the active view: long-quiet history is not counted.
-    return runs.filter((run) => !terminal.has(run.state) && (statusOf(run).key !== "quiet" || serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW)).map(statusOf);
+    return runs.filter((run) => !terminal.has(run.state) && !run.archived && (statusOf(run).key !== "quiet" || serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW)).map(statusOf);
   }
   const BUSY = new Set(["running", "waiting", "idle", "unknown"]);
   function renderCounts() {
@@ -343,10 +344,13 @@
     agent.append(node("span", prefix, "tree"), node("span", nameOf(run), "agent-name"));
     if (orphan) agent.append(node("span", "parent not yet available", "note"));
     if (context) agent.append(node("span", "context", "note"));
+    // Where the session runs, when it is an app rather than a terminal (Claude desktop).
+    if (run.app) agent.append(node("span", run.app, "note"));
     const harness = harnessOf(run);
     const harnessCell = node("span", null, "cell harness-cell");
     const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(harness.key);
-    harnessCell.title = harness.label; harnessCell.setAttribute("aria-label", harness.label);
+    const where = run.app ? `${harness.label} · ${run.app}` : harness.label;
+    harnessCell.title = where; harnessCell.setAttribute("aria-label", where);
     harnessCell.append(swatch);
     const doing = doingOf(run, status);
     const doingCell = node("span", null, `cell doing ${doing.cls}`);
@@ -402,6 +406,8 @@
       const turn = node("p", `↩ finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
       turn.append(node("span", ` · continue it in ${harness.label}`, "needs-where"));
       main.append(turn);
+    } else if (run.archived) {
+      main.append(node("p", `■ archived in ${run.app || "its app"} · last active ${age(run.last_seen)} ago`, "closed-line"));
     } else if (status.key === "closed") {
       main.append(node("p", `■ closed ${age(run.last_seen)} ago · no running process owns this session any more`, "closed-line"));
     } else if (status.key === "needs") {
@@ -441,6 +447,7 @@
     const fact = (title, ...content) => { const dd = node("dd"); dd.append(...content); facts.append(node("dt", title), dd); return dd; };
     const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(harness.key);
     fact("harness", swatch, harness.label);
+    if (run.app) fact("app", run.app);
     if (run.project) fact("project", run.project);
     fact(terminal.has(run.state) || status.key === "closed" ? "ran for" : "running for", age(run.started_at, time(run.ended_at) || serverNow()));
     fact("last seen", seenText(run.last_seen)).dataset.seen = run.last_seen || "";
@@ -466,7 +473,9 @@
       open.addEventListener("click", () => openApp(run.run_id));
       items.push(open);
     } else if (target.kind === "resume" && target.command) {
-      const copy = node("button", "⧉ copy resume command", "link app-link"); copy.type = "button"; copy.dataset.focusKey = "copy-resume"; copy.title = target.command;
+      // An app session resumes with the CLI, so say where it will continue.
+      const copy = node("button", run.app ? "⧉ copy terminal resume command" : "⧉ copy resume command", "link app-link"); copy.type = "button"; copy.dataset.focusKey = "copy-resume";
+      copy.title = run.app ? `Resumes in a terminal, not in ${run.app}: ${target.command}` : target.command;
       copy.addEventListener("click", () => copyCommand(run.run_id));
       items.push(copy);
       if (state.targetFallback) {
