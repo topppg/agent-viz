@@ -44,7 +44,9 @@ jobs:
 
           distribution = importlib.metadata.distribution("spiritboard")
           requirements = distribution.requires or []
-          assert len(requirements) == 1 and requirements[0].lower().startswith("pyjwt[crypto]"), requirements
+          assert len(requirements) == 2, requirements
+          assert any(item.lower().startswith("pyjwt[crypto]") for item in requirements), requirements
+          assert any(item.lower().startswith("keyring") for item in requirements), requirements
           assert distribution.metadata["Description-Content-Type"] == "text/markdown"
           assets = importlib.resources.files("spiritboard").joinpath("static")
           for name in ("index.html", "app.js", "style.css", "summary-settings.js", "summary-settings.css"):

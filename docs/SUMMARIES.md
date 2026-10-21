@@ -41,9 +41,32 @@ The browser sends a pasted key only to the loopback service and clears the form
 on submission or close. It never stores credentials in browser storage. OAuth
 callbacks validate one-use state; ChatGPT additionally verifies signed identity
 tokens, account identity, requested scopes and a login nonce. Spiritboard stores
-its own connection files under `auth/` in the private data directory, with private
-file permissions on POSIX systems. They are not encrypted at rest. It does not
-reuse authentication files from discovered Codex or Claude profiles.
+OpenRouter keys and ChatGPT access, refresh and identity tokens in the native OS
+credential store: macOS Keychain, Windows Credential Manager, or Linux Secret
+Service. It does not reuse authentication files from discovered Codex or Claude
+profiles. No credential values are written into Spiritboard's local files.
+
+Only private, non-secret references remain under `auth/credentials/` in the data
+directory. Each data directory has separate credential entries. Larger records
+are split into bounded OS-store entries to fit Windows limits. New entries are
+read back and verified before their references are committed locally.
+
+If storage is locked, unavailable, denied or corrupt, saving/restoring fails
+clearly. No plaintext or plugin-based fallback is used. Monitoring and demo mode
+still work without a credential store; explicit launch-provided keys can remain
+in memory as described below. On Linux, an unlocked Secret Service collection
+and a D-Bus user session are required for saved connections.
+
+This protects credentials on disk; it does not make a compromised computer safe.
+In particular, macOS may allow other scripts using the same Python executable
+to access its keychain entries without another prompt. See the upstream
+[keyring security notes](https://keyring.readthedocs.io/en/stable/#security-considerations).
+
+There is deliberately no migration. Old plaintext connection files are ignored,
+not read, imported or automatically deleted. If testing an older build, remove
+those old files yourself and connect again. Removing a data directory or
+uninstalling the package is not a substitute for disconnecting/revoking provider
+access; disconnect before removing the app's state.
 
 ChatGPT disconnection clears local tokens and attempts remote revocation. If
 revocation cannot be confirmed, the settings panel explicitly tells you to
