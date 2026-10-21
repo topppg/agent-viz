@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 from .. import processes
 from ..transcripts import (
     READ_FLAGS,
+    READ_GAP,
+    TEXT_HIDDEN,
     Session,
     existing_trees,
     last_request,
@@ -103,6 +105,10 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
         if stamp and (out["last_seen"] is None or stamp > out["last_seen"]):
             out["last_seen"] = stamp
         kind = row.get("type")
+        if kind == READ_GAP:
+            # The header's request and reply predate the unread middle; the scan searches back.
+            out["task"], last_reply = TEXT_HIDDEN, ""
+            continue
         p = row.get("payload", {})
         if not isinstance(p, dict):
             continue
@@ -143,8 +149,9 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 event == "message" and p.get("role") == "assistant"
             ):
                 state, evidence = "working", str(event)
-                if profile.include_text and event in {"message", "agent_message"}:
-                    # Only the agent's own prose; wrapped system notices are not replies.
+                if profile.include_text and event == "message":
+                    # Only the agent's own prose: agent_message items are routed between agents
+                    # and wrapped system notices are not replies.
                     reply = text(p.get("content"))
                     last_reply = reply if reply and not reply.startswith("<") else last_reply
                 activity = last_reply or "Model activity recorded"

@@ -77,7 +77,7 @@
   function doingOf(run, status) {
     if (terminal.has(run.state)) return { mark: "›", text: run.summary || run.activity || run.task || "finished", cls: "" };
     const summary = run.ai_summary;
-    if (summary?.text) return { mark: "✦", ai: true, text: summary.text, cls: status.key === "needs" ? "needs" : summary.stale ? "stale-summary" : "" };
+    if (summary?.text) return { mark: "", ai: true, text: summary.text, cls: status.key === "needs" ? "needs" : summary.stale ? "stale-summary" : "" };
     // The last reply says most about a finished turn; the request is the fallback.
     const replied = run.activity && !run.activity.startsWith("Turn ended");
     const raw = status.turn && !replied ? run.task || run.activity : run.activity || run.task;
@@ -180,7 +180,7 @@
     if (ai.subscription_calls) usage.push(`${ai.subscription_calls} ChatGPT plan calls`);
     if (!usage.length) usage.push("no provider calls yet");
     const provider = ai.provider === "codex" ? "ChatGPT" : ai.provider === "openrouter" ? "OpenRouter" : "";
-    host.append(node("span", `✦ summaries ${ai.status === "error" ? "error" : "on"}${provider ? ` · ${provider}` : ""}`, "ai-mark"),
+    host.append(node("span", `summaries ${ai.status === "error" ? "error" : "on"}${provider ? ` · ${provider}` : ""}`, "ai-mark"),
       node("span", ` · ${usage.join(" · ")}`, "muted"));
     host.title = ai.error || "Opt-in: bounded redacted context goes only to connected providers; ChatGPT uses plan allowance, not a reported USD charge";
   }
@@ -359,7 +359,8 @@
     harnessCell.append(swatch);
     const doing = doingOf(run, status);
     const doingCell = node("span", null, `cell doing ${doing.cls}`);
-    doingCell.append(node("span", `${doing.mark} `, `mark${doing.ai ? " ai" : ""}`), doing.text);
+    if (doing.mark) doingCell.append(node("span", `${doing.mark} `, "mark"));
+    doingCell.append(doing.text);
     if (doing.ai) doingCell.title = `${run.ai_summary?.origin === "claude-recap" ? "Claude recap" : "AI summary"}${run.ai_summary?.stale ? " · goal changed, refresh due" : ""}`;
     const rate = rateOf(run.run_id);
     const rateCell = node("span", null, "rate-cell");
@@ -424,9 +425,7 @@
     const goal = run.ai_summary?.text || (run.parent_run_id ? run.task : "");
     if (goal) {
       const summary = node("div", null, "summary");
-      const heading = node("span", null, "label");
-      if (run.ai_summary?.text) heading.append(node("span", "✦ ", "ai-mark"), "summary"); else heading.append("task");
-      summary.append(heading, node("p", goal, "goal"));
+      summary.append(node("span", run.ai_summary?.text ? "summary" : "task", "label"), node("p", goal, "goal"));
       main.append(summary);
     }
     const fields = node("dl", null, "fields");

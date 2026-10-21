@@ -26,6 +26,9 @@ TAIL_BYTES = 512 * 1024
 REQUEST_SEARCH_BYTES = 32 * 1024 * 1024
 MAX_SMALL_FILE = 64 * 1024
 TEXT_HIDDEN = "Text hidden · enable include_text for this profile"
+# Marks the unread middle of a long transcript between its header and tail rows.
+READ_GAP = "spiritboard.read_gap"
+REQUEST_HEADING = re.compile(r"^## My request(?: for Codex)?:[ \t]*$", re.M)
 MAX_ENTRIES = 30_000
 MAX_DEPTH = 7
 READ_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
@@ -151,8 +154,10 @@ def records(path: Path) -> list[dict[str, Any]]:
             tail = stream.read(TAIL_BYTES + 1)
             tail = tail.split(b"\n", 1)[-1]
             blocks = [header, tail]
-    result = []
-    for block in blocks:
+    result: list[dict[str, Any]] = []
+    for index, block in enumerate(blocks):
+        if index:
+            result.append({"type": READ_GAP})
         for line in block.splitlines(keepends=True):
             # A producer can be midway through writing an otherwise valid JSON.
             if not line.endswith(b"\n"):
@@ -279,21 +284,22 @@ def utc_time(value: Any) -> str | None:
         return None
 
 
-def text(message: Any, limit: int = 160) -> str:
+def parts(message: Any) -> list[str]:
     if isinstance(message, str):
-        return safe(message, limit)
+        return [message]
     if isinstance(message, list):
-        return safe(
-            " ".join(
-                x.get("text", "")
-                for x in message
-                if isinstance(x, dict)
-                and x.get("type") in {"text", "input_text", "output_text"}
-                and isinstance(x.get("text"), str)
-            ),
-            limit,
-        )
-    return ""
+        return [
+            x["text"]
+            for x in message
+            if isinstance(x, dict)
+            and x.get("type") in {"text", "input_text", "output_text"}
+            and isinstance(x.get("text"), str)
+        ]
+    return []
+
+
+def text(message: Any, limit: int = 160) -> str:
+    return safe(" ".join(parts(message)), limit)
 
 
 def request_text(message: object, limit: int = 160) -> str:
@@ -303,7 +309,14 @@ def request_text(message: object, limit: int = 160) -> str:
     _, fork, directive = value.partition("</fork-boilerplate>")
     if fork:
         value = re.sub(r"^\s*Your directive:\s*", "", directive)
-    return "" if value.lstrip().startswith(("<", "# AGENTS.md")) else safe(value, limit)
+        return "" if value.lstrip().startswith(("<", "# AGENTS.md")) else safe(value, limit)
+    kept = []
+    for part in parts(message):
+        # Codex apps put files, IDE or browser context first and the request under a heading.
+        part = REQUEST_HEADING.split(part)[-1]
+        if not part.lstrip().startswith(("<", "# AGENTS.md")):
+            kept.append(part)
+    return safe(" ".join(kept), limit)
 
 
 def valid_cwd(value: object) -> str:

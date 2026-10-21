@@ -20,6 +20,8 @@ from .. import processes
 from ..processes import Process
 from ..transcripts import (
     READ_FLAGS,
+    READ_GAP,
+    TEXT_HIDDEN,
     Session,
     existing_trees,
     last_request,
@@ -105,6 +107,13 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
         if stamp and (out["last_seen"] is None or stamp > out["last_seen"]):
             out["last_seen"] = stamp
         kind, message = row.get("type"), row.get("message", {})
+        if kind == READ_GAP:
+            # The header's request and reply predate the unread middle; the scan searches back.
+            # A subagent keeps its first prompt, which is the task its parent gave it.
+            last_reply = ""
+            if not agent:
+                out["task"] = TEXT_HIDDEN
+            continue
         state, activity, evidence = None, None, None
         if kind == "custom-title":
             custom_title = safe(row.get("customTitle"), 120) or custom_title

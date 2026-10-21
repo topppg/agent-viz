@@ -133,7 +133,7 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  const asker = rows().find(r => r.dataset.runId === 'ask');
  assert.ok(asker.textContent.includes('needs you~'));
  assert.ok(asker.textContent.includes('Retry tuning'));
- assert.ok(asker.textContent.includes('✦ Tuning retry limits'));
+ assert.ok(asker.textContent.includes('Tuning retry limits') && !asker.textContent.includes('✦'));
  assert.ok(flatten(asker).some(x => (x.className || '').includes('doing needs')));
  assert.ok(rows().find(r => r.dataset.runId === 'root').textContent.includes('40'));
  // Harnesses: every profile listed, the dominant one flagged noisy.
