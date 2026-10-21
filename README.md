@@ -13,11 +13,30 @@ waiting for you or gone, and a button that takes you straight to it.
 It only reads what the agents already write to disk. It never starts, steers or
 stops an agent, and nothing leaves your machine unless you turn on summaries.
 
+## Supported harnesses
+
+| Harness | Reads | Live or closed | Open | Resume |
+| --- | --- | --- | --- | --- |
+| **Claude Code** (CLI) | `~/.claude*/projects`, `CLAUDE_CONFIG_DIR` | `sessions/<pid>.json` + process start time | its terminal tab or app window | `claude --resume <id>` |
+| **Claude desktop app** | the same folders, marked "Claude desktop", enriched from the app's session records | as Claude Code | the exact session (`claude://code/continue`) | in a terminal with the CLI |
+| **Codex** (CLI and ChatGPT app) | `~/.codex*`, `~/.codex-switch/profiles/*`, `CODEX_HOME` | the thread locks a codex process holds | its terminal tab, or the ChatGPT window | `codex resume <id>` |
+| **opencode** | `opencode.db`, read-only | an `opencode` process in the session's directory | its terminal | `opencode -s <id>` |
+| **Pi** | `~/.pi/agent/sessions`, `PI_CODING_AGENT_DIR` | a `pi` process in the session's directory | its terminal | `pi --session <file>` |
+| **DeepSeek Harness** | `~/.dsh` (zstd-compressed), `DSH_HOME` | the `session.lock` the app holds | the app window | not yet |
+| **Your own agents** | the Python SDK below | heartbeats | — | — |
+
+Claude Code, Codex and opencode are checked against real sessions. The Claude
+desktop marker, Pi and DeepSeek Harness are built from each app's own code and
+documentation and covered by tests, but have seen little or no real data yet.
+New harnesses plug in as one module each (see [the source guide](docs/SOURCES.md#adding-a-harness)).
+
 ## What you see
 
 - **Every harness at once.** Each storage profile (personal and work accounts,
   the default CLI folders, the desktop apps) is a harness with its own colour,
-  live events per minute, and a 10-minute activity chart stacked by harness.
+  live events per minute, and a 10-minute activity chart stacked by harness. The
+  harness list shows only harnesses with something running; idle ones stay
+  available in the harness filter.
 - **Where to put your attention.** Every session has one status:
 
   | Status | Meaning |

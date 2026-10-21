@@ -136,11 +136,11 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(asker.textContent.includes('Tuning retry limits') && !asker.textContent.includes('✦'));
  assert.ok(flatten(asker).some(x => (x.className || '').includes('doing needs')));
  assert.ok(rows().find(r => r.dataset.runId === 'root').textContent.includes('40'));
- // Harnesses: every profile listed, the dominant one flagged noisy.
+ // Harnesses: only those with something running; idle ones are counted, the dominant one flagged noisy.
  const harnessButtons = ids.harnesses.children.filter(x => x.tagName === 'button');
- assert.equal(harnessButtons.length, 4);
- assert.ok(ids.harnesses.textContent.includes('Empty profile'));
- assert.ok(ids.harnesses.textContent.includes('no observations yet'));
+ assert.equal(harnessButtons.length, 3);
+ assert.ok(!ids.harnesses.textContent.includes('Empty profile'));
+ assert.ok(ids.harnesses.textContent.includes('1 idle harness · pick one in the harness filter'));
  assert.ok(harnessButtons.find(b => b.textContent.includes('codex · work')).textContent.includes('▲ noisy'));
  assert.ok(ids.flux.children.some(x => x.className === 'col'));
  assert.ok(ids.flux.attrs['aria-label'].includes('codex · work'));
