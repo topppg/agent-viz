@@ -10,6 +10,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import focus
@@ -45,6 +46,11 @@ class Collector(ThreadingHTTPServer):
         self.focus_lock = threading.Lock()
         self.instance_id = uuid.uuid4().hex
         super().__init__((host, port), Handler)
+
+    def server_bind(self) -> None:
+        # HTTPServer's reverse-DNS lookup can stall; this server only binds numeric loopback.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     @property
     def url(self):
