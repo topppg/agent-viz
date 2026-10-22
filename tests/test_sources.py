@@ -233,6 +233,36 @@ class SourcesTests(unittest.TestCase):
         self.log(codex, "run.jsonl", rows)
         self.assertEqual(scan_profile(codex)[0]["task"], "Follow-up request")
 
+    def test_claude_now_keeps_latest_agent_message_after_tool_result(self):
+        profile = self.profile("claude", "claude-reply", text=True)
+        base = {"sessionId": "same", "timestamp": "2026-10-20T08:00:00Z"}
+        self.log(
+            profile,
+            "p/session.jsonl",
+            [
+                {
+                    **base,
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": "Investigating the retry path"}]
+                    },
+                },
+                {**base, "type": "user", "message": {"content": "Check one more caller"}},
+                {
+                    **base,
+                    "type": "user",
+                    "message": {"content": [{"type": "tool_result", "content": "SECRET output"}]},
+                },
+            ],
+        )
+        with patch.object(claude, "latest_reply", wraps=claude.latest_reply) as search:
+            row = scan_profile(profile)[0]
+        search.assert_not_called()
+        self.assertEqual(row["activity"], "Investigating the retry path")
+        self.assertNotIn("SECRET output", json.dumps(row))
+        hidden = replace(profile, include_text=False)
+        self.assertEqual(scan_profile(hidden)[0]["activity"], "Tool result recorded")
+
     def test_subagent_named_by_description_with_parent_prompt_as_goal(self):
         profile = self.profile("claude", "claude-sub", text=True)
         side = {
@@ -593,12 +623,13 @@ class SourcesTests(unittest.TestCase):
                 {**base, "type": "assistant", "message": {"content": "Opening reply"}},
             ]
             + [result] * 100
+            + [{**base, "type": "assistant", "message": {"content": "Latest agent message"}}]
             + [{**base, "type": "user", "message": {"content": "Latest request"}}]
             + [result] * 200
         )
         self.log(claude, "p/session.jsonl", rows)
         row = scan_profile(claude)[0]
-        self.assertEqual((row["task"], row["activity"]), ("Latest request", "Tool result recorded"))
+        self.assertEqual((row["task"], row["activity"]), ("Latest request", "Latest agent message"))
 
     def test_codex_app_requests_are_unwrapped(self):
         profile = self.profile("codex", "codex-app", text=True)
