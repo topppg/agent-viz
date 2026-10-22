@@ -2,44 +2,28 @@
 
 from __future__ import annotations
 
-import http.client
-import json
-import re
+import argparse
+import sys
+from pathlib import Path
 
-from spiritboard.cli import main
+from spiritboard import cli
+from spiritboard.launcher import LaunchError, default_data_dir, running_url
 
-_STANDARD_URL = "http://127.0.0.1:8766"
 
-
-def running_standard_dashboard() -> str | None:
-    connection = http.client.HTTPConnection("127.0.0.1", 8766, timeout=0.5)
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="spiritboard-backend")
+    parser.add_argument("--data-dir", type=Path, help="show only the dashboard that owns this")
+    args = parser.parse_args(argv)
     try:
-        connection.request("GET", "/api/health")
-        response = connection.getresponse()
-        if response.status != 200:
-            return None
-        body = response.read(4097)
-        if len(body) > 4096:
-            return None
-        health = json.loads(body)
-        if (
-            isinstance(health, dict)
-            and health.get("ok") is True
-            and health.get("service") == "spiritboard"
-            and isinstance(health.get("instance_id"), str)
-            and re.fullmatch(r"[0-9a-f]{32}", health["instance_id"])
-        ):
-            return _STANDARD_URL
-    except (OSError, ValueError, http.client.HTTPException):
-        pass
-    finally:
-        connection.close()
-    return None
+        url = running_url(args.data_dir or default_data_dir())
+    except LaunchError as error:
+        if args.data_dir is not None:
+            print(f"Spiritboard could not connect: {error}", flush=True)
+            return 1
+        return cli.main(["serve", "--no-open", "--port", "0"])
+    print(f"Spiritboard is already running: {url}", flush=True)
+    return 0
 
 
 if __name__ == "__main__":
-    running = running_standard_dashboard()
-    if running:
-        print(f"Spiritboard is already running: {running}", flush=True)
-    else:
-        raise SystemExit(main(["serve", "--no-open", "--port", "0"]))
+    raise SystemExit(main(sys.argv[1:]))
