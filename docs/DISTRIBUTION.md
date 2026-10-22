@@ -12,12 +12,12 @@ Linux Secret Service collection on a D-Bus user session. A headless Linux machin
 desktop keyring service before it can save credentials. Monitoring and demo mode do not require
 one. Spiritboard never selects a plaintext, null, third-party, or chained storage fallback.
 
-## Install from GitHub today
+## Install the published package
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
 ```bash
-uvx --from git+https://github.com/topppg/spiritboard@main spiritboard
+uvx spiritboard
 ```
 
 This installs into uv's isolated tool cache and opens the local dashboard. Keep the terminal
@@ -30,14 +30,14 @@ The GitHub repository, package, and installed command are all named `spiritboard
 For an installed command you can use repeatedly:
 
 ```bash
-uv tool install git+https://github.com/topppg/spiritboard@main
+uv tool install spiritboard
 spiritboard
 ```
 
 If uv reports that its tool directory is not on your PATH, run `uv tool update-shell` and open a
-new terminal. To upgrade this GitHub installation, rerun the install command with `--force --refresh`.
-For a reproducible installation, replace `@main` with a reviewed full commit SHA or a published
-release tag. The moving `main` branch is a development channel, not an immutable release.
+new terminal. To upgrade the installed package, run `uv tool upgrade spiritboard`. For a fixed
+version, use `uvx spiritboard@X.Y.Z` or `uv tool install spiritboard==X.Y.Z`. To try unreleased
+changes, use `uvx --from git+https://github.com/topppg/spiritboard@main spiritboard`.
 
 Useful launch options:
 
@@ -59,22 +59,20 @@ Existing installations keep their data: explicitly pass the former `--data-dir` 
 using it. No old folders are silently moved or deleted. Uninstalling the tool with
 `uv tool uninstall spiritboard` removes its environment, not your saved dashboard data.
 
-## PyPI is a separate release step
+## macOS app distribution
 
-The workflows prepare publishing, but do not mean that the `spiritboard` name has been reserved,
-that a package is available on PyPI, or that a release has happened. A maintainer must verify the
-name, configure the account and publishing permissions, and explicitly approve the first
-upload. The package is MIT-licensed (`LICENSE`, `license = "MIT"` in `pyproject.toml`).
+The [macOS app guide](MAC_APP.md) covers the standalone window and Dock app. After the Apple
+credentials below are configured, every new public release builds signed and notarized Apple
+Silicon and Intel DMGs and attaches them to the matching GitHub Release. The Python package
+continues to install through `uvx spiritboard`. There is no public Mac DMG yet; the existing
+`0.1.0` release predates this workflow. An unsigned local DMG is only for testing.
 
-Only after a successful, verified PyPI release should the default installation become:
+## Python package and Mac release
 
-```bash
-uvx spiritboard
-# Or install the released command:
-uv tool install spiritboard
-```
-
-Do not advertise those short commands before the intended package is actually available.
+`spiritboard` is published on PyPI, and `uvx spiritboard` installs that package. The matching
+GitHub Release contains its exact wheel and source archive. The package is MIT-licensed
+(`LICENSE`, `license = "MIT"` in `pyproject.toml`). New releases use the manual workflow below;
+Mac DMGs join the GitHub assets after signing credentials are configured.
 
 ## What CI checks
 
@@ -107,19 +105,39 @@ checkout for each release build rather than mixing versions in an old output fol
 
 One-time actions, performed by the repository/package owner:
 
-1. Verify that the PyPI project name can be used. Update metadata and docs if the final package
-   name differs from `spiritboard`.
-2. Create a GitHub environment named `pypi`. Restrict deployment branches to `main`, require a
+1. Keep the GitHub environment named `pypi` restricted to `main`, require a
    release reviewer where available, and disable self-review where appropriate.
-3. Add a PyPI trusted publisher (or pending publisher for the first release) with owner `topppg`,
+2. Keep the PyPI trusted publisher configured with owner `topppg`,
    repository `spiritboard`, workflow filename `release.yml`, and environment `pypi`. All fields must
    match exactly. If the GitHub repository is renamed, update the publisher and project URLs first.
-4. Protect the default branch and require the normal checks and distribution matrix before release.
+3. Protect the default branch and require the normal checks and distribution matrix before release.
 
 Do not add a long-lived PyPI token to the repository. The publishing job requests a short-lived
 identity token; the build and test jobs do not have that permission. See the official
 [PyPI trusted publishing guide](https://docs.pypi.org/trusted-publishers/using-a-publisher/) and
 [uv publishing guidance](https://docs.astral.sh/uv/guides/integration/github/#publishing-to-pypi).
+
+## Maintainer setup: macOS releases
+
+Create a GitHub environment named `macos-release`, restrict it to `main`, and require a release
+reviewer where available. Add these environment secrets; do not put their values in the repo or
+in a PR:
+
+| Secret | Value |
+| --- | --- |
+| `MAC_CERTIFICATE_BASE64` | Base64 encoding of an exported Developer ID Application `.p12`, including its private key. |
+| `MAC_CERTIFICATE_PASSWORD` | Password used when exporting that `.p12`. |
+| `MAC_SIGN_IDENTITY` | Exact identity name, such as `Developer ID Application: Example (TEAMID)`. |
+| `MAC_NOTARY_KEY_BASE64` | Base64 encoding of an App Store Connect API `.p8` key authorized to notarize. |
+| `MAC_NOTARY_KEY_ID` | Key ID for that `.p8` key. |
+| `MAC_NOTARY_ISSUER_ID` | Issuer ID for that `.p8` key. |
+
+The workflow imports them into a temporary keychain on each Mac runner, removes the keychain
+after building, and never saves credentials in release artifacts. Both the dry run and the
+publish run need these secrets. The first release with Mac DMGs must use a **new version**;
+existing PyPI files, tags, and GitHub release assets are immutable. See [Apple's notarization
+guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+for obtaining and configuring signing credentials.
 
 ## Release procedure
 
@@ -128,9 +146,10 @@ identity token; the build and test jobs do not have that permission. See the off
 2. Merge the approved changes and verify `Checks` and `Distribution` on `main`.
 3. In GitHub Actions, select **Release package**, choose the `main` branch, enter the exact
    committed version, and leave **publish** unchecked. This reruns the distribution matrix,
-   tests, and metadata validation, then retains the built files as a seven-day artifact.
-4. Inspect that run and its artifacts. When ready to upload, manually run the same workflow
-   against the reviewed `main` commit with **publish** checked. Ensure `main` has not advanced
+   tests, and metadata validation, then builds and notarizes both Mac DMGs. The wheel, source
+   archive, and DMGs are retained as seven-day artifacts.
+4. Inspect that run and its artifacts, including both DMGs. When ready to upload, manually run
+   the same workflow against the reviewed `main` commit with **publish** checked. Ensure `main` has not advanced
    since review. Approve the `pypi` deployment only after inspecting that run's source and outputs.
 5. The publishing job rejects an existing `vVERSION` tag that resolves to another commit,
    including annotated tags, or conflicting existing GitHub release metadata or assets.
@@ -138,10 +157,11 @@ identity token; the build and test jobs do not have that permission. See the off
    PyPI's SHA-256 receipts against both files from that run's validated build artifact. It then
    creates `vVERSION` at the run's exact `main` commit SHA, not the latest moving `main` branch,
    and a matching GitHub Release. The release links PyPI and the source commit and attaches the
-   same wheel, source archive, and a `SHA256SUMS` file. Existing tags and assets are never moved
-   or overwritten.
-6. Verify the resulting PyPI project, version, README, GitHub tag/release, and installation in
-   a clean environment. Only then update public installation instructions and announce the release.
+   same wheel, source archive, both signed and notarized DMGs, and a `SHA256SUMS` file covering
+   all four payloads. Existing tags and assets are never moved or overwritten.
+6. Verify the resulting PyPI project, version, README, GitHub tag/release, both DMG downloads,
+   and installation in a clean environment. Only then update public installation instructions
+   and announce the release.
 
 The workflow is manual-only, refuses non-`main` refs, and checks the requested version against
 both package and source metadata. Pushes, pull requests, tags, and GitHub release events do not
@@ -160,7 +180,7 @@ while GitHub pairing fails. The workflow then fails and reports the partial rele
 announce completion until both sides have been verified.
 
 If publishing succeeded but the GitHub job failed, inspect its error and select **Re-run failed
-jobs** on the same run, within the build artifact's seven-day retention period. Do not start
+jobs** on the same run, within the artifacts' seven-day retention period. Do not start
 another publishing run, rerun all jobs, republish the version, move a tag, or delete existing
 assets. The pairing job checks PyPI again, verifies any existing release assets byte-for-byte,
 and uploads only missing assets. A conflicting tag, release, or file is an error requiring

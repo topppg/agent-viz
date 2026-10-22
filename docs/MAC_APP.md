@@ -1,10 +1,11 @@
 # macOS app
 
 The macOS app gives Spiritboard its own Dock icon and window. It contains the same Python
-dashboard as the `uvx` package, plus a bundled Python runtime. Users can download the DMG,
-drag `Spiritboard.app` to Applications, and open it without installing Python or uv. The app
-uses the CLI's normal data directory: it shows the dashboard that already owns that directory,
-or starts its own server there on a free port.
+dashboard as the `uvx` package, plus a bundled Python runtime. Signed Apple Silicon and Intel
+DMGs are built by the release workflow but have not been published yet. Once distributed, users
+can drag `Spiritboard.app` to Applications and open it without installing Python or uv. The app uses the
+CLI's normal data directory: it shows the dashboard that already owns that directory, or starts
+its own server there on a free port.
 
 A CLI dashboard started with a custom `--data-dir` keeps its own history. To show it in the app,
 choose **File › Choose Data Folder…** and pick that folder; hidden folders such as
@@ -40,6 +41,8 @@ The build signs the bundled Python program and the app, notarizes the DMG, and s
 ticket. Apple requires Developer ID signing and notarization for normal distribution outside
 the Mac App Store. Keep the signing identity and notarization credentials out of the repo.
 
-The existing `uvx spiritboard` command remains available for CLI users. DMGs should be added
-to GitHub Releases only after the release pairing checks are extended to account for them;
-the current pairing expects exactly the Python wheel, source archive, and checksum file.
+The release workflow builds, signs, notarizes, and checks both Mac architectures before uploading
+the Python package to PyPI. It attaches both DMGs to the matching GitHub Release, with their
+SHA-256 digests in `SHA256SUMS`. The existing `uvx spiritboard` command remains available. See
+the [distribution guide](DISTRIBUTION.md#maintainer-setup-macos-releases) for the required Apple
+credentials and release procedure. No public Mac DMG exists until a new version is released.
