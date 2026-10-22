@@ -120,6 +120,19 @@ enabled setting or explicit `--summaries`, a new installation makes no summary c
   makes at most one request every 120 seconds, covering up to six sessions.
 - While a refresh is due, the row keeps its previous summary, marked as stale.
 
+## Titles
+
+- A session starts with its native title. When a summary refreshes, the same call
+  may give it a new title if the goal has clearly moved on, at most once an hour.
+  The title it replaced is shown as "was: …" in the expanded row.
+- Names you set yourself (a Claude `/rename`, a Pi `/name`) are never replaced.
+  Other harnesses don't record who set a title, so any change to the native title
+  is treated as a rename: the AI title is dropped and later ones build on it.
+- A subagent with only a generic name (no Claude Task description, no DeepSeek
+  title) is named once from the task its parent gave it, after it has run for
+  30 seconds, in the same batched call. Codex subagent prompts are encrypted, so
+  they keep their agent path.
+
 ## Data sent
 
 Each entry is at most 2,000 characters. Tool arguments, tool results,

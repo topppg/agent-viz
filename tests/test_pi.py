@@ -102,11 +102,15 @@ class PiTests(unittest.TestCase):
         t.user("Fix the flaky invented test")
         t.assistant(say("Done."))
         self.assertEqual(self.observe(t)["name"], "Fix the flaky invented test")
+        self.assertNotIn("title_source", self.observe(t))
         t.add("session_info", name="Invented rename")
         t.add("session_info", name="Final invented name")
-        self.assertEqual(self.observe(t)["name"], "Final invented name")
+        run = self.observe(t)
+        self.assertEqual((run["name"], run["title_source"]), ("Final invented name", "user"))
+        self.assertNotIn("title_source", self.observe(t, self.hidden))
         t.add("session_info", name="")
         self.assertEqual(self.observe(t)["name"], "Fix the flaky invented test")
+        self.assertNotIn("title_source", self.observe(t))
 
     def test_state_transitions(self):
         t = Transcript()

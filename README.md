@@ -120,7 +120,8 @@ New harnesses plug in as one module each (see [the source guide](https://github.
 - **What each one is doing.** The session's own title (your `/rename`, the
   Claude desktop app's title, Claude's generated title, the Codex thread name, the
   opencode session title, a Pi `/name`, the DeepSeek Harness title or the Grok Bot
-  agent's name), its goal, your latest request and
+  agent's name), retitled by the summary model once the goal moves on, its goal,
+  your latest request and
   the agent's latest reply or commentary. Subagents sit under their parent,
   named by the task the parent gave them. Sessions the Claude desktop app runs
   are tagged **Claude desktop**; ones archived there never count as active.

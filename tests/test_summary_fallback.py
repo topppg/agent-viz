@@ -56,7 +56,13 @@ def response(cost: float | None = None):
     return {
         "id": "synthetic-response",
         "usage": {"cost": cost} if cost is not None else {},
-        "choices": [{"message": {"content": json.dumps({"r1": "Investigating retry behavior"})}}],
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps({"r1": {"summary": "Investigating retry behavior"}})
+                }
+            }
+        ],
     }
 
 

@@ -216,6 +216,8 @@ class DshTests(unittest.TestCase):
         child = runs[CHILD]
         self.assertEqual(child["parent_run_id"], runs[PARENT]["run_id"])
         self.assertEqual(child["name"], "DeepSeek subagent 22222222")
+        self.assertEqual(child["title_source"], "placeholder")
+        self.assertNotIn("title_source", runs[PARENT])
         self.assertEqual(child["task"], "Audit the login module")
         self.assertEqual(child["state"], "working")
         self.assertEqual(dsh.HARNESS.owner(CHILD), CHILD)
@@ -230,6 +232,20 @@ class DshTests(unittest.TestCase):
         self.assertEqual(dsh.titles(self.root), {PARENT: "Cached"})
         self.assertEqual(self.observe()["name"], "Cached")
         self.assertNotIn("Cached", json.dumps(self.observe(text=False)))
+
+    def test_titled_subagent_is_not_a_placeholder(self):
+        rows = [header(CHILD, parent=PARENT), user(1, "Audit the login module", "parent")]
+        titled = [*rows, event(2, "session/title", {"title": "Login audit", "source": {}})]
+        run = self.observe(CHILD, titled)
+        self.assertEqual(run["name"], "Login audit")
+        self.assertNotIn("title_source", run)
+        cache = self.root / dsh.PROJCACHE
+        cache.mkdir(parents=True)
+        record = {"record": {"rows": {"title": {"ver": 1, "seq": 1, "val": "Cached audit"}}}}
+        (cache / f"{CHILD}.json").write_text(json.dumps(record))
+        run = self.observe(CHILD, rows)
+        self.assertEqual(run["name"], "Cached audit")
+        self.assertNotIn("title_source", run)
 
     def test_archived_sessions_only_left_out_of_live_storage(self):
         self.write(PARENT)

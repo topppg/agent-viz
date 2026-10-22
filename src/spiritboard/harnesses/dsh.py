@@ -391,6 +391,8 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
             )
     if profile.include_text and title:
         out["name"] = title
+    elif agent and profile.include_text:
+        out["title_source"] = "placeholder"
     out["last_seen"] = out["last_seen"] or mtime_iso(mtime)
     return out
 

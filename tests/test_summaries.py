@@ -6,7 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
@@ -64,7 +64,7 @@ class SummariesTests(unittest.TestCase):
                 {
                     "message": {
                         "content": content
-                        or json.dumps({"r1": "Investigating retry-test expectations"})
+                        or json.dumps({"r1": {"summary": "Investigating retry-test expectations"}})
                     }
                 }
             ],
@@ -221,7 +221,7 @@ class SummariesTests(unittest.TestCase):
         result = instance._candidates()
         self.assertEqual(len(result), 6)
         self.assertEqual(result[0]["run_id"], "working")
-        self.assertLessEqual(sum(len(row["text"]) for row in result), 6000)
+        self.assertLessEqual(sum(len(row["entry"]["excerpt"]) for row in result), 6000)
 
     def test_redaction_input_and_output(self):
         instance = self.summarizer()
@@ -231,7 +231,9 @@ class SummariesTests(unittest.TestCase):
             f"Bearer token123 {secret} password=abcdef"
         )
         response = self.response(
-            json.dumps({"r1": "Checking /Users/private/work for me@example.org " + secret})
+            json.dumps(
+                {"r1": {"summary": "Checking /Users/private/work for me@example.org " + secret}}
+            )
         )
         with patch("spiritboard.summaries._request", return_value=response) as request:
             instance.tick()
@@ -291,10 +293,14 @@ class SummariesTests(unittest.TestCase):
 
     def test_extra_missing_duplicate_and_wrong_type_ids_rejected(self):
         for content in (
-            '{"r2":"Unknown"}',
-            '{"r1":"Fine","extra":"No"}',
-            '{"r1":"First","r1":"Second"}',
+            '{"r2":{"summary":"Unknown"}}',
+            '{"r1":{"summary":"Fine"},"extra":{"summary":"No"}}',
+            '{"r1":{"summary":"First"},"r1":{"summary":"Second"}}',
             '{"r1":42}',
+            '{"r1":"Plain sentence"}',
+            '{"r1":{"summary":"Fine","extra":"No"}}',
+            '{"r1":{"summary":null,"title":"Only a title"}}',
+            '{"r1":{"summary":"Fine","title":7}}',
             "[]",
         ):
             with self.subTest(content=content):
@@ -461,8 +467,8 @@ class SummariesTests(unittest.TestCase):
         instance.profiles_provider = lambda: [profile]
         candidates = instance._candidates()
         self.assertEqual(len(candidates), 1)
-        self.assertIn("Fix retries", candidates[0]["text"])
-        self.assertNotIn("Text hidden", candidates[0]["text"])
+        self.assertIn("Fix retries", candidates[0]["entry"]["excerpt"])
+        self.assertNotIn("Text hidden", candidates[0]["entry"]["excerpt"])
 
     def test_native_never_falls_back_to_hidden_metadata(self):
         self.store.snapshot.return_value = {
@@ -527,7 +533,7 @@ class SummariesTests(unittest.TestCase):
 
     def test_instrumented_codex_sdk_uses_supplied_text(self):
         self.store.snapshot.return_value = {"runs": [self.make_run(source="codex", mode="sdk")]}
-        self.assertIn("Fix the retry test", self.summarizer()._candidates()[0]["text"])
+        self.assertIn("Fix the retry test", self.summarizer()._candidates()[0]["entry"]["excerpt"])
 
     def test_sdk_summary_stale_immediately_when_task_changes(self):
         instance = self.summarizer()
@@ -579,7 +585,7 @@ class SummariesTests(unittest.TestCase):
         request.assert_not_called()
         entry = instance.public_state()["summaries"][0]
         self.assertEqual(entry["origin"], "claude-recap")
-        self.assertEqual(entry["title"], "Retry test repair")
+        self.assertEqual(entry["title"], "")
         self.assertEqual(
             entry["text"], "We're repairing the flaky retry test. Next, rerun the suite."
         )
@@ -599,7 +605,7 @@ class SummariesTests(unittest.TestCase):
         instance.profiles_provider = lambda: [profile]
         with patch("spiritboard.summaries._request", return_value=self.response()) as request:
             instance.tick()
-        self.assertEqual(instance.public_state()["summaries"][0]["title"], "Desktop title")
+        self.assertEqual(instance.public_state()["summaries"][0]["title"], "")
         sent = request.call_args.args[1]["messages"][1]["content"]
         self.assertIn("Desktop title", sent)
         self.assertNotIn("Generated", sent)
@@ -667,7 +673,7 @@ class SummariesTests(unittest.TestCase):
         instance.profiles_provider = lambda: [profile]
         with patch("spiritboard.summaries._request", return_value=self.response()) as request:
             instance.tick()
-        sent = json.loads(request.call_args.args[1]["messages"][1]["content"])["r1"]
+        sent = json.loads(request.call_args.args[1]["messages"][1]["content"])["r1"]["excerpt"]
         for part in (
             "recap: Repairing the retry test.",
             "user: Fix the retry test",
@@ -701,8 +707,165 @@ class SummariesTests(unittest.TestCase):
         instance = self.summarizer()
         instance.profiles_provider = lambda: [profile]
         candidate = instance._candidates()[0]
-        self.assertEqual(candidate["title"], "Retry repair")
-        self.assertIn("title: Retry repair", candidate["text"])
+        self.assertIn("title: Retry repair", candidate["entry"]["excerpt"])
+
+    def reply(self, summary="Investigating retries", title=None):
+        return self.response(json.dumps({"r1": {"summary": summary, "title": title}}))
+
+    def age(self, instance, *, titled=False):
+        self.age_calls(instance)
+        old = datetime.fromtimestamp(time.time() - 3700, UTC).isoformat()
+        instance.db.execute("UPDATE summaries SET generated_at=?", (old,))
+        if titled:
+            instance.db.execute(
+                "UPDATE summaries SET titled_at=? WHERE titled_at IS NOT NULL", (old,)
+            )
+
+    def sent_entry(self, request):
+        return json.loads(request.call_args.args[1]["messages"][1]["content"])["r1"]
+
+    def test_goal_shift_retitles_at_most_hourly(self):
+        run = self.store.snapshot.return_value["runs"][0]
+        run["name"] = "Retry fix"
+        instance = self.summarizer()
+        with patch(
+            "spiritboard.summaries._request", return_value=self.reply(title="Retry budget overhaul")
+        ) as request:
+            instance.tick()
+        self.assertEqual(self.sent_entry(request)["current_title"], "Retry fix")
+        entry = instance.public_state()["summaries"][0]
+        self.assertEqual(entry["title"], "Retry budget overhaul")
+        self.assertEqual(entry["previous_title"], "Retry fix")
+        self.assertIsNotNone(entry["titled_at"])
+
+        run["task"] = "Now document the retry budget"
+        self.age(instance)
+        with patch(
+            "spiritboard.summaries._request", return_value=self.reply(title="Docs")
+        ) as request:
+            instance.tick()
+        self.assertNotIn("current_title", self.sent_entry(request))
+        self.assertEqual(instance.public_state()["summaries"][0]["title"], "Retry budget overhaul")
+
+        run["task"] = "Migrate the scheduler"
+        self.age(instance, titled=True)
+        with patch(
+            "spiritboard.summaries._request", return_value=self.reply(title="Scheduler migration")
+        ) as request:
+            instance.tick()
+        self.assertEqual(self.sent_entry(request)["current_title"], "Retry budget overhaul")
+        entry = instance.public_state()["summaries"][0]
+        self.assertEqual(entry["title"], "Scheduler migration")
+        self.assertEqual(entry["previous_title"], "Retry budget overhaul")
+
+    def test_same_or_null_title_keeps_the_native_name(self):
+        self.store.snapshot.return_value["runs"][0]["name"] = "Retry fix"
+        for title in (None, "retry FIX"):
+            with self.subTest(title=title):
+                instance = self.summarizer()
+                with patch("spiritboard.summaries._request", return_value=self.reply(title=title)):
+                    instance.tick()
+                entry = instance.public_state()["summaries"][0]
+                self.assertEqual((entry["title"], entry["previous_title"]), ("", ""))
+
+    def test_native_rename_hides_and_resets_the_ai_title(self):
+        run = self.store.snapshot.return_value["runs"][0]
+        run["name"] = "Retry fix"
+        instance = self.summarizer()
+        with patch("spiritboard.summaries._request", return_value=self.reply(title="Retry budget")):
+            instance.tick()
+        run["name"] = "Renamed by me"
+        entry = instance.public_state()["summaries"][0]
+        self.assertEqual((entry["title"], entry["previous_title"]), ("", ""))
+        run["task"] = "Something else entirely"
+        self.age(instance)
+        with patch("spiritboard.summaries._request", return_value=self.reply()) as request:
+            instance.tick()
+        self.assertEqual(self.sent_entry(request)["current_title"], "Renamed by me")
+        self.assertEqual(instance.public_state()["summaries"][0]["title"], "")
+
+    def test_user_set_names_are_never_retitled(self):
+        self.store.snapshot.return_value["runs"][0].update(name="Mine", title_source="user")
+        instance = self.summarizer()
+        with patch(
+            "spiritboard.summaries._request", return_value=self.reply(title="Model idea")
+        ) as request:
+            instance.tick()
+        self.assertNotIn("current_title", self.sent_entry(request))
+        self.assertEqual(instance.public_state()["summaries"][0]["title"], "")
+
+    def subagent(self, **overrides):
+        started = datetime.fromtimestamp(time.time() - 60, UTC).isoformat()
+        values = dict(
+            run_id="child",
+            parent_run_id="parent",
+            name="Claude subagent 1234abcd",
+            title_source="placeholder",
+            task="Audit the cache keys",
+            started_at=started,
+        )
+        values.update(overrides)
+        return self.make_run(**values)
+
+    def test_placeholder_subagent_is_titled_once(self):
+        self.store.snapshot.return_value = {"runs": [self.subagent()]}
+        instance = self.summarizer()
+        response = self.response(json.dumps({"r1": {"summary": None, "title": "Cache key audit"}}))
+        with patch("spiritboard.summaries._request", return_value=response) as request:
+            instance.tick()
+        self.assertEqual(self.sent_entry(request), {"subagent_task": "Audit the cache keys"})
+        entry = instance.public_state()["summaries"][0]
+        self.assertEqual(
+            (entry["title"], entry["text"], entry["stale"]), ("Cache key audit", "", False)
+        )
+        self.store.snapshot.return_value["runs"][0]["task"] = "Changed later"
+        self.age(instance, titled=True)
+        self.assertEqual(instance._candidates(), [])
+
+    def test_subagents_not_titled_when_young_named_or_hidden(self):
+        from spiritboard.transcripts import TEXT_HIDDEN
+
+        young = datetime.fromtimestamp(time.time() - 5, UTC).isoformat()
+        for overrides in (
+            {"started_at": young},
+            {"title_source": None},
+            {"task": TEXT_HIDDEN},
+            {"archived": True},
+        ):
+            with self.subTest(overrides=overrides):
+                self.store.snapshot.return_value = {"runs": [self.subagent(**overrides)]}
+                self.assertEqual(self.summarizer()._candidates(), [])
+
+    def test_untitled_subagent_never_discards_the_batch(self):
+        self.store.snapshot.return_value["runs"].append(self.subagent())
+        instance = self.summarizer()
+        response = self.response(
+            json.dumps(
+                {
+                    "r1": {"summary": "Investigating retries", "title": None},
+                    "r2": {"summary": None, "title": " "},
+                }
+            )
+        )
+        with patch("spiritboard.summaries._request", return_value=response) as request:
+            instance.tick()
+        sent = json.loads(request.call_args.args[1]["messages"][1]["content"])
+        self.assertEqual(sent["r2"], {"subagent_task": "Audit the cache keys"})
+        state = instance.public_state()
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual([row["run_id"] for row in state["summaries"]], ["private-native-id"])
+        self.assertIn("child", instance._failed)
+
+    def test_subagent_with_a_summary_or_finished_is_not_titled(self):
+        instance = self.summarizer()
+        self.store.snapshot.return_value = {"runs": [self.subagent(state="waiting_user")]}
+        with patch("spiritboard.summaries._request", return_value=self.reply()) as request:
+            instance.tick()
+        self.assertIn("excerpt", self.sent_entry(request))
+        self.store.snapshot.return_value["runs"][0]["state"] = "working"
+        self.assertEqual(instance._candidates(), [])
+        self.store.snapshot.return_value = {"runs": [self.subagent(state="completed")]}
+        self.assertEqual(self.summarizer()._candidates(), [])
 
     def test_control_characters_stripped(self):
         self.assertEqual(redact("Checking\x00\x1b[31m tests\n"), "Checking [31m tests")
