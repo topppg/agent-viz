@@ -232,7 +232,6 @@ final class SpiritboardApp: NSObject, NSApplicationDelegate, NSMenuItemValidatio
             startBackend(current)
             return
         }
-        backend = nil
         // Our own server may own the folder chosen next, so let it release the lock first.
         old.interrupt()
         DispatchQueue.global().async {
