@@ -402,12 +402,17 @@ def test_github_errors_are_not_mistaken_for_missing_tags(monkeypatch: pytest.Mon
 
 def test_workflow_pairs_after_publish_with_separate_permissions() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    mac = workflow.split("\n  mac-app:\n", 1)[1].split("\n  publish:\n", 1)[0]
     publish, pairing = workflow.split("\n  publish:\n", 1)[1].split("\n  github-release:\n", 1)
+    assert "needs: build" in mac and "environment: macos-release" in mac
+    assert "macos-15" in mac and "macos-15-intel" in mac
+    assert "xcrun stapler validate" in mac
+    assert "needs: [build, mac-app]" in publish
     assert "github.ref == 'refs/heads/main' && inputs.publish" in publish
     assert "github.ref == 'refs/heads/main' && inputs.publish" in pairing
     assert "contents: read" in publish and "id-token: write" in publish
     assert "contents: write" not in publish
-    assert "needs: [build, publish]" in pairing
+    assert "needs: [build, mac-app, publish]" in pairing
     assert "contents: write" in pairing and "id-token:" not in pairing
     assert "paired_release.py preflight" in publish
     assert publish.index("paired_release.py preflight") < publish.index("uv publish")
@@ -416,4 +421,8 @@ def test_workflow_pairs_after_publish_with_separate_permissions() -> None:
     assert "RELEASE_SHA: ${{ github.sha }}" in pairing
     assert '--version "$RELEASE_VERSION" --sha "$RELEASE_SHA"' in pairing
     assert "name: spiritboard-dist" in publish and "name: spiritboard-dist" in pairing
+    for arch in ("arm64", "x86_64"):
+        assert f"name: spiritboard-mac-{arch}" in publish
+        assert f"name: spiritboard-mac-{arch}" in pairing
+    assert "--mac-dist mac-dist" in publish and "--mac-dist mac-dist" in pairing
     assert "uv publish" not in pairing

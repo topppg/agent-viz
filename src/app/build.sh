@@ -60,7 +60,11 @@ if [[ -n "${SPIRITBOARD_NOTARY_PROFILE:-}" ]]; then
     echo 'Notarization requires SPIRITBOARD_SIGN_IDENTITY.' >&2
     exit 1
   fi
-  xcrun notarytool submit "$dmg" --keychain-profile "$SPIRITBOARD_NOTARY_PROFILE" --wait
+  notary_args=(--keychain-profile "$SPIRITBOARD_NOTARY_PROFILE")
+  if [[ -n "${SPIRITBOARD_NOTARY_KEYCHAIN:-}" ]]; then
+    notary_args+=(--keychain "$SPIRITBOARD_NOTARY_KEYCHAIN")
+  fi
+  xcrun notarytool submit "$dmg" "${notary_args[@]}" --wait
   xcrun stapler staple "$dmg"
 fi
 

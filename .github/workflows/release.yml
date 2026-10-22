@@ -76,9 +76,87 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  mac-app:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    environment: macos-release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: false
+      - name: Install Developer ID identity and notary credentials
+        env:
+          MAC_CERTIFICATE_BASE64: ${{ secrets.MAC_CERTIFICATE_BASE64 }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          MAC_NOTARY_KEY_BASE64: ${{ secrets.MAC_NOTARY_KEY_BASE64 }}
+          MAC_NOTARY_KEY_ID: ${{ secrets.MAC_NOTARY_KEY_ID }}
+          MAC_NOTARY_ISSUER_ID: ${{ secrets.MAC_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          : "${MAC_CERTIFICATE_BASE64:?Missing Mac signing certificate}"
+          : "${MAC_CERTIFICATE_PASSWORD:?Missing Mac signing certificate password}"
+          : "${MAC_NOTARY_KEY_BASE64:?Missing notary API key}"
+          : "${MAC_NOTARY_KEY_ID:?Missing notary API key ID}"
+          : "${MAC_NOTARY_ISSUER_ID:?Missing notary API issuer ID}"
+          keychain="$RUNNER_TEMP/spiritboard-signing.keychain-db"
+          certificate="$RUNNER_TEMP/spiritboard-signing.p12"
+          notary_key="$RUNNER_TEMP/spiritboard-notary.p8"
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$MAC_CERTIFICATE_BASE64" | base64 --decode --output "$certificate"
+          printf '%s' "$MAC_NOTARY_KEY_BASE64" | base64 --decode --output "$notary_key"
+          chmod 600 "$certificate" "$notary_key"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -P "$MAC_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          xcrun notarytool store-credentials spiritboard \
+            --key "$notary_key" --key-id "$MAC_NOTARY_KEY_ID" \
+            --issuer "$MAC_NOTARY_ISSUER_ID" --keychain "$keychain"
+      - name: Build signed and notarized Mac app
+        env:
+          SPIRITBOARD_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+          SPIRITBOARD_NOTARY_PROFILE: spiritboard
+          SPIRITBOARD_NOTARY_KEYCHAIN: ${{ runner.temp }}/spiritboard-signing.keychain-db
+        run: |
+          set -euo pipefail
+          : "${SPIRITBOARD_SIGN_IDENTITY:?Missing Developer ID identity name}"
+          test "$(uname -m)" = "${{ matrix.arch }}"
+          bash src/app/build.sh
+          dmg="build/mac-app/Spiritboard-${{ inputs.version }}-macos-${{ matrix.arch }}.dmg"
+          test -f "$dmg"
+          codesign --verify --deep --strict build/mac-app/Spiritboard.app
+          xcrun stapler validate "$dmg"
+      - name: Upload notarized Mac DMG
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spiritboard-mac-${{ matrix.arch }}
+          path: build/mac-app/Spiritboard-${{ inputs.version }}-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/spiritboard-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/spiritboard-signing.p12" "$RUNNER_TEMP/spiritboard-notary.p8"
+
   publish:
     if: github.ref == 'refs/heads/main' && inputs.publish
-    needs: build
+    needs: [build, mac-app]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: pypi
@@ -96,6 +174,14 @@ jobs:
         with:
           name: spiritboard-dist
           path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: spiritboard-mac-arm64
+          path: mac-dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: spiritboard-mac-x86_64
+          path: mac-dist
       - name: Refuse conflicting tags, releases, or assets before uploading
         env:
           GH_TOKEN: ${{ github.token }}
@@ -104,13 +190,14 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
         run: |
           uv run --no-project --no-config python scripts/paired_release.py preflight \
-            --repository "$RELEASE_REPOSITORY" --version "$RELEASE_VERSION" --sha "$RELEASE_SHA"
+            --repository "$RELEASE_REPOSITORY" --version "$RELEASE_VERSION" --sha "$RELEASE_SHA" \
+            --mac-dist mac-dist
       - name: Publish with short-lived trusted publishing credentials
         run: uv publish --trusted-publishing always dist/*
 
   github-release:
     if: github.ref == 'refs/heads/main' && inputs.publish
-    needs: [build, publish]
+    needs: [build, mac-app, publish]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -126,6 +213,14 @@ jobs:
         with:
           name: spiritboard-dist
           path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: spiritboard-mac-arm64
+          path: mac-dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: spiritboard-mac-x86_64
+          path: mac-dist
       - name: Verify PyPI receipts and pair the exact source and distribution files
         env:
           GH_TOKEN: ${{ github.token }}
@@ -134,7 +229,8 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
         run: |
           uv run --no-project --no-config python scripts/paired_release.py pair \
-            --repository "$RELEASE_REPOSITORY" --version "$RELEASE_VERSION" --sha "$RELEASE_SHA"
+            --repository "$RELEASE_REPOSITORY" --version "$RELEASE_VERSION" --sha "$RELEASE_SHA" \
+            --mac-dist mac-dist
       - name: Report a partial release
         if: failure()
         run: |
