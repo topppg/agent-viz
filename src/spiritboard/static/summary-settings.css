@@ -15,7 +15,7 @@
 .summary-settings input[type="checkbox"] { flex: none; min-height: 0; margin-top: 4px; accent-color: var(--run); }
 .summary-settings-toggle { font-weight: 600; }
 .summary-settings-picker { display: grid; gap: 8px; margin-top: 20px; color: var(--soft); font-size: 13px; }
-.summary-settings-picker select { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font: inherit; }
+.summary-settings-picker select { width: 100%; min-height: 40px; padding: 8px 32px 8px 12px; border: 1px solid var(--border); border-radius: 7px; background-color: var(--bg); color: var(--text); font: inherit; }
 .summary-settings-picker select:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
 .summary-settings-picker select:disabled { opacity: .6; }
 .summary-settings-help { color: var(--muted); font-size: 12.5px; line-height: 1.6; }
