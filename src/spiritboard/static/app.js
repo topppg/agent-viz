@@ -6,8 +6,9 @@
   const PALETTE = ["#8fa8ff", "#c4b5fd", "#f0abfc", "#fda4af", "#7dd3fc", "#fdba74", "#a7f3d0", "#e9d5ff"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   const MAX_ROWS = 300;
+  const REST_KEY = "spiritboard.rested";
   const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
-  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0 };
+  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested() };
   // Chart windows in seconds: heading, then the left and middle axis labels.
   const ZOOMS = { 600: ["last 10 minutes", "-10m", "-5m"], 3600: ["last hour", "-1h", "-30m"], 86400: ["last 24 hours", "-24h", "-12h"],
     604800: ["last 7 days", "-7d", "-3.5d"], 2592000: ["last 30 days", "-30d", "-15d"] };
@@ -67,6 +68,17 @@
     if (health === "fresh" && last !== null && serverNow() - last > (state.snapshot?.stale_after_seconds || 30) * 1000) return "stale";
     return health || "unknown";
   }
+  // A rest mark holds the turn's last_seen, so any later activity clears it.
+  function loadRested() {
+    try { return new Map(Object.entries(JSON.parse(localStorage.getItem(REST_KEY)) || {})); } catch (_) { return new Map(); }
+  }
+  function toggleRest(run) {
+    if (state.rested.get(run.run_id) === run.last_seen) state.rested.delete(run.run_id); else state.rested.set(run.run_id, run.last_seen);
+    const current = new Map(state.latest.runs.map((r) => [r.run_id, r.last_seen]));
+    [...state.rested].filter(([id, seen]) => current.get(id) !== seen).forEach(([id]) => state.rested.delete(id));
+    try { localStorage.setItem(REST_KEY, JSON.stringify(Object.fromEntries(state.rested))); } catch (_) { /* rest marks are a convenience */ }
+    render();
+  }
   function statusOf(run) {
     const inferred = run.inferred ? "~" : "";
     if (run.state === "completed") return { key: "done", glyph: "✓", text: `done${inferred}` };
@@ -78,8 +90,10 @@
     // An unanswered approval stops a transcript from changing; it still needs you.
     if (run.state === "waiting_user") return { key: "needs", glyph: "◐", text: `needs you${inferred}` };
     // A top-level session that recently finished its turn is waiting for your next direction.
-    if (run.state === "idle" && !run.parent_run_id && serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW)
+    if (run.state === "idle" && !run.parent_run_id && serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW) {
+      if (!state.past && state.rested.get(run.run_id) === run.last_seen) return { key: "rest", turn: true, glyph: "☾", text: `at rest${inferred}` };
       return { key: "needs", turn: true, glyph: "↩", text: `your turn${inferred}` };
+    }
     if (run.state === "idle" && run.live === true && !run.parent_run_id) return { key: "idle", glyph: "◌", text: `open · idle ${age(run.last_seen)}` };
     if (!["fresh", "observed"].includes(healthOf(run))) return { key: "quiet", glyph: "○", text: `quiet ${age(run.last_seen)}` };
     // Waiting on a tool or a child is ordinary work, not something for you.
@@ -190,6 +204,7 @@
     const statuses = activeStatuses(state.snapshot.runs);
     const counts = [["running", "●", statuses.filter((s) => BUSY.has(s.key)).length, "running"],
       ["needs", "◐", statuses.filter((s) => s.key === "needs").length, "needs you"],
+      ["rest", "☾", statuses.filter((s) => s.key === "rest").length, "at rest"],
       ["quiet", "○", statuses.filter((s) => s.key === "quiet").length, "quiet"]];
     $("counts").replaceChildren(...counts.map(([key, glyph, value, text]) => {
       const item = node("span"); item.append(node("span", glyph, `g-${key}`), " ", node("strong", value), node("span", ` ${text}`, "count-word")); return item;
@@ -379,7 +394,7 @@
 
   function workRank(run) {
     const key = statusOf(run).key;
-    return { needs: 0, running: 1, waiting: 2, idle: 3, unknown: 4, quiet: 5, failed: 6, done: 7 }[key] ?? 8;
+    return { needs: 0, running: 1, waiting: 2, rest: 3, idle: 3, unknown: 4, quiet: 5, failed: 6, done: 7 }[key] ?? 8;
   }
   function sortValue(run) {
     if (state.sort === "harness") return harnessOf(run).label.toLowerCase();
@@ -399,7 +414,7 @@
   function tableKey() {
     return JSON.stringify([state.fingerprint, activity().end && Math.floor(time(activity().end) / 10000), state.view,
       $("harness-filter").value, $("window-filter").value, $("search").value, state.sort, state.descending, state.selected, state.historyOpen,
-      state.events.length, state.eventBusy, state.more, state.target, state.targetNote, state.targetFallback, Math.floor(serverNow() / 60000)]);
+      state.events.length, state.eventBusy, state.more, state.target, state.targetNote, state.targetFallback, [...state.rested], Math.floor(serverNow() / 60000)]);
   }
   function seenText(value) {
     const seen = time(value);
@@ -541,6 +556,11 @@
     if (aiTitleOf(run) && run.ai_summary?.previous_title) title.append(node("span", `was: ${run.ai_summary.previous_title}`, "was"));
     const actions = node("div", null, "detail-actions");
     actions.append(...targetControls(run));
+    if (status.turn && !state.past) {
+      const rest = node("button", status.key === "rest" ? "↩ back to your turn" : "☾ let it rest", "link rest-link"); rest.type = "button"; rest.dataset.focusKey = "rest";
+      rest.addEventListener("click", () => toggleRest(run));
+      actions.append(rest);
+    }
     const links = node("div", null, "detail-links");
     const history = node("button", state.historyOpen ? "hide history" : "history ▸", "link"); history.type = "button"; history.dataset.focusKey = "history";
     history.addEventListener("click", () => { state.historyOpen = !state.historyOpen; if (state.historyOpen && !state.events.length) loadEvents(true); else renderTable(); });
@@ -557,7 +577,11 @@
     const seen = node("span", seenText(run.last_seen)); seen.dataset.seen = run.last_seen || "";
     fact("last seen", seen);
     main.append(head, meta);
-    if (status.turn) {
+    if (status.key === "rest") {
+      const rest = node("p", "☾ at rest · you checked this turn", "rest-line");
+      rest.append(node("span", " · stirs again when the agent does anything", "rest-where"));
+      main.append(rest);
+    } else if (status.turn) {
       const turn = node("p", `↩ finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
       turn.append(node("span", ` · continue it in ${harness.label}`, "needs-where"));
       main.append(turn);
@@ -687,6 +711,10 @@
     return box;
   }
   function renderDetail() { if (state.snapshot) renderTable(); }
+  function restSelected() {
+    const run = state.selected && state.snapshot.runs.find((r) => r.run_id === state.selected);
+    if (run && statusOf(run).turn && !state.past) toggleRest(run);
+  }
   async function selectRun(id) {
     state.selected = id; state.events = []; state.nextCursor = 0; state.more = false; state.historyOpen = false;
     state.target = null; state.targetNote = ""; state.targetFallback = false;
@@ -766,7 +794,7 @@
     }
     if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
     const actions = { "/": () => $("search").focus(), j: () => move(1), ArrowDown: () => move(1), k: () => move(-1), ArrowUp: () => move(-1),
-      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed"), l: backToLive, L: backToLive,
+      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed"), l: backToLive, L: backToLive, r: restSelected,
       "?": () => foldKeys($("keys-toggle").getAttribute("aria-expanded") !== "true") };
     if (actions[event.key]) { event.preventDefault(); actions[event.key](); }
   });
