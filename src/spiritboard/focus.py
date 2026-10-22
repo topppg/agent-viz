@@ -310,6 +310,9 @@ def resolve(run: dict[str, object] | None, profiles: list[SourceProfile]) -> Tar
             if opened:
                 return Target("focus", opened[0], steps=(Step(opened[1]),))
             return adapter(pid, chain)
+        opened = harness.open_app(session, "", []) if harness.remote and harness.open_app else None
+        if opened:
+            return Target("focus", opened[0], steps=(Step(opened[1]),))
         # Resuming a session that is still running elsewhere would fork it.
         if not known or session != native or run.get("parent_run_id"):
             return UNSUPPORTED
