@@ -3,8 +3,9 @@
 The macOS app gives Spiritboard its own Dock icon and window. It contains the same Python
 dashboard as the `uvx` package, plus a bundled Python runtime. Users can download the DMG,
 drag `Spiritboard.app` to Applications, and open it without installing Python or uv. The app
-uses the CLI's normal data directory, so history and settings are shared. If the CLI is already
-serving that directory with the same default settings, the app displays its existing dashboard.
+uses the CLI's normal data directory. If a Spiritboard CLI dashboard is already running on the
+standard port 8766, the app displays that dashboard, including its chosen data directory and
+settings. Otherwise, the app starts its own server with the normal default data directory.
 
 ## Build
 

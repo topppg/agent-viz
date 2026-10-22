@@ -1,7 +1,14 @@
 import AppKit
 import WebKit
 
-final class SpiritboardApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
+final class SpiritboardApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
+    WKUIDelegate, WKScriptMessageHandler {
+    private let headerColor = NSColor(
+        srgbRed: 17.0 / 255, green: 14.0 / 255, blue: 26.0 / 255, alpha: 1
+    )
+    private let boardColor = NSColor(
+        srgbRed: 13.0 / 255, green: 11.0 / 255, blue: 20.0 / 255, alpha: 1
+    )
     private var window: NSWindow!
     private var webView: WKWebView!
     private var backend: Process?
@@ -15,6 +22,21 @@ final class SpiritboardApp: NSObject, NSApplicationDelegate, WKNavigationDelegat
         app.setActivationPolicy(.regular)
 
         let configuration = WKWebViewConfiguration()
+        configuration.userContentController.add(self, name: "titlebar")
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: """
+                const reportTitlebar = () => {
+                  const header = document.querySelector('.top');
+                  if (header) window.webkit.messageHandlers.titlebar.postMessage(
+                    header.getBoundingClientRect().bottom > 0);
+                };
+                addEventListener('scroll', reportTitlebar, {passive: true});
+                addEventListener('load', reportTitlebar);
+                reportTitlebar();
+                """,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -26,6 +48,11 @@ final class SpiritboardApp: NSObject, NSApplicationDelegate, WKNavigationDelegat
             defer: false
         )
         window.title = "Spiritboard"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = headerColor
         window.center()
         window.contentView = webView
         window.makeKeyAndOrderFront(nil)
@@ -41,6 +68,13 @@ final class SpiritboardApp: NSObject, NSApplicationDelegate, WKNavigationDelegat
         if let backend, backend.isRunning {
             backend.interrupt()
         }
+    }
+
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard message.name == "titlebar", message.webView === webView,
+              let headerVisible = message.body as? Bool else { return }
+        window.backgroundColor = headerVisible ? headerColor : boardColor
     }
 
     private func startBackend() {
