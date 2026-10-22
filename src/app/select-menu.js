@@ -97,6 +97,8 @@
 
   function show(select) {
     close(false);
+    typed = "";
+    typedAt = 0;
     const list = document.createElement("ul");
     list.className = "mac-select-menu";
     list.id = "mac-select-menu";
@@ -180,18 +182,26 @@
     show(select);
   }, true);
 
+  const enabledItem = (event) => {
+    const item = open && event.target.closest?.(".mac-select-menu li");
+    return item && open.list.contains(item) && item.getAttribute("aria-disabled") !== "true" ? item : null;
+  };
+
   document.addEventListener("mouseup", (event) => {
-    const item = open && event.button === 0 && event.target.closest?.(".mac-select-menu li");
-    if (item && open.list.contains(item) && item.getAttribute("aria-disabled") !== "true") {
-      choose(Number(item.dataset.index));
-    }
+    const item = event.button === 0 && enabledItem(event);
+    if (item) choose(Number(item.dataset.index));
+  }, true);
+
+  // Assistive tech (VoiceOver, Voice Control) clicks with no preceding mouse press, so detail is 0.
+  // Pointer clicks already chose on mouseup and closed the menu.
+  document.addEventListener("click", (event) => {
+    const item = event.detail === 0 && enabledItem(event);
+    if (item) choose(Number(item.dataset.index));
   }, true);
 
   document.addEventListener("mousemove", (event) => {
-    const item = open && event.target.closest?.(".mac-select-menu li");
-    if (item && open.list.contains(item) && item.getAttribute("aria-disabled") !== "true") {
-      setActive(Number(item.dataset.index), false);
-    }
+    const item = enabledItem(event);
+    if (item) setActive(Number(item.dataset.index), false);
   }, true);
 
   document.addEventListener("keydown", (event) => {
