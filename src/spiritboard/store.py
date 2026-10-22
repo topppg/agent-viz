@@ -36,6 +36,7 @@ class Store:
             CREATE INDEX IF NOT EXISTS by_run ON events(run_id, cursor);
             CREATE INDEX IF NOT EXISTS by_received ON events(received_at);
             CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS local_names(run_id TEXT PRIMARY KEY, name TEXT NOT NULL);
         """)
         self.db.execute(
             "INSERT OR IGNORE INTO metadata VALUES('stream_id',?)", (str(uuid.uuid4()),)
@@ -325,6 +326,22 @@ class Store:
                 raise
             return True
 
+    def rename(self, run_id: str, name: str) -> str | None:
+        """Set the name the user gave a run here; an empty name clears it."""
+        cleaned = " ".join(text(name, 120, empty=True).split())
+        with self.lock:
+            if self._get(run_id) is None:
+                raise KeyError(run_id)
+            if cleaned:
+                self.db.execute(
+                    "INSERT INTO local_names VALUES(?,?) "
+                    "ON CONFLICT(run_id) DO UPDATE SET name=excluded.name",
+                    (run_id, cleaned),
+                )
+            else:
+                self.db.execute("DELETE FROM local_names WHERE run_id=?", (run_id,))
+        return cleaned or None
+
     def run(self, run_id: str) -> dict | None:
         """Server-side record including private native identity; never sent as-is."""
         with self.lock:
@@ -332,7 +349,10 @@ class Store:
 
     def _public(self, rows: list[dict], current: float, started_at: float, limit: int) -> dict:
         rows.sort(key=lambda r: r.get("last_seen", ""), reverse=True)
+        names = dict(self.db.execute("SELECT run_id,name FROM local_names"))
         for run in rows:
+            if run["run_id"] in names:
+                run["local_name"] = names[run["run_id"]]
             seen = timestamp(run["last_seen"])
             if run["mode"] == "observation":
                 run["health"] = "observed" if current - seen <= 60 else "stale"
@@ -475,6 +495,7 @@ class Store:
                 for run_id in candidates:
                     self.db.execute("DELETE FROM events WHERE run_id=?", (run_id,))
                     self.db.execute("DELETE FROM runs WHERE run_id=?", (run_id,))
+                    self.db.execute("DELETE FROM local_names WHERE run_id=?", (run_id,))
                 self.db.execute("COMMIT")
             except Exception:
                 self.db.execute("ROLLBACK")

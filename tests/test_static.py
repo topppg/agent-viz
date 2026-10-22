@@ -119,10 +119,15 @@ let stream;
 class EventSource { constructor() { this.listeners = {}; stream = this; } addEventListener(name, fn) { this.listeners[name] = fn; } }
 class Option extends Element { constructor(text,value) { super('option'); this.textContent = text; this.value = value; } }
 const requests = [], posts = [], copied = [];
+let renameStatus = 200;
 const targets = {orphan:{available:true,kind:'focus',label:'cmux'}, ask:{available:true,kind:'resume',label:'resume',command:'claude --resume invented-0000'}};
 const navigator = {clipboard:{writeText:async text => { copied.push(text); }}};
 const context = {document,Option,EventSource,navigator,setInterval:() => {},console,fetch:async (url, options = {}) => {
-  if (options.method === 'POST') { posts.push({url, headers:options.headers}); return {ok:true,json:async()=>({ok:true})}; }
+  if (options.method === 'POST') {
+    posts.push(options.body ? {url, headers:options.headers, body:JSON.parse(options.body)} : {url, headers:options.headers});
+    if (url.endsWith('/name')) return renameStatus === 200 ? {ok:true,json:async()=>({ok:true,local_name:JSON.parse(options.body).name.trim() || null})} : {ok:false,status:renameStatus};
+    return {ok:true,json:async()=>({ok:true})};
+  }
   requests.push(url);
   if (url.endsWith('/focus')) {
     return {ok:true,json:async()=>targets[decodeURIComponent(url.split('/')[3])] || {available:false,kind:'unsupported',label:''}};
@@ -133,6 +138,9 @@ const context = {document,Option,EventSource,navigator,setInterval:() => {},cons
 vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),context);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.dataset.runId);
+const expandOf = (r) => flatten(r).find(x => (x.className || '').includes('expand'));
+const nameButton = (r) => flatten(r).find(x => (x.className || '').includes('rename'));
+const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
 (async()=>{
  await tick();
  assert.equal(ids['demo-banner'].hidden,false);
@@ -205,16 +213,16 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.deepEqual(rows().map(r => r.dataset.runId), ['root','child']);
  ids.search.value = ''; ids.search.listeners.input();
  // Re-render keeps focus on the same row.
- rows()[1].focus();
+ expandOf(rows()[1]).focus();
  stream.listeners.snapshot({data:JSON.stringify(snapshot)});
- assert.equal(document.activeElement.dataset.runId, rows()[1].dataset.runId);
+ assert.equal(document.activeElement, expandOf(rows()[1]));
  // An identical snapshot keeps the same row elements, so clicks survive live ticks.
  const stableRow = rows()[0];
  stream.listeners.snapshot({data:JSON.stringify(snapshot)});
  assert.equal(rows()[0], stableRow);
  // Clicking a row opens its details inline, directly under it.
  const detail = () => flatten(ids.runs).find(x => x.id === 'detail');
- const expanded = () => rows().find(r => r.attrs['aria-expanded'] === 'true')?.dataset.runId;
+ const expanded = () => rows().find(r => expandOf(r).attrs['aria-expanded'] === 'true')?.dataset.runId;
  rows().find(r => r.dataset.runId === 'orphan').listeners.click(); await tick();
  assert.equal(expanded(), 'orphan');
  const after = ids.runs.children.indexOf(rows().find(r => r.dataset.runId === 'orphan')) + 1;
@@ -367,11 +375,11 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  const deskRow = rows().find(r => r.dataset.runId === 'desk');
  assert.ok(deskRow.textContent.includes('Desktop title'));
  assert.ok(!deskRow.textContent.includes('Old generated title'));
- assert.equal(flatten(deskRow).find(x => x.className === 'agent-name').title, undefined);
+ assert.equal(nameButton(deskRow).title, 'Click to rename');
  // An evolving AI title wins over the native name and keeps the title it replaced findable.
  const evolvedRow = rows().find(r => r.dataset.runId === 'evolved');
  assert.ok(evolvedRow.textContent.includes('Ship retry budget'));
- assert.equal(flatten(evolvedRow).find(x => x.className === 'agent-name').title, 'AI title · native: native-slug · Renamed from “Tune retry limits”');
+ assert.equal(nameButton(evolvedRow).title, 'AI title · native: native-slug · Renamed from “Tune retry limits” · Click to rename');
  ids.search.value = 'tune retry'; ids.search.listeners.input(); await tick();
  assert.ok(rows().some(r => r.dataset.runId === 'evolved'));
  ids.search.value = ''; ids.search.listeners.input(); await tick();
@@ -440,6 +448,94 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  cols()[59].listeners.click(); await tick();
  assert.equal(ids['past-bar'].hidden, true);
  assert.ok(rows().length > 1);
+ // Renaming: the name is its own button beside the row's expand handle, never nested in it.
+ docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
+ const rootRow = () => rows().find(r => r.dataset.runId === 'root');
+ assert.equal(rootRow().tagName, 'div');
+ assert.equal(expandOf(rootRow()).tagName, 'button');
+ assert.equal(expandOf(rootRow()).dataset.focusKey, 'select:root');
+ assert.ok(!flatten(ids.runs).some(x => x.tagName === 'button' && flatten(x).some(y => y.tagName === 'button')));
+ assert.equal(nameButton(rootRow()).textContent, 'Root');
+ assert.equal(nameButton(rootRow()).title, 'Click to rename');
+ // Clicking the name edits it in place, selected, without expanding the row.
+ nameButton(rootRow()).listeners.click({stopPropagation(){}});
+ assert.equal(expanded(), undefined);
+ assert.equal(editor().value, 'Root');
+ assert.equal(editor().maxLength, 120);
+ assert.equal(editor().attrs['aria-label'], 'Agent name');
+ assert.equal(document.activeElement, editor());
+ // Shortcuts stay quiet while typing, and a live tick keeps the draft in the same input.
+ const field = editor();
+ field.value = 'Release train'; field.listeners.input();
+ docListeners.keydown({key:'j', target:field, preventDefault(){ throw new Error('shortcut fired while typing'); }});
+ assert.equal(expanded(), undefined);
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:runs.map(r => r.run_id === 'root' ? {...r, activity:'Still going'} : r)})}); await tick();
+ assert.equal(editor(), field);
+ assert.equal(field.value, 'Release train');
+ // Enter saves: one POST with the custom header, the new name shows at once with a marker.
+ const renamesBefore = posts.length;
+ field.listeners.keydown({key:'Enter', preventDefault(){}, stopPropagation(){}});
+ assert.deepEqual(posts.slice(renamesBefore), [{url:'/api/runs/root/name', headers:{'X-Spiritboard':'rename','Content-Type':'application/json'}, body:{name:'Release train'}}]);
+ assert.equal(editor(), undefined);
+ assert.equal(nameButton(rootRow()).textContent, 'Release train');
+ assert.equal(document.activeElement, nameButton(rootRow()));
+ assert.equal(nameButton(rootRow()).title, 'Your name · automatic: Root');
+ assert.ok(flatten(rootRow()).some(x => x.className === 'renamed-mark'));
+ await tick();
+ // The saved name arrives with the next snapshot; search finds it.
+ const renamedRuns = runs.map(r => r.run_id === 'root' ? {...r, local_name:'Release train'} : r);
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:renamedRuns})}); await tick();
+ ids.search.value = 'release train'; ids.search.listeners.input();
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['root']);
+ ids.search.value = ''; ids.search.listeners.input();
+ // The heading says it was renamed here; Escape cancels an edit there without saving.
+ rootRow().listeners.click(); await tick();
+ assert.equal(expanded(), 'root');
+ const headingOf = () => flatten(detail()).find(x => x.tagName === 'h3');
+ assert.ok(flatten(detail()).find(x => (x.className || '').includes('renamed-note')).textContent.startsWith('Renamed by you in Spiritboard · automatic title: Root'));
+ assert.ok(!flatten(detail()).some(x => x.className === 'was'));
+ nameButton(headingOf()).listeners.click({stopPropagation(){}});
+ assert.equal(editor().dataset.focusKey, 'edit:detail:root');
+ editor().value = 'Something else';
+ editor().listeners.keydown({key:'Escape', preventDefault(){}, stopPropagation(){}});
+ assert.equal(posts.length, renamesBefore + 1);
+ assert.equal(headingOf().textContent, 'Release train');
+ assert.equal(document.activeElement, nameButton(headingOf()));
+ // "Use automatic title" clears the local name.
+ control('auto-name').listeners.click(); await tick();
+ assert.deepEqual(posts.at(-1).body, {name:''});
+ assert.equal(nameButton(rootRow()).textContent, 'Root');
+ assert.ok(!flatten(rootRow()).some(x => x.className === 'renamed-mark'));
+ assert.equal(control('auto-name'), undefined);
+ // Saving an empty name clears it too; saving the unchanged automatic name sends nothing.
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:renamedRuns})}); await tick();
+ nameButton(rootRow()).listeners.click({stopPropagation(){}});
+ editor().value = '   '; editor().listeners.blur(); await tick();
+ assert.equal(posts.length, renamesBefore + 3);
+ assert.deepEqual(posts.at(-1).body, {name:''});
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
+ nameButton(rootRow()).listeners.click({stopPropagation(){}});
+ editor().listeners.keydown({key:'Enter', preventDefault(){}, stopPropagation(){}}); await tick();
+ assert.equal(posts.length, renamesBefore + 3);
+ // A refused rename restores the previous name and says why.
+ renameStatus = 400;
+ nameButton(rootRow()).listeners.click({stopPropagation(){}});
+ editor().value = 'Bad name'; editor().listeners.keydown({key:'Enter', preventDefault(){}, stopPropagation(){}});
+ assert.equal(nameButton(rootRow()).textContent, 'Bad name');
+ await tick();
+ assert.equal(nameButton(rootRow()).textContent, 'Root');
+ assert.equal(ids.error.hidden, false);
+ assert.ok(ids.error.textContent.includes('that name is not allowed'));
+ renameStatus = 200;
+ // The past board is read-only: names are plain text there.
+ docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
+ cols()[10].listeners.click(); await tick();
+ assert.equal(ids['past-bar'].hidden, false);
+ assert.equal(nameButton(rows()[0]), undefined);
+ assert.ok(flatten(rows()[0]).some(x => x.className === 'agent-name' && x.tagName === 'span'));
+ docListeners.keydown({key:'L', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.ok(nameButton(rootRow()));
  // Direct API usage has no dollar receipt; never call it free or ChatGPT plan usage.
  for (const provider of ['openai', 'anthropic']) {
    stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:true,status:'ready',provider,api_calls:1,subscription_calls:0,known_cost_usd:0,actual_cost_usd:null,unknown_cost_calls:1}})});

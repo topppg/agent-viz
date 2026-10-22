@@ -123,7 +123,8 @@ New harnesses plug in as one module each (see [the source guide](https://github.
   opencode session title, a Pi `/name`, the DeepSeek Harness title or the Grok Bot
   agent's name), retitled by the summary model once the goal moves on, its goal,
   your latest request and
-  the agent's latest reply or commentary. Subagents sit under their parent,
+  the agent's latest reply or commentary. Click a name to rename it in Spiritboard
+  only; clear it to go back to the automatic title. Subagents sit under their parent,
   named by the task the parent gave them. Sessions the Claude desktop app runs
   are tagged **Claude desktop**; ones archived there never count as active.
 - **Jump in.** Open a session in the terminal or app that runs it (cmux, tmux,

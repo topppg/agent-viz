@@ -165,6 +165,10 @@ def _fingerprint(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
+def _user_named(run: dict) -> bool:
+    return run.get("title_source") == "user" or bool(run.get("local_name"))
+
+
 def _native(run: dict) -> str:
     # Only compared for equality, so the name itself is never stored.
     return _fingerprint(str(run.get("name") or ""))
@@ -172,7 +176,7 @@ def _native(run: dict) -> str:
 
 def _titling(run: dict, prior: dict | None) -> dict:
     """The run's AI title state, reset whenever its native name changes (a likely rename)."""
-    if run.get("title_source") == "user" or not prior or prior["native_name"] != _native(run):
+    if _user_named(run) or not prior or prior["native_name"] != _native(run):
         return {
             "ai_title": "",
             "previous_title": "",
@@ -464,7 +468,7 @@ class Summarizer:
             ) or current - self._failed.get(run_id, 0) < REFRESH_SECONDS:
                 continue
             if len(result) < 6:
-                retitle = run.get("title_source") != "user" and (
+                retitle = not _user_named(run) and (
                     current - _stamp(titling["titled_at"]) >= RETITLE_SECONDS
                 )
                 entry = {"excerpt": content}
@@ -759,7 +763,7 @@ class Summarizer:
                 titled = bool(
                     ai_title
                     and run is not None
-                    and run.get("title_source") != "user"
+                    and not _user_named(run)
                     and _native(run) == native_name
                 )
                 # Stale means the goal context changed and a refresh is still due.

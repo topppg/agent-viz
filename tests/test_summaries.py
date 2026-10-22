@@ -784,6 +784,21 @@ class SummariesTests(unittest.TestCase):
         self.assertEqual(self.sent_entry(request)["current_title"], "Renamed by me")
         self.assertEqual(instance.public_state()["summaries"][0]["title"], "")
 
+    def test_spiritboard_name_stops_and_hides_ai_titles(self):
+        run = self.store.snapshot.return_value["runs"][0]
+        run["name"] = "Retry fix"
+        instance = self.summarizer()
+        with patch("spiritboard.summaries._request", return_value=self.reply(title="Retry budget")):
+            instance.tick()
+        run["local_name"] = "Mine"
+        self.assertEqual(instance.public_state()["summaries"][0]["title"], "")
+        run["task"] = "Something else entirely"
+        self.age(instance, titled=True)
+        with patch("spiritboard.summaries._request", return_value=self.reply()) as request:
+            instance.tick()
+        self.assertNotIn("current_title", self.sent_entry(request))
+        self.assertNotIn("Mine", json.dumps(request.call_args.args[1]))
+
     def test_user_set_names_are_never_retitled(self):
         self.store.snapshot.return_value["runs"][0].update(name="Mine", title_source="user")
         instance = self.summarizer()
