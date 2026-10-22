@@ -272,7 +272,7 @@ class GrokBotTests(unittest.TestCase):
         self.assertNotIn("invented-account", exposed)
         self.assertNotIn("auth0", exposed)
 
-    def test_liveness_is_unknown_and_nothing_opens_or_resumes(self):
+    def test_liveness_is_unknown_and_the_agent_opens_in_the_app_but_never_resumes(self):
         self.roster(agent(ALPHA, "A"))
         self.replica(ALPHA, reply(1, "Hello", NOW))
         harness = HARNESSES["grokbot"]
@@ -285,7 +285,19 @@ class GrokBotTests(unittest.TestCase):
             "native_id": ALPHA,
             "session_id": "grok-test:observed",
         }
-        self.assertEqual(focus.resolve(run, [self.profile()]).kind, "unsupported")
+        with patch.object(sys, "platform", "darwin"):
+            target = focus.resolve(run, [self.profile()])
+        self.assertEqual((target.kind, target.label), ("focus", "Grok Bot"))
+        link = f"grokbot://app/v1/agent?id={ALPHA}"
+        self.assertEqual([step.argv for step in target.steps], [("/usr/bin/open", link)])
+        with patch.object(sys, "platform", "linux"):
+            self.assertEqual(focus.resolve(run, [self.profile()]).kind, "unsupported")
+
+    def test_agent_link_rejects_ids_the_app_would_refuse(self):
+        with patch.object(sys, "platform", "darwin"):
+            self.assertIsNone(grokbot.open_app("a/b", "", []))
+            self.assertIsNone(grokbot.open_app("x" * 129, "", []))
+            self.assertIsNone(grokbot.open_app("id?x=1", "", []))
 
     def test_goal_and_latest_request(self):
         self.roster(agent(ALPHA, "Planner"))

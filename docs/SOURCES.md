@@ -293,7 +293,9 @@ may change.
   message is `idle`, so a recent one reads as your turn. `event` entries
   (`name-changed`, `automation-changed`) only move `last_seen`.
 - **Liveness, open and resume.** Liveness is always unknown, so a Grok Bot agent is
-  never shown closed. No focus or resume is offered.
+  never shown closed. Open runs `/usr/bin/open grokbot://app/v1/agent?id=<agent id>`,
+  the app's own agent route (checked against Grok Bot 0.75), on macOS only and only
+  for ids matching the app's `[A-Za-z0-9_-]{1,128}` validator. No resume is offered.
 
 ## Opening a session's app
 
@@ -319,6 +321,8 @@ look for the live process that owns it; SDK runs are never eligible.
   CLI session as a new desktop session rather than showing it. A closed desktop
   session gets the ordinary CLI resume command, labelled as resuming in a
   terminal.
+- **Grok Bot:** agents run in the cloud and have no local process, so no process
+  is looked up; the agent link above opens it in the app.
 - **Codex:** the session's rollout transcript is located by native ID under the
   profile's `sessions/` and `archived_sessions/` trees, and `lsof -t` reports the
   Codex process holding it open. Archived transcripts are treated as stopped; a

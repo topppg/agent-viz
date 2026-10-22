@@ -88,7 +88,7 @@ for upgrades, removal and publishing.
 | **opencode** | `opencode.db`, read-only | an `opencode` process in the session's directory | its terminal | `opencode -s <id>` |
 | **Pi** | `~/.pi/agent/sessions`, `PI_CODING_AGENT_DIR` | a `pi` process in the session's directory | its terminal | `pi --session <file>` |
 | **DeepSeek Harness** | `~/.dsh` (zstd-compressed), `DSH_HOME` | the `session.lock` the app holds | the app window | not yet |
-| **Grok Bot** (macOS app) | the app's local cache, `GROK_BOT_HOME` | unknown: its agents run in the cloud | — | — |
+| **Grok Bot** (macOS app) | the app's local cache, `GROK_BOT_HOME` | unknown: its agents run in the cloud | the exact agent in the app | — |
 | **Your own agents** | the Python SDK below | heartbeats | — | — |
 
 Claude Code, Codex and opencode are checked against real sessions. The Claude
@@ -214,7 +214,9 @@ a cmux panel, a tmux pane, an iTerm2 session, an Apple Terminal tab, or the
 owning app's window (VS Code, Ghostty, ChatGPT, Claude desktop, DeepSeek Harness).
 A live Claude desktop session opens directly in the app with
 `claude://code/continue`; when the app's record of it is unknown, the app is just
-brought forward. On Linux, tmux panes and `wmctrl` windows are supported.
+brought forward. A Grok Bot agent runs in the cloud, so it has no local process;
+it opens directly in the Grok Bot app with the app's own agent link. On Linux,
+tmux panes and `wmctrl` windows are supported.
 
 The button only brings a window forward. It never types into, signals or
 controls an agent. The first iTerm2 or Terminal use can trigger a macOS

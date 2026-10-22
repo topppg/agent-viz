@@ -27,6 +27,7 @@ from ..transcripts import (
 from .harness import Goal, Harness
 
 if TYPE_CHECKING:
+    from ..processes import Process
     from ..sources import SourceProfile
 
 CACHE = "sand-client-persistence"
@@ -40,6 +41,9 @@ REPLICA_SCHEMAS = frozenset({1})
 MAX_BLOB = 8 * 1024 * 1024
 MAX_BLOBS = 5_000
 MAX_ROWS = 5_000
+# The app's own deep link for one agent (route "agent", checked against Grok Bot 0.75).
+AGENT_LINK = "grokbot://app/v1/agent?id={}"
+AGENT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 MAX_ENTRIES = 2_000
 # A request newer than this without a reply means the cloud agent is still on it.
 WORKING_MS = 30 * 60_000
@@ -345,6 +349,12 @@ def goal(session: Session) -> Goal:
     return Goal(redact(row.get("name"), 120), "", "", tuple(messages))
 
 
+def open_app(session_id: str, app: str, chain: list[Process]) -> tuple[str, tuple[str, ...]] | None:
+    if sys.platform != "darwin" or not AGENT_ID.fullmatch(session_id):
+        return None
+    return "Grok Bot", ("/usr/bin/open", AGENT_LINK.format(session_id))
+
+
 HARNESS = Harness(
     kind="grokbot",
     name="Grok Bot",
@@ -361,5 +371,7 @@ HARNESS = Harness(
     owner=lambda native: native,
     session_pid=lambda root, native: (False, None),
     resume=lambda root, native: None,
+    open_app=open_app,
+    remote=True,
     goal=goal,
 )

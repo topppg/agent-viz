@@ -63,6 +63,8 @@ class Harness:
     # (label, argv) opening a live session in its own app, from the native session ID, the
     # run's ``app`` marker and the owning process chain; None leaves it to the generic adapter.
     open_app: Callable[[str, str, list[Process]], tuple[str, tuple[str, ...]] | None] | None = None
+    # Agents run off this machine, so ``open_app`` is asked with no process chain.
+    remote: bool = False
 
 
 def shell_resume(env: str, root: Path, command: str, cwd: str) -> str:
