@@ -11,6 +11,7 @@ arch="$(uname -m)"
 rm -rf "$build_dir"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Helpers"
 cp src/app/Info.plist "$app/Contents/Info.plist"
+cp src/app/select-menu.js "$app/Contents/Resources/"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$app/Contents/Info.plist"
 
