@@ -106,6 +106,23 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(self.scan()[CLI_ID]["name"], "My rename")
         self.assertNotEqual(self.scan(text=False)[CLI_ID]["name"], "Desktop title")
 
+    def test_rename_marks_a_user_title_that_survives_the_desktop_title(self) -> None:
+        ai = {"type": "ai-title", "aiTitle": "Generated", "sessionId": CLI_ID}
+        custom = {"type": "custom-title", "customTitle": "My rename", "sessionId": CLI_ID}
+        self.record(cliSessionId=CLI_ID)
+        self.transcript(CLI_ID, None, ai)
+        self.assertNotIn("title_source", self.scan()[CLI_ID])
+        self.transcript(CLI_ID, None, ai, custom)
+        row = self.scan()[CLI_ID]
+        self.assertEqual((row["name"], row["title_source"]), ("My rename", "user"))
+        self.assertEqual(row["app"], "Claude desktop")
+        store = Store()
+        self.addCleanup(store.close)
+        store.observe(row)
+        stored = store.run(row["run_id"])
+        self.assertEqual((stored["name"], stored["title_source"]), ("My rename", "user"))
+        self.assertNotIn("title_source", self.scan(text=False)[CLI_ID])
+
     def test_metadata_changes_apply_without_transcript_changes(self) -> None:
         self.transcript(CLI_ID)
         path = self.record(cliSessionId=CLI_ID)

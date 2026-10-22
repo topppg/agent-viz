@@ -177,6 +177,8 @@ def scan_profile(
                 result.append(dict(value))
                 if titles and value.get("native_id") in titles:
                     result[-1]["name"] = titles[value["native_id"]]
+                    if result[-1].get("title_source") == "placeholder":
+                        del result[-1]["title_source"]
             else:
                 coverage["unsupported_files"] += 1
         except (OSError, ValueError, TypeError, RecursionError):

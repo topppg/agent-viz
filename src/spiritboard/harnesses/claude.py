@@ -169,8 +169,8 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
     # A /rename beats Claude's generated title; subagents keep their parent-given name.
     if profile.include_text and not agent and (custom_title or ai_title):
         out["name"] = custom_title or ai_title
-        # Not stored; lets a desktop title outrank only the generated one.
-        out["title_source"] = "custom" if custom_title else "ai"
+        if custom_title:
+            out["title_source"] = "user"
     out["last_seen"] = out["last_seen"] or mtime_iso(mtime)
     return out
 
@@ -195,7 +195,10 @@ def subagent_description(path: Path) -> str:
 def observe(profile: SourceProfile, session: Session) -> dict | None:
     value = parse(profile, records(session.path), session.mtime)
     if value and value.get("parent_run_id") and profile.include_text:
-        value["name"] = subagent_description(session.path) or value["name"]
+        description = subagent_description(session.path)
+        value["name"] = description or value["name"]
+        if not description:
+            value["title_source"] = "placeholder"
     return value
 
 
@@ -429,7 +432,7 @@ def enrich(profile: SourceProfile, rows: list[dict]) -> None:
             profile.include_text
             and desktop.title
             and ":agent:" not in native
-            and row.get("title_source") != "custom"
+            and row.get("title_source") != "user"
         ):
             row["name"] = desktop.title
 

@@ -99,8 +99,14 @@
     if (status.key === "quiet" || status.key === "closed") return { mark: "›", text: `last said: ${raw}`, cls: "dim" };
     return { mark: "›", text: raw, cls: status.key === "needs" ? "needs" : "" };
   }
-  // Desktop metadata and /rename take priority, even over a cached summary title.
-  const nameOf = (run) => (run.app === "Claude desktop" && run.name) || run.ai_summary?.title || run.name || "Unnamed run";
+  // A name the user set (/rename, session name) always beats the AI title.
+  const aiTitleOf = (run) => (run.title_source !== "user" && run.ai_summary?.title) || "";
+  const nameOf = (run) => aiTitleOf(run) || run.name || "Unnamed run";
+  function titleNote(run) {
+    if (!aiTitleOf(run)) return "";
+    const was = run.ai_summary?.previous_title;
+    return `AI title${run.name ? ` · native: ${run.name}` : ""}${was ? ` · Renamed from “${was}”` : ""}`;
+  }
   function inView(run) {
     const status = statusOf(run);
     if (state.view === "waiting") return status.key === "needs";
@@ -116,7 +122,7 @@
     const query = $("search").value.toLowerCase().trim();
     const harness = $("harness-filter").value;
     return inView(run) && (!harness || harnessOf(run).key === harness) &&
-      (!query || [run.name, run.ai_summary?.title, run.task, run.activity, run.ai_summary?.text, run.project, run.app, harnessOf(run).label].some((v) => String(v || "").toLowerCase().includes(query)));
+      (!query || [run.name, run.ai_summary?.title, run.ai_summary?.previous_title, run.task, run.activity, run.ai_summary?.text, run.project, run.app, harnessOf(run).label].some((v) => String(v || "").toLowerCase().includes(query)));
   }
 
   function activity() { return state.snapshot?.activity || { bucket_seconds: 10, buckets: 60, runs: {} }; }
@@ -466,7 +472,9 @@
     button.setAttribute("aria-expanded", String(state.selected === run.run_id));
     const statusCell = node("span", `${state.selected === run.run_id ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status g-${status.key}`);
     const agent = node("span", null, "cell agent");
-    agent.append(node("span", prefix, "tree"), node("span", nameOf(run), "agent-name"));
+    const name = node("span", nameOf(run), "agent-name");
+    if (titleNote(run)) name.title = titleNote(run);
+    agent.append(node("span", prefix, "tree"), name);
     if (orphan) agent.append(node("span", "parent not yet available", "note"));
     if (context) agent.append(node("span", "context", "note"));
     // Where the session runs, when it is an app rather than a terminal (Claude desktop).
@@ -527,7 +535,10 @@
     const main = node("div", null, "detail-main");
     const head = node("div", null, "detail-head");
     const title = node("div", null, "detail-title");
-    title.append(node("h3", nameOf(run)), node("span", `${status.glyph} ${status.text}`, `pill g-${status.key}`));
+    const heading = node("h3", nameOf(run));
+    if (titleNote(run)) heading.title = titleNote(run);
+    title.append(heading, node("span", `${status.glyph} ${status.text}`, `pill g-${status.key}`));
+    if (aiTitleOf(run) && run.ai_summary?.previous_title) title.append(node("span", `was: ${run.ai_summary.previous_title}`, "was"));
     const actions = node("div", null, "detail-actions");
     actions.append(...targetControls(run));
     const links = node("div", null, "detail-links");

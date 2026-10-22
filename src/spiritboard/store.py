@@ -245,6 +245,7 @@ class Store:
             "health",
             "app",
             "archived",
+            "title_source",
         }
         data = {k: v for k, v in observation.items() if k in allowed}
         for key in ("run_id", "session_id", "name", "source", "account"):
@@ -259,6 +260,9 @@ class Store:
             text(data["app"], 40)
         if "archived" in data and data["archived"] is not True:
             raise ValueError("invalid archived flag")
+        # "user": named by the user, never retitled; "placeholder": a generic subagent name.
+        if data.get("title_source", "user") not in {"user", "placeholder"}:
+            raise ValueError("invalid title source")
         if data.get("state") not in STATES | TERMINAL | {"unknown"}:
             raise ValueError("invalid observed state")
         timestamp(data["last_seen"])

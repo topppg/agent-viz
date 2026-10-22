@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -289,6 +290,36 @@ class SourcesTests(unittest.TestCase):
         (self.root / "elsewhere.json").write_text(json.dumps({"description": "Followed a link"}))
         path.write_text(path.read_text() + "\n")
         self.assertTrue(scan_profile(profile)[0]["name"].startswith("Claude subagent"))
+
+    def test_claude_subagent_without_description_is_a_placeholder_title(self):
+        profile = self.profile("claude", "claude-placeholder", text=True)
+        self.log(profile, "p/same.jsonl", self.claude())
+        path = self.log(profile, "p/same/subagents/agent-a1b2c3.jsonl", self.claude("a1b2c3"))
+        rows = {row["native_id"]: row for row in scan_profile(profile)}
+        child = rows["same:agent:a1b2c3"]
+        self.assertTrue(child["name"].startswith("Claude subagent"))
+        self.assertEqual(child["title_source"], "placeholder")
+        self.assertNotIn("title_source", rows["same"])
+        meta = path.with_name("agent-a1b2c3.meta.json")
+        meta.write_text(json.dumps({"description": "Map retry callers"}))
+        path.write_text(path.read_text() + "\n")
+        child = next(r for r in scan_profile(profile) if r["native_id"] == "same:agent:a1b2c3")
+        self.assertEqual(child["name"], "Map retry callers")
+        self.assertNotIn("title_source", child)
+
+    def test_native_title_index_replaces_a_placeholder_title(self):
+        profile = self.profile("claude", "claude-indexed", text=True)
+        self.log(profile, "p/same/subagents/agent-a1b2c3.jsonl", self.claude("a1b2c3"))
+        self.assertEqual(scan_profile(profile)[0]["title_source"], "placeholder")
+        indexed = replace(
+            claude.HARNESS, titles=lambda root: {"same:agent:a1b2c3": "Indexed title"}
+        )
+        with patch.dict("spiritboard.sources.HARNESSES", {"claude": indexed}):
+            row = scan_profile(profile)[0]
+        self.assertEqual(row["name"], "Indexed title")
+        self.assertNotIn("title_source", row)
+        # The override applies to the returned copy, not the cached observation.
+        self.assertEqual(scan_profile(profile)[0]["title_source"], "placeholder")
 
     @unittest.skipUnless(hasattr(os, "mkfifo"), "Requires named pipes")
     def test_metadata_readers_do_not_block_on_fifo(self):

@@ -341,15 +341,27 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  ids.views.children[0].listeners.click();
  goneRow.listeners.click(); await tick();
  assert.ok(detail().textContent.includes('no running process owns this session'));
- // A Claude desktop session is tagged; an archived one is never active; resume says terminal.
+ // A user-named Claude desktop session is tagged; an archived one is never active; resume says terminal.
  const mine = {session_id:'claude-personal:observed',source:'claude',account:'personal',app:'Claude desktop'};
- const desk = run('desk', null, 'Desktop title', {...mine,ai_summary:{title:'Old generated title',text:'Investigating retries'}});
+ const desk = run('desk', null, 'Desktop title', {...mine,title_source:'user',ai_summary:{title:'Old generated title',text:'Investigating retries'}});
  const shelved = run('shelved', null, 'Shelved', {...mine, archived:true, state:'idle'});
+ const evolved = run('evolved', null, 'native-slug', {ai_summary:{title:'Ship retry budget',previous_title:'Tune retry limits',titled_at:now,text:'Shipping it'}});
  targets.desk = {available:true,kind:'resume',label:'resume',command:'claude --resume invented-1111'};
- stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, desk, shelved]})}); await tick();
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, desk, shelved, evolved]})}); await tick();
  const deskRow = rows().find(r => r.dataset.runId === 'desk');
  assert.ok(deskRow.textContent.includes('Desktop title'));
  assert.ok(!deskRow.textContent.includes('Old generated title'));
+ assert.equal(flatten(deskRow).find(x => x.className === 'agent-name').title, undefined);
+ // An evolving AI title wins over the native name and keeps the title it replaced findable.
+ const evolvedRow = rows().find(r => r.dataset.runId === 'evolved');
+ assert.ok(evolvedRow.textContent.includes('Ship retry budget'));
+ assert.equal(flatten(evolvedRow).find(x => x.className === 'agent-name').title, 'AI title · native: native-slug · Renamed from “Tune retry limits”');
+ ids.search.value = 'tune retry'; ids.search.listeners.input(); await tick();
+ assert.ok(rows().some(r => r.dataset.runId === 'evolved'));
+ ids.search.value = ''; ids.search.listeners.input(); await tick();
+ rows().find(r => r.dataset.runId === 'evolved').listeners.click(); await tick();
+ assert.ok(flatten(detail()).some(x => x.className === 'was' && x.textContent === 'was: Tune retry limits'));
+ rows().find(r => r.dataset.runId === 'evolved').listeners.click(); await tick();
  assert.ok(flatten(deskRow).some(x => x.className === 'note' && x.textContent === 'Claude desktop'));
  assert.equal(flatten(deskRow).find(x => (x.className || '').includes('harness-cell')).title, 'Claude · personal · Claude desktop');
  assert.equal(rows().find(r => r.dataset.runId === 'shelved'), undefined);

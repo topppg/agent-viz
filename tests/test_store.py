@@ -212,6 +212,18 @@ class StoreTests(unittest.TestCase):
             self.assertNotIn("raw_prompt", row)
             self.assertNotIn("auth_token", row)
 
+    def test_observation_title_source_is_validated_and_follows_latest(self):
+        for source in ("user", "placeholder"):
+            run = f"titled-{source}"
+            self.assertTrue(self.store.observe(observation(run, title_source=source)))
+            self.assertEqual(self.store.run(run)["title_source"], source)
+        self.store.observe(observation("titled-user"))
+        self.assertNotIn("title_source", self.store.run("titled-user"))
+        for invalid in ("ai", "custom", "", None, True):
+            with self.assertRaisesRegex(ValueError, "invalid title source"):
+                self.store.observe(observation("titled-bad", title_source=invalid))
+        self.assertIsNone(self.store.run("titled-bad"))
+
     def test_observation_cycles_cross_session_and_sdk_collision_rejected(self):
         self.store.ingest(event())
         with self.assertRaisesRegex(ValueError, "collides"):

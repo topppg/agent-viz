@@ -180,7 +180,10 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
             ),
             "",
         )
-        out["name"] = _title(rows, safe) or first or out["name"]
+        named = _title(rows, safe)
+        out["name"] = named or first or out["name"]
+        if named:
+            out["title_source"] = "user"
     out["last_seen"] = out["last_seen"] or mtime_iso(mtime)
     return out
 
