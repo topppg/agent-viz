@@ -8,7 +8,7 @@
   const MAX_ROWS = 300;
   const REST_KEY = "spiritboard.rested";
   const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
-  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested(), editing: null };
+  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested(), editing: null, draft: "" };
   // Chart windows in seconds: heading, then the left and middle axis labels.
   const ZOOMS = { 600: ["last 10 minutes", "-10m", "-5m"], 3600: ["last hour", "-1h", "-30m"], 86400: ["last 24 hours", "-24h", "-12h"],
     604800: ["last 7 days", "-7d", "-3.5d"], 2592000: ["last 30 days", "-30d", "-15d"] };
@@ -485,19 +485,18 @@
     const status = statusOf(run);
     const open = state.selected === run.run_id;
     const depth = Math.round(prefix.length / 3);
-    const item = node("div", null, `row run-row ${status.key}${depth ? " sub" : ""}${open ? " selected" : ""}${context ? " context" : ""}`);
+    const button = node("button", null, `row run-row ${status.key}${depth ? " sub" : ""}${open ? " selected" : ""}${context ? " context" : ""}`);
     // Subagents shift right as a block, so they never read as top-level processes.
-    if (depth) item.style.setProperty("--depth", String(depth));
-    item.dataset.runId = run.run_id;
-    item.setAttribute("aria-current", String(open));
-    // The status cell is the row's keyboard handle; a click anywhere but the name also expands.
-    const statusCell = node("button", `${open ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status expand g-${status.key}`);
-    statusCell.type = "button"; statusCell.dataset.focusKey = `select:${run.run_id}`;
-    statusCell.setAttribute("aria-expanded", String(open));
-    statusCell.setAttribute("aria-label", `${nameOf(run)} · ${status.text}`);
-    if (open) statusCell.setAttribute("aria-controls", "detail");
+    if (depth) button.style.setProperty("--depth", String(depth));
+    button.type = "button"; button.dataset.focusKey = `select:${run.run_id}`; button.dataset.runId = run.run_id;
+    button.setAttribute("aria-current", String(open));
+    button.setAttribute("aria-expanded", String(open));
+    const statusCell = node("span", `${open ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status g-${status.key}`);
     const agent = node("span", null, "cell agent");
-    agent.append(node("span", prefix, "tree"), nameControl(run, "row"));
+    // Renaming happens in the opened session; a click on the row only opens it.
+    const name = node("span", nameOf(run), "agent-name");
+    if (titleNote(run)) name.title = titleNote(run);
+    agent.append(node("span", prefix, "tree"), name);
     if (run.local_name) {
       const mark = node("span", "●", "renamed-mark"); mark.title = "Renamed by you in Spiritboard";
       mark.setAttribute("role", "img"); mark.setAttribute("aria-label", "renamed by you");
@@ -524,23 +523,18 @@
     rateCell.append(node("span", rate, "num"), bar);
     const last = node("span", seenText(run.last_seen), "cell seen");
     last.dataset.seen = run.last_seen || "";
-    item.append(harnessCell, statusCell, agent, doingCell, rateCell, last);
-    item.addEventListener("click", (event) => {
-      if (event?.target?.closest?.(".rename, .name-edit")) return;
-      selectRun(state.selected === run.run_id ? null : run.run_id);
-      byFocusKey(`select:${run.run_id}`)?.focus({ preventScroll: true });
-    });
-    return item;
+    button.append(harnessCell, statusCell, agent, doingCell, rateCell, last);
+    button.addEventListener("click", () => selectRun(state.selected === run.run_id ? null : run.run_id));
+    return button;
   }
   const byFocusKey = (key) => [...$("runs").querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === key);
-  // The name is its own click target: a button that turns into an input while renaming.
-  function nameControl(run, where) {
-    const key = `${where}:${run.run_id}`;
-    if (state.editing?.key === key) {
+  // The opened session's heading is a button that turns into an input while renaming.
+  function nameControl(run) {
+    if (state.editing === run.run_id) {
       const input = node("input", null, "name-edit");
-      input.type = "text"; input.value = state.editing.draft; input.maxLength = 120; input.spellcheck = false; input.autocomplete = "off";
-      input.setAttribute("aria-label", "Agent name"); input.dataset.focusKey = `edit:${key}`;
-      input.addEventListener("input", () => { if (state.editing) state.editing.draft = input.value; });
+      input.type = "text"; input.value = state.draft; input.maxLength = 120; input.spellcheck = false; input.autocomplete = "off";
+      input.setAttribute("aria-label", "Agent name"); input.dataset.focusKey = "name-edit";
+      input.addEventListener("input", () => { state.draft = input.value; });
       input.addEventListener("keydown", (event) => {
         if (event.isComposing) return;
         if (event.key === "Enter") { event.preventDefault(); endEdit(input.value, true); }
@@ -551,30 +545,30 @@
     }
     const note = titleNote(run);
     if (state.past) { const text = node("span", nameOf(run), "agent-name"); if (note) text.title = note; return text; }
-    const button = node("button", null, "agent-name rename"); button.type = "button"; button.dataset.focusKey = `name:${key}`;
+    const button = node("button", null, "agent-name rename"); button.type = "button"; button.dataset.focusKey = "name";
     button.append(node("span", nameOf(run), "name-text"));
     button.title = run.local_name ? note : [note, "Click to rename"].filter(Boolean).join(" · ");
     button.setAttribute("aria-label", `Rename ${nameOf(run)}`);
-    button.addEventListener("click", (event) => { event?.stopPropagation?.(); startEdit(run.run_id, where); });
+    button.addEventListener("click", (event) => { event?.stopPropagation?.(); startEdit(run.run_id); });
     return button;
   }
-  function startEdit(id, where) {
+  function startEdit(id) {
     const run = state.snapshot?.runs.find((r) => r.run_id === id);
     if (!run || state.past) return;
-    state.editing = { key: `${where}:${id}`, runId: id, draft: nameOf(run) };
+    state.editing = id; state.draft = nameOf(run);
     renderTable(true);
-    const input = byFocusKey(`edit:${where}:${id}`);
+    const input = byFocusKey("name-edit");
     if (!input) { state.editing = null; renderTable(); return; }
     input.focus(); input.select?.();
   }
   function endEdit(value, refocus) {
-    const editing = state.editing;
-    if (!editing) return;
+    const id = state.editing;
+    if (!id) return;
     state.editing = null;
-    if (value !== null) storeName(editing.runId, value.trim());
+    if (value !== null) storeName(id, value.trim());
     if (!refocus) { settle(); return; }
     renderTable();
-    byFocusKey(`name:${editing.key}`)?.focus();
+    byFocusKey("name")?.focus();
   }
   // Rebuilding between press and release would swallow the click that ended a rename by blur.
   let pressed = false, unsettled = false;
@@ -650,13 +644,13 @@
     const main = node("div", null, "detail-main");
     const head = node("div", null, "detail-head");
     const title = node("div", null, "detail-title");
-    const heading = node("h3"); heading.append(nameControl(run, "detail"));
+    const heading = node("h3"); heading.append(nameControl(run));
     title.append(heading, node("span", `${status.glyph} ${status.text}`, `pill g-${status.key}`));
     if (run.local_name) {
       const renamed = node("span", `Renamed by you in Spiritboard · automatic title: ${autoNameOf(run)}`, "was renamed-note");
       if (!state.past) {
         const reset = node("button", "Use automatic title", "link"); reset.type = "button"; reset.dataset.focusKey = "auto-name";
-        reset.addEventListener("click", () => { storeName(run.run_id, ""); settle(); byFocusKey(`name:detail:${run.run_id}`)?.focus(); });
+        reset.addEventListener("click", () => { storeName(run.run_id, ""); settle(); byFocusKey("name")?.focus(); });
         renamed.append(" · ", reset);
       }
       title.append(renamed);
@@ -861,7 +855,7 @@
     const index = state.order.indexOf(state.selected);
     const next = state.order[Math.min(state.order.length - 1, Math.max(0, index === -1 ? 0 : index + step))];
     selectRun(next);
-    byFocusKey(`select:${next}`)?.focus({ preventScroll: false });
+    [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === next)?.focus({ preventScroll: false });
   }
 
   [...$("views").children].forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
