@@ -326,6 +326,22 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(ids.counts.textContent.includes('3 needs you'));
  turnRow.listeners.click(); await tick();
  assert.ok(detail().textContent.includes('waiting for your next direction'));
+ // Letting a turn rest calms it until the agent acts again.
+ assert.equal(control('rest').textContent, '☾ let it rest');
+ control('rest').listeners.click(); await tick();
+ assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('☾ at rest~'));
+ assert.ok(detail().textContent.includes('you checked this turn'));
+ assert.equal(control('rest').textContent, '↩ back to your turn');
+ assert.ok(ids.counts.textContent.includes('2 needs you') && ids.counts.textContent.includes('1 at rest'));
+ docListeners.keydown({key:'w', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.ok(!rows().some(r => r.dataset.runId === 'turn'));
+ docListeners.keydown({key:'a', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ docListeners.keydown({key:'r', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('↩ your turn~'));
+ docListeners.keydown({key:'r', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ const stirred = {...turn, last_seen:new Date(Date.parse(now) + 1000).toISOString()};
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, stirred, replied]})}); await tick();
+ assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('↩ your turn~'));
  // Checked liveness: no owning process means closed, never "your turn"; an open idle session stays visible.
  const gone = run('gone', null, 'Gone', {state:'idle', live:false, activity:'Wrapped up the release'});
  const hours = new Date(Date.now() - 2 * 3600000).toISOString();
@@ -398,7 +414,7 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.ok(ids['past-bar'].textContent.includes('4m ago'));
  assert.ok(ids['past-bar'].textContent.includes('⟲ back to live'));
  assert.equal(ids.connection.textContent, 'past · not live');
- assert.ok(ids.counts.textContent.includes('at '));
+ assert.ok(ids.counts.children.some(c => c.className === 'counts-at'));
  assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan']);
  assert.ok(rows()[0].textContent.includes('Earlier step'));
  assert.equal(control('open-app').disabled, true);
@@ -413,7 +429,7 @@ const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.data
  assert.equal(ids['past-bar'].hidden, true);
  assert.ok(rows().length > 1);
  assert.equal(ids.connection.textContent, 'live');
- assert.ok(!ids.counts.textContent.includes('at '));
+ assert.ok(!ids.counts.children.some(c => c.className === 'counts-at'));
  assert.equal(control('open-app').disabled, undefined);
  // L returns to live, and so does the newest bar.
  cols()[10].listeners.click(); await tick();

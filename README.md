@@ -111,6 +111,7 @@ New harnesses plug in as one module each (see [the source guide](https://github.
   | --- | --- |
   | ◐ **needs you** | Waiting for your approval. |
   | ↩ **your turn** | Finished its turn in the last 30 minutes and is waiting for your next direction. |
+  | ☾ **at rest** | A turn you checked with **let it rest** (or `r`) in its detail view; nothing needed now. It goes back to your turn as soon as the agent does anything. Kept in this browser only. |
   | ● **running** | Working, including while it waits on a tool or a subagent. |
   | ◌ **open · idle** | Still open in a terminal or app, idle for longer. |
   | ○ **quiet** | No recent activity, and liveness could not be checked. Quiet never means failed. |
@@ -134,7 +135,8 @@ New harnesses plug in as one module each (see [the source guide](https://github.
 <sub>Synthetic data: invented sessions, projects and activity.</sub>
 
 Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w`
-/ `e` switch between active, needs-you and all. Click a table heading to sort by
+/ `e` switch between active, needs-you and all, and `r` lets the open session's
+turn rest. Click a table heading to sort by
 that column, click again to reverse it, and a third time to restore the default
 attention order. Subagents stay under their parent while sorting.
 
@@ -353,9 +355,9 @@ approve agents.
 
 The look is ghostly rather than spooky: dark amethyst surfaces, Space Grotesk
 for reading with Space Mono for numbers and times, violet for activity, amber
-for attention, pink for summaries, and motion only when something actually
+for attention, green for rest, pink for summaries, and motion only when something actually
 changes. Labels stay literal (needs you, your turn,
-closed, open in cmux) so the board needs no vocabulary of its own.
+closed, open in cmux), with one nod to the board: a turn you checked is at rest.
 
 Next: more harnesses and framework adapters, exact tab focus for Ghostty once a
 released version exposes it, and a longer scripted demo scenario for recording.
