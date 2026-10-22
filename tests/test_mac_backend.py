@@ -19,38 +19,12 @@ from spiritboard.launcher import Instance
 BACKEND = Path(__file__).resolve().parents[1] / "src" / "app" / "backend.py"
 
 
-def test_forged_health_on_standard_port_is_not_trusted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    forged = MagicMock(status=200)
-    forged.read.return_value = (
-        b'{"ok":true,"service":"spiritboard","instance_id":"1234567890abcdef1234567890abcdef"}'
-    )
-    serve = MagicMock(return_value=0)
-    with (
-        patch("http.client.HTTPConnection") as connection,
-        patch("spiritboard.cli.main", serve),
-        patch("sys.argv", [str(BACKEND)]),
-    ):
-        connection.return_value.getresponse.return_value = forged
-        with pytest.raises(SystemExit) as exited:
-            runpy.run_path(str(BACKEND), run_name="__main__")
-    assert exited.value.code == 0
-    serve.assert_called_once_with(["serve", "--no-open", "--port", "0"])
-    assert "already running" not in capsys.readouterr().out
-
-
 @contextlib.contextmanager
-def dashboard(directory: Path, health_id: str | None = None) -> Iterator[str]:
-    """The data directory's lock owner plus a health endpoint answering as ``health_id``."""
-    published_id = uuid.uuid4().hex
-
+def health_server(instance_id: str, port: int = 0) -> Iterator[str]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             payload = json.dumps(
-                {"ok": True, "service": "spiritboard", "instance_id": health_id or published_id}
+                {"ok": True, "service": "spiritboard", "instance_id": instance_id}
             ).encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(payload)))
@@ -60,18 +34,45 @@ def dashboard(directory: Path, health_id: str | None = None) -> Iterator[str]:
         def log_message(self, *_args: object) -> None:
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    url = f"http://127.0.0.1:{server.server_port}"
     try:
-        with Instance(directory, {}) as owner:
-            owner.publish(url, published_id)
-            yield url
+        yield f"http://127.0.0.1:{server.server_port}"
     finally:
         server.shutdown()
         server.server_close()
         thread.join(2)
+
+
+@contextlib.contextmanager
+def dashboard(directory: Path, health_id: str | None = None) -> Iterator[str]:
+    """The data directory's lock owner plus a health endpoint answering as ``health_id``."""
+    published_id = uuid.uuid4().hex
+    with health_server(health_id or published_id) as url, Instance(directory, {}) as owner:
+        owner.publish(url, published_id)
+        yield url
+
+
+def test_forged_health_on_standard_port_is_not_trusted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    serve = MagicMock(return_value=0)
+    with contextlib.ExitStack() as stack:
+        # Impersonate the standard port when it is free; a dashboard may already use it.
+        try:
+            stack.enter_context(health_server(uuid.uuid4().hex, 8766))
+        except OSError:
+            stack.enter_context(health_server(uuid.uuid4().hex))
+        stack.enter_context(patch.object(cli, "main", serve))
+        stack.enter_context(patch("sys.argv", [str(BACKEND)]))
+        with pytest.raises(SystemExit) as exited:
+            runpy.run_path(str(BACKEND), run_name="__main__")
+    assert exited.value.code == 0
+    serve.assert_called_once_with(["serve", "--no-open", "--port", "0"])
+    assert "already running" not in capsys.readouterr().out
 
 
 def test_selected_directory_shows_its_verified_dashboard(
