@@ -137,8 +137,6 @@ def parse(profile: SourceProfile, rows: list[dict], mtime: float) -> dict | None
                 request = request_text(content, 400 if agent else 160)
                 if request and not (agent and prompt_seen):
                     out["task"], prompt_seen = request, True
-                    if not result:
-                        last_reply = ""
         elif kind == "assistant" and isinstance(message, dict):
             stop = message.get("stop_reason")
             content = message.get("content", [])
@@ -193,7 +191,22 @@ def subagent_description(path: Path) -> str:
 
 
 def observe(profile: SourceProfile, session: Session) -> dict | None:
-    value = parse(profile, records(session.path), session.mtime)
+    rows = records(session.path)
+    value = parse(profile, rows, session.mtime)
+    if (
+        value
+        and profile.include_text
+        and any(row.get("type") == READ_GAP for row in rows)
+        and value["activity"]
+        in {
+            "Tool result recorded",
+            "User turn recorded",
+            "Turn ended · session may resume",
+            "Tool call recorded",
+            "Model activity recorded",
+        }
+    ):
+        value["activity"] = latest_reply(session) or value["activity"]
     if value and value.get("parent_run_id") and profile.include_text:
         description = subagent_description(session.path)
         value["name"] = description or value["name"]
@@ -218,6 +231,17 @@ def row_request(row: dict[str, Any]) -> str:
 
 def latest_request(session: Session) -> str:
     return last_request(session.path, b'"type":"user"', row_request)
+
+
+def row_reply(row: dict[str, Any]) -> str:
+    message = row.get("message")
+    if row.get("type") != "assistant" or not isinstance(message, dict):
+        return ""
+    return reply_text(message.get("content"))
+
+
+def latest_reply(session: Session) -> str:
+    return last_request(session.path, b'"type":"assistant"', row_reply)
 
 
 def session_pid(root: Path, session_id: str) -> tuple[bool, int | None]:
