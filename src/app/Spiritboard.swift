@@ -48,6 +48,29 @@ final class SpiritboardApp: NSObject, NSApplicationDelegate, NSMenuItemValidatio
             injectionTime: .atDocumentEnd,
             forMainFrameOnly: true
         ))
+        // The dashboard may be served by an older CLI process, so keep Mac controls in the app.
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: """
+                (() => {
+                  const style = document.createElement('style');
+                  style.textContent = `
+                    select {
+                      appearance: none !important;
+                      border-radius: 8px !important;
+                      padding-right: 32px !important;
+                      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='12' fill='none' stroke='%239a93ad' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 4.5l3-3 3 3M1 7.5l3 3 3-3'/%3E%3C/svg%3E") !important;
+                      background-repeat: no-repeat !important;
+                      background-position: right 12px center !important;
+                      box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 1px 4px rgba(0,0,0,.18);
+                    }
+                    select:hover { border-color: var(--run) !important; }
+                  `;
+                  document.head.appendChild(style);
+                })();
+                """,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.uiDelegate = self
