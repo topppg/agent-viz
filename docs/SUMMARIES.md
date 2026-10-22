@@ -125,7 +125,8 @@ enabled setting or explicit `--summaries`, a new installation makes no summary c
 - A session starts with its native title. When a summary refreshes, the same call
   may give it a new title if the goal has clearly moved on, at most once an hour.
   The title it replaced is shown as "was: …" in the expanded row.
-- Names you set yourself (a Claude `/rename`, a Pi `/name`) are never replaced.
+- Names you set yourself (a Claude `/rename`, a Pi `/name`, or a name typed in
+  Spiritboard) are never replaced. A Spiritboard name is never sent to the provider.
   Other harnesses don't record who set a title, so any change to the native title
   is treated as a rename: the AI title is dropped and later ones build on it.
 - A subagent with only a generic name (no Claude Task description, no DeepSeek

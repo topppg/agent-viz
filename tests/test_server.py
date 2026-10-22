@@ -204,6 +204,46 @@ class ServerTests(unittest.TestCase):
             {"Origin": origin, "X-Spiritboard": "focus", **(headers or {})},
         )
 
+    def rename_post(self, body, headers=None, run="run"):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        raw = body if isinstance(body, str) else json.dumps(body)
+        return self.request(
+            "POST",
+            f"/api/runs/{run}/name",
+            raw,
+            {
+                "Origin": origin,
+                "X-Spiritboard": "rename",
+                "Content-Type": "application/json",
+                **(headers or {}),
+            },
+        )
+
+    def test_rename_sets_and_clears_a_local_name(self):
+        self.assertEqual(self.post(json.dumps(self.event()))[0], 200)
+        status, _, data = self.rename_post({"name": "  Retry\twork  "})
+        self.assertEqual(
+            (status, json.loads(data)), (200, {"ok": True, "local_name": "Retry work"})
+        )
+        run = self.json_get("/api/snapshot")[1]["runs"][0]
+        self.assertEqual(run["local_name"], "Retry work")
+        status, _, data = self.rename_post({"name": " "})
+        self.assertEqual(json.loads(data), {"ok": True, "local_name": None})
+        self.assertNotIn("local_name", self.json_get("/api/snapshot")[1]["runs"][0])
+
+    def test_rename_requires_dashboard_origin_and_a_valid_name(self):
+        self.assertEqual(self.post(json.dumps(self.event()))[0], 200)
+        self.assertEqual(self.rename_post({"name": "x"}, {"X-Spiritboard": "focus"})[0], 403)
+        self.assertEqual(
+            self.rename_post({"name": "x"}, {"Origin": "https://evil.invalid"})[0], 403
+        )
+        self.assertEqual(self.rename_post({"name": "x"}, {"Sec-Fetch-Site": "cross-site"})[0], 403)
+        for body in ({"name": "x" * 121}, {"name": "a\x00b"}, {"name": 7}, {"other": 1}, "[]", "{"):
+            with self.subTest(body=body):
+                self.assertEqual(self.rename_post(body)[0], 400)
+        self.assertEqual(self.rename_post({"name": "x"}, run="missing")[0], 404)
+        self.assertNotIn("local_name", self.json_get("/api/snapshot")[1]["runs"][0])
+
     def test_focus_lookup_is_lazy_and_sdk_runs_are_unsupported(self):
         self.assertEqual(self.post(json.dumps(self.event()))[0], 200)
         status, _, data = self.request("GET", "/api/runs/run/focus")

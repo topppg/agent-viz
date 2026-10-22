@@ -164,6 +164,23 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(rows, {"old-parent", "child", "still-active"})
         self.assertEqual(self.store.events("old-done")["events"], [])
 
+    def test_local_name_survives_observations_and_leaves_with_the_run(self):
+        old = (datetime.now(UTC) - timedelta(days=10)).isoformat()
+        self.store.observe(observation(run="named", last_seen=old))
+        self.assertEqual(self.store.rename("named", " My\n  name "), "My name")
+        self.store.observe(observation(run="named", last_seen=old, name="Native again"))
+        run = self.store.snapshot()["runs"][0]
+        self.assertEqual((run["name"], run["local_name"]), ("Native again", "My name"))
+        self.assertNotIn("local_name", self.store.run("named"))
+        with self.assertRaises(KeyError):
+            self.store.rename("missing", "x")
+        for bad in ("x" * 121, "a\x00b", 7):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.store.rename("named", bad)
+        self.store.prune(7)
+        self.store.observe(observation(run="named"))
+        self.assertNotIn("local_name", self.store.snapshot()["runs"][0])
+
     def test_parallel_operations_keep_independent_outcomes(self):
         self.store.ingest(event())
         self.store.ingest(
