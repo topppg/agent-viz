@@ -35,6 +35,13 @@
     .mac-select-menu li.is-active { background: rgba(183,156,255,.24); color: var(--bright, #f4f0ff); }
     .mac-select-menu li[aria-disabled="true"] { color: var(--dim, #6b6480); }
     .mac-select-menu li[hidden] { display: none; }
+    @media (min-height: 601px) and (orientation: portrait) {
+      .flux-panel { flex-direction: column; align-items: stretch; gap: 6px; }
+      .flux-panel .panel-head { order: 0; }
+      .flux-panel h2, .flux .ymax { display: block; }
+      .axis { display: flex; }
+      .flux { flex: none; height: clamp(160px, 22vh, 260px); }
+    }
     @media (prefers-reduced-motion: reduce) { .mac-select-menu, .mac-select-menu.is-above { transition: none; transform: none; } }
   `;
   // The dashboard's CSP blocks <style> elements but not CSSOM. Older WebKit keeps native menus.
