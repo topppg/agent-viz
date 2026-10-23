@@ -203,12 +203,13 @@
     // Same scope as the active view: long-quiet history is not counted.
     return runs.filter((run) => !terminal.has(run.state) && !run.archived && (statusOf(run).key !== "quiet" || serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW)).map(statusOf);
   }
-  const BUSY = new Set(["running", "waiting", "idle", "unknown"]);
+  const BUSY = new Set(["running", "waiting", "unknown"]);
   function renderCounts() {
     const statuses = activeStatuses(state.snapshot.runs);
     const counts = [["running", "●", statuses.filter((s) => BUSY.has(s.key)).length, "running"],
       ["needs", "◐", statuses.filter((s) => s.key === "needs").length, "needs you"],
       ["rest", "☾", statuses.filter((s) => s.key === "rest").length, "at rest"],
+      ["idle", "◌", statuses.filter((s) => s.key === "idle").length, "idle"],
       ["quiet", "○", statuses.filter((s) => s.key === "quiet").length, "quiet"]];
     $("counts").replaceChildren(...counts.map(([key, glyph, value, text]) => {
       const item = node("span"); item.append(node("span", glyph, `g-${key}`), " ", node("strong", value), node("span", ` ${text}`, "count-word")); return item;
@@ -258,7 +259,7 @@
     const focused = document.activeElement?.dataset?.focusKey;
     const host = $("harnesses");
     // Only harnesses with something running (or the one filtered on); idle ones stay in the filter.
-    const running = (h) => h.rate > 0 || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs");
+    const running = (h) => h.rate > 0 || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs" || s.key === "idle");
     const shown = list.filter((h) => running(h) || $("harness-filter").value === h.key);
     host.replaceChildren(...shown.map((h) => {
       const button = node("button", null, `harness${$("harness-filter").value === h.key ? " is-selected" : ""}`);
@@ -266,7 +267,7 @@
       button.setAttribute("aria-pressed", String($("harness-filter").value === h.key));
       const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(h.key);
       const statuses = activeStatuses(h.runs);
-      const parts = [[(s) => BUSY.has(s.key), "running"], [(s) => s.key === "needs", "needs you"], [(s) => s.key === "quiet", "quiet"]]
+      const parts = [[(s) => BUSY.has(s.key), "running"], [(s) => s.key === "needs", "needs you"], [(s) => s.key === "idle", "idle"], [(s) => s.key === "quiet", "quiet"]]
         .map(([test, text]) => [statuses.filter(test).length, text]).filter(([n]) => n).map(([n, text]) => `${n} ${text}`);
       const sub = parts.join(" · ") || (h.runs.length ? "nothing active" : "no observations yet");
       const name = node("span", null, "who"); name.title = `${h.label} · ${sub}`; name.append(node("span", h.label, "name"), node("span", sub, "sub"));
