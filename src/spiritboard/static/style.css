@@ -110,6 +110,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .run-row.needs.selected { background: #2a2210; }
 .run-row.quiet { color: var(--muted); font-style: italic; animation: flicker 4s ease-in-out infinite; }
 .run-row.closed { color: var(--muted); }
+.run-row.idle, .run-row.idle .agent-name, .run-row.idle .doing { color: var(--muted); }
 .closed-line { color: var(--muted); }
 .run-row.done { color: #b3acc6; }
 .run-row.context { opacity: .65; }
