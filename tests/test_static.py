@@ -371,11 +371,24 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const openRow = rows().find(r => r.dataset.runId === 'open');
  assert.ok(openRow.textContent.includes('open · idle') && openRow.textContent.includes('1 subagent'));
  assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
- // Opening the session leaves the list folded; the toggle and the s key fold it without opening.
- openRow.listeners.click(); await tick();
- assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
- rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
+ // Opening the session lists its subagents and closing it folds them again.
  const foldOf = (id) => flatten(rows().find(r => r.dataset.runId === id)).find(x => x.className === 'fold');
+ openRow.listeners.click(); await tick();
+ assert.ok(detail());
+ assert.ok(rows().some(r => r.dataset.runId === 'helper'));
+ // Moving into a subagent keeps the parent's list open.
+ rows().find(r => r.dataset.runId === 'helper').listeners.click(); await tick();
+ assert.ok(rows().some(r => r.dataset.runId === 'helper'));
+ rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
+ rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
+ assert.equal(detail(), undefined);
+ assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
+ // With the panel open, the toggle closes the panel and the list together.
+ rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
+ foldOf('open').listeners.click(); await tick();
+ assert.equal(detail(), undefined);
+ assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
+ // With the panel closed, the toggle and the s key fold the list without opening it.
  assert.equal(foldOf('open').textContent, '▸ 1 subagent');
  foldOf('open').listeners.click(); await tick();
  assert.equal(detail(), undefined);
@@ -539,7 +552,8 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const renamedRuns = runs.map(r => r.run_id === 'root' ? {...r, local_name:'Release train'} : r);
  stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:renamedRuns})}); await tick();
  ids.search.value = 'release train'; ids.search.listeners.input();
- assert.deepEqual(rows().map(r => r.dataset.runId), ['root']);
+ // Root is open, so its subagents are listed under it too.
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask','child']);
  ids.search.value = ''; ids.search.listeners.input();
  // The heading says it was renamed here; Escape cancels an edit without saving.
  assert.ok(flatten(detail()).find(x => (x.className || '').includes('renamed-note')).textContent.startsWith('Renamed by you in Spiritboard · automatic title: Root'));
