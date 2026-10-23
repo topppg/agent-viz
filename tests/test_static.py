@@ -353,15 +353,20 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const gone = run('gone', null, 'Gone', {state:'idle', live:false, activity:'Wrapped up the release'});
  const hours = new Date(Date.now() - 2 * 3600000).toISOString();
  const open = run('open', null, 'Open', {state:'idle', live:true, last_seen:hours});
- stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open]})}); await tick();
+ const helper = run('helper', 'open', 'Helper', {state:'idle', live:true, last_seen:hours});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper]})}); await tick();
  const goneRow = rows().find(r => r.dataset.runId === 'gone');
  assert.ok(goneRow.textContent.includes('■ closed'));
  assert.ok(goneRow.textContent.includes('last said: Wrapped up the release'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
- assert.equal(rows().find(r => r.dataset.runId === 'open'), undefined);
- ids.views.children[2].listeners.click();
- assert.ok(rows().find(r => r.dataset.runId === 'open').textContent.includes('open · idle'));
- ids.views.children[0].listeners.click();
+ // An open session stays active however long it idles; its settled subagents fold until it is opened.
+ const openRow = rows().find(r => r.dataset.runId === 'open');
+ assert.ok(openRow.textContent.includes('open · idle') && openRow.textContent.includes('1 subagent'));
+ assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
+ openRow.listeners.click(); await tick();
+ assert.ok(rows().some(r => r.dataset.runId === 'helper'));
+ assert.ok(!rows().find(r => r.dataset.runId === 'open').textContent.includes('1 subagent'));
+ rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
  goneRow.listeners.click(); await tick();
  assert.ok(detail().textContent.includes('no running process owns this session'));
  // A user-named Claude desktop session is tagged; an archived one is never active; resume says terminal.

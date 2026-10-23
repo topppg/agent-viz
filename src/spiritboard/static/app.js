@@ -129,6 +129,8 @@
     if (state.view === "waiting") return status.key === "needs";
     if (state.view === "active") {
       if (terminal.has(run.state) || run.archived) return false;
+      // An open terminal is never history, however long it idles.
+      if (status.key === "idle" && run.live === true) return true;
       // Long-idle open sessions, quiet and closed ones stay under "all" after 30 minutes.
       return !["quiet", "closed", "idle"].includes(status.key) || serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW;
     }
@@ -463,13 +465,19 @@
     if (!direct.size) { host.append(node("p", state.view === "active" ? `Nothing active ${state.past ? "at this moment" : "right now"}. Press e to show all history.` : "No agents match these filters.", "empty")); return; }
     const maxRate = Math.max(1, ...[...visible].map(rateOf));
     const visited = new Set();
+    const openPath = new Set();
+    for (let r = byId.get(state.selected); r && !openPath.has(r.run_id); r = byId.get(r.parent_run_id)) openPath.add(r.run_id);
     const renderRun = (run, prefix, pad, orphan) => {
       if (visited.has(run.run_id) || !visible.has(run.run_id) || state.order.length >= MAX_ROWS) return;
       visited.add(run.run_id);
       state.order.push(run.run_id);
-      host.append(row(run, prefix, !direct.has(run.run_id), orphan, maxRate));
+      let kids = (children.get(run.run_id) || []).filter((c) => visible.has(c.run_id)).sort(compare);
+      // An idle or quiet session keeps its settled subagents folded until its row is opened.
+      const folded = ["idle", "quiet", "rest"].includes(statusOf(run).key) && !openPath.has(run.run_id)
+        && kids.every((c) => rank(c).rank >= 3) ? kids.length : 0;
+      if (folded) kids = [];
+      host.append(row(run, prefix, !direct.has(run.run_id), orphan, maxRate, folded));
       if (state.selected === run.run_id) host.append(expansion(run, byId));
-      const kids = (children.get(run.run_id) || []).filter((c) => visible.has(c.run_id)).sort(compare);
       kids.forEach((child, i) => {
         const last = i === kids.length - 1;
         renderRun(child, `${pad}${last ? "└─ " : "├─ "}`, `${pad}${last ? "   " : "│  "}`, false);
@@ -481,7 +489,7 @@
     if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
     if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
-  function row(run, prefix, context, orphan, maxRate) {
+  function row(run, prefix, context, orphan, maxRate, folded = 0) {
     const status = statusOf(run);
     const open = state.selected === run.run_id;
     const depth = Math.round(prefix.length / 3);
@@ -504,6 +512,7 @@
     }
     if (orphan) agent.append(node("span", "parent not yet available", "note"));
     if (context) agent.append(node("span", "context", "note"));
+    if (folded) agent.append(node("span", `${folded} subagent${folded === 1 ? "" : "s"}`, "note"));
     // Where the session runs, when it is an app rather than a terminal (Claude desktop).
     if (run.app) agent.append(node("span", run.app, "note"));
     const harness = harnessOf(run);
