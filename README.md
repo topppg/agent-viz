@@ -91,9 +91,10 @@ for upgrades, removal and publishing.
 | **Grok Bot** (macOS app) | the app's local cache, `GROK_BOT_HOME` | unknown: its agents run in the cloud | the exact agent in the app | — |
 | **Your own agents** | the Python SDK below | heartbeats | — | — |
 
-Claude Code, Codex and opencode are checked against real sessions. The Claude
-desktop marker, Pi and DeepSeek Harness are built from each app's own code and
-documentation and covered by tests, but have seen little or no real data yet.
+Claude Code, Codex and opencode are checked against real sessions, and Pi against
+a real Pi 0.73 session (reading, liveness and resume). The Claude desktop marker
+and DeepSeek Harness are built from each app's own code and documentation and
+covered by tests, but have seen little or no real data yet.
 Grok Bot is read from the app's local cache, whose undocumented format was observed
 on one machine and may change; unrecognized versions are skipped with a warning.
 New harnesses plug in as one module each (see [the source guide](https://github.com/topppg/spiritboard/blob/main/docs/SOURCES.md#adding-a-harness)).
