@@ -80,27 +80,26 @@
     render();
   }
   function statusOf(run) {
-    const inferred = run.inferred ? "~" : "";
-    if (run.state === "completed") return { key: "done", glyph: "✓", text: `done${inferred}` };
-    if (run.state === "failed") return { key: "failed", glyph: "✗", text: `failed${inferred}` };
-    if (run.state === "cancelled") return { key: "done", glyph: "–", text: `cancelled${inferred}` };
+    if (run.state === "completed") return { key: "done", glyph: "✓", text: "done" };
+    if (run.state === "failed") return { key: "failed", glyph: "✗", text: "failed" };
+    if (run.state === "cancelled") return { key: "done", glyph: "–", text: "cancelled" };
     if (run.archived) return { key: "closed", glyph: "■", text: `archived ${age(run.last_seen)}` };
     // No live process owns it (checked, not guessed): the session has ended.
     if (run.live === false) return { key: "closed", glyph: "■", text: `closed ${age(run.last_seen)}` };
     // An unanswered approval stops a transcript from changing; it still needs you.
-    if (run.state === "waiting_user") return { key: "needs", glyph: "◐", text: `needs you${inferred}` };
+    if (run.state === "waiting_user") return { key: "needs", glyph: "◐", text: "needs you" };
     // A top-level session that recently finished its turn is waiting for your next direction.
     if (run.state === "idle" && !run.parent_run_id && serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW) {
-      if (!state.past && state.rested.get(run.run_id) === run.last_seen) return { key: "rest", turn: true, glyph: "☾", text: `at rest${inferred}` };
-      return { key: "needs", turn: true, glyph: "↩", text: `your turn${inferred}` };
+      if (!state.past && state.rested.get(run.run_id) === run.last_seen) return { key: "rest", turn: true, glyph: "☾", text: "at rest" };
+      return { key: "needs", turn: true, glyph: "◐", text: "your turn" };
     }
     if (run.state === "idle" && run.live === true && !run.parent_run_id) return { key: "idle", glyph: "◌", text: `open · idle ${age(run.last_seen)}` };
     if (!["fresh", "observed"].includes(healthOf(run))) return { key: "quiet", glyph: "○", text: `quiet ${age(run.last_seen)}` };
     // Waiting on a tool or a child is ordinary work, not something for you.
-    if (String(run.state).startsWith("waiting")) return { key: "running", glyph: "●", text: `running${inferred}` };
-    if (run.state === "idle") return { key: "idle", glyph: "◌", text: `idle${inferred}` };
+    if (String(run.state).startsWith("waiting")) return { key: "running", glyph: "●", text: "running" };
+    if (run.state === "idle") return { key: "idle", glyph: "◌", text: "idle" };
     if (run.state === "unknown") return { key: "unknown", glyph: "?", text: "unknown" };
-    return { key: "running", glyph: "●", text: `running${inferred}` };
+    return { key: "running", glyph: "●", text: "running" };
   }
   function doingOf(run, status) {
     if (terminal.has(run.state)) return { mark: "›", text: run.summary || run.activity || run.task || "finished", cls: "" };
@@ -502,6 +501,7 @@
     button.setAttribute("aria-current", String(open));
     button.setAttribute("aria-expanded", String(open));
     const statusCell = node("span", `${open ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status g-${status.key}`);
+    if (run.inferred) statusCell.title = "Inferred from the transcript";
     const agent = node("span", null, "cell agent");
     // Renaming happens in the opened session; a click on the row only opens it.
     const name = node("span", nameOf(run), "agent-name");
@@ -682,7 +682,7 @@
     const actions = node("div", null, "detail-actions");
     actions.append(...targetControls(run));
     if (status.turn && !state.past) {
-      const rest = node("button", status.key === "rest" ? "↩ back to your turn" : "☾ let it rest", "link rest-link"); rest.type = "button"; rest.dataset.focusKey = "rest";
+      const rest = node("button", status.key === "rest" ? "◐ back to your turn" : "☾ let it rest", "link rest-link"); rest.type = "button"; rest.dataset.focusKey = "rest";
       rest.addEventListener("click", () => toggleRest(run));
       actions.append(rest);
     }
@@ -707,7 +707,7 @@
       rest.append(node("span", " · stirs again when the agent does anything", "rest-where"));
       main.append(rest);
     } else if (status.turn) {
-      const turn = node("p", `↩ finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
+      const turn = node("p", `finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
       turn.append(node("span", ` · continue it in ${harness.label}`, "needs-where"));
       main.append(turn);
     } else if (run.archived) {
