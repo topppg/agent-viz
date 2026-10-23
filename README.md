@@ -114,7 +114,7 @@ New harnesses plug in as one module each (see [the source guide](https://github.
   | ↩ **your turn** | Finished its turn in the last 30 minutes and is waiting for your next direction. |
   | ☾ **at rest** | A turn you checked with **let it rest** (or `r`) in its detail view; nothing needed now. It goes back to your turn as soon as the agent does anything. Kept in this browser only. |
   | ● **running** | Working, including while it waits on a tool or a subagent. |
-  | ◌ **open · idle** | Still open in a terminal or app, idle for longer. |
+  | ◌ **open · idle** | Still open in a terminal or app, idle for longer. It stays in the active view however long it idles, dimmed, with its subagents folded. Click **▸ N subagents** on any row (or press `s`) to fold or unfold its subagents without opening the session. Its summary and title are not refreshed while it idles. |
   | ○ **quiet** | No recent activity, and liveness could not be checked. Quiet never means failed. |
   | ■ **closed** | No running process owns the session any more. |
   | ✓ **done** | An SDK run reported that it finished. |
@@ -124,7 +124,8 @@ New harnesses plug in as one module each (see [the source guide](https://github.
   opencode session title, a Pi `/name`, the DeepSeek Harness title or the Grok Bot
   agent's name), retitled by the summary model once the goal moves on, its goal,
   your latest request and
-  the agent's latest reply or commentary. Subagents sit under their parent,
+  the agent's latest reply or commentary. Open a session and click its name to rename it in Spiritboard
+  only; clear it to go back to the automatic title. Subagents sit under their parent,
   named by the task the parent gave them. Sessions the Claude desktop app runs
   are tagged **Claude desktop**; ones archived there never count as active.
 - **Jump in.** Open a session in the terminal or app that runs it (cmux, tmux,
@@ -139,7 +140,8 @@ Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w
 / `e` switch between active, needs-you and all, and `r` lets the open session's
 turn rest. Click a table heading to sort by
 that column, click again to reverse it, and a third time to restore the default
-attention order. Subagents stay under their parent while sorting.
+attention order. Sorting orders within groups, so busy and needs-you agents stay above
+open idle ones, and those above history. Subagents stay under their parent while sorting.
 
 Zoom the event-rate chart out to the last hour, day, week or 30 days. Click a
 bar to see the board as it was at that moment, rebuilt from the recorded

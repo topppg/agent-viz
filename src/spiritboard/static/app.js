@@ -8,7 +8,7 @@
   const MAX_ROWS = 300;
   const REST_KEY = "spiritboard.rested";
   const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
-  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested() };
+  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested(), editing: null, draft: "", folds: new Map() };
   // Chart windows in seconds: heading, then the left and middle axis labels.
   const ZOOMS = { 600: ["last 10 minutes", "-10m", "-5m"], 3600: ["last hour", "-1h", "-30m"], 86400: ["last 24 hours", "-24h", "-12h"],
     604800: ["last 7 days", "-7d", "-3.5d"], 2592000: ["last 30 days", "-30d", "-15d"] };
@@ -115,8 +115,11 @@
   }
   // A name the user set (/rename, session name) always beats the AI title.
   const aiTitleOf = (run) => (run.title_source !== "user" && run.ai_summary?.title) || "";
-  const nameOf = (run) => aiTitleOf(run) || run.name || "Unnamed run";
+  const autoNameOf = (run) => aiTitleOf(run) || run.name || "Unnamed run";
+  // A name given here in Spiritboard beats every automatic one.
+  const nameOf = (run) => run.local_name || autoNameOf(run);
   function titleNote(run) {
+    if (run.local_name) return `Your name · automatic: ${autoNameOf(run)}`;
     if (!aiTitleOf(run)) return "";
     const was = run.ai_summary?.previous_title;
     return `AI title${run.name ? ` · native: ${run.name}` : ""}${was ? ` · Renamed from “${was}”` : ""}`;
@@ -126,6 +129,8 @@
     if (state.view === "waiting") return status.key === "needs";
     if (state.view === "active") {
       if (terminal.has(run.state) || run.archived) return false;
+      // An open terminal is never history, however long it idles.
+      if (status.key === "idle" && run.live === true) return true;
       // Long-idle open sessions, quiet and closed ones stay under "all" after 30 minutes.
       return !["quiet", "closed", "idle"].includes(status.key) || serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW;
     }
@@ -136,7 +141,7 @@
     const query = $("search").value.toLowerCase().trim();
     const harness = $("harness-filter").value;
     return inView(run) && (!harness || harnessOf(run).key === harness) &&
-      (!query || [run.name, run.ai_summary?.title, run.ai_summary?.previous_title, run.task, run.activity, run.ai_summary?.text, run.project, run.app, harnessOf(run).label].some((v) => String(v || "").toLowerCase().includes(query)));
+      (!query || [run.local_name, run.name, run.ai_summary?.title, run.ai_summary?.previous_title, run.task, run.activity, run.ai_summary?.text, run.project, run.app, harnessOf(run).label].some((v) => String(v || "").toLowerCase().includes(query)));
   }
 
   function activity() { return state.snapshot?.activity || { bucket_seconds: 10, buckets: 60, runs: {} }; }
@@ -421,7 +426,9 @@
     return seen !== null && serverNow() - seen < 2000 ? "now" : age(value);
   }
   function updateSeen() { [...$("runs").querySelectorAll("[data-seen]")].forEach((el) => { el.textContent = seenText(el.dataset.seen); }); }
-  function renderTable() {
+  function renderTable(force = false) {
+    // An open rename keeps the table still so its draft, focus and caret survive live ticks.
+    if (state.editing && !force) { state.tableKey = ""; updateSeen(); return; }
     state.tableKey = tableKey();
     const focused = document.activeElement?.dataset?.focusKey;
     const host = $("runs"); host.replaceChildren(); host.setAttribute("aria-busy", "false");
@@ -445,7 +452,10 @@
     const live = (a, b) => rank(a).rank - rank(b).rank || rank(b).seen - rank(a).seen || a.run_id.localeCompare(b.run_id);
     // While a run is open, keep the order from before it opened so rows don't jump; unseen runs go after.
     const frozen = (run) => state.frozen.get(run.run_id) ?? Infinity;
+    // Column sorts order within tiers: busy or needing you, then open or resting, then history.
+    const tier = (run) => { const r = rank(run).rank; return r < 3 ? 0 : r === 3 ? 1 : 2; };
     const sorted = (a, b) => {
+      if (state.sort !== "status" && tier(a) !== tier(b)) return tier(a) - tier(b);
       const left = state.sort === "status" ? rank(a).rank : sortValue(a);
       const right = state.sort === "status" ? rank(b).rank : sortValue(b);
       const order = typeof left === "number" ? left - right : left.localeCompare(right);
@@ -458,14 +468,19 @@
     if (!direct.size) { host.append(node("p", state.view === "active" ? `Nothing active ${state.past ? "at this moment" : "right now"}. Press e to show all history.` : "No agents match these filters.", "empty")); return; }
     const maxRate = Math.max(1, ...[...visible].map(rateOf));
     const visited = new Set();
+    const openPath = new Set();
+    for (let r = byId.get(byId.get(state.selected)?.parent_run_id); r && !openPath.has(r.run_id); r = byId.get(r.parent_run_id)) openPath.add(r.run_id);
     const renderRun = (run, prefix, pad, orphan) => {
       if (visited.has(run.run_id) || !visible.has(run.run_id) || state.order.length >= MAX_ROWS) return;
       visited.add(run.run_id);
       state.order.push(run.run_id);
-      host.append(row(run, prefix, !direct.has(run.run_id), orphan, maxRate));
-      if (state.selected === run.run_id) host.append(expansion(run, byId));
       const kids = (children.get(run.run_id) || []).filter((c) => visible.has(c.run_id)).sort(compare);
-      kids.forEach((child, i) => {
+      // An idle or quiet session folds its settled subagents unless you unfolded it.
+      const settled = ["idle", "quiet", "rest"].includes(statusOf(run).key) && kids.every((c) => rank(c).rank >= 3);
+      const folded = kids.length > 0 && (state.folds.get(run.run_id) ?? settled) && !openPath.has(run.run_id);
+      host.append(row(run, prefix, !direct.has(run.run_id), orphan, maxRate, kids.length, folded));
+      if (state.selected === run.run_id) host.append(expansion(run, byId));
+      if (!folded) kids.forEach((child, i) => {
         const last = i === kids.length - 1;
         renderRun(child, `${pad}${last ? "└─ " : "├─ "}`, `${pad}${last ? "   " : "│  "}`, false);
       });
@@ -476,22 +491,36 @@
     if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
     if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
-  function row(run, prefix, context, orphan, maxRate) {
+  function row(run, prefix, context, orphan, maxRate, kids = 0, folded = false) {
     const status = statusOf(run);
+    const open = state.selected === run.run_id;
     const depth = Math.round(prefix.length / 3);
-    const button = node("button", null, `row run-row ${status.key}${depth ? " sub" : ""}${state.selected === run.run_id ? " selected" : ""}${context ? " context" : ""}`);
+    const button = node("button", null, `row run-row ${status.key}${depth ? " sub" : ""}${open ? " selected" : ""}${context ? " context" : ""}`);
     // Subagents shift right as a block, so they never read as top-level processes.
     if (depth) button.style.setProperty("--depth", String(depth));
     button.type = "button"; button.dataset.focusKey = `select:${run.run_id}`; button.dataset.runId = run.run_id;
-    button.setAttribute("aria-current", String(state.selected === run.run_id));
-    button.setAttribute("aria-expanded", String(state.selected === run.run_id));
-    const statusCell = node("span", `${state.selected === run.run_id ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status g-${status.key}`);
+    button.setAttribute("aria-current", String(open));
+    button.setAttribute("aria-expanded", String(open));
+    const statusCell = node("span", `${open ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status g-${status.key}`);
     const agent = node("span", null, "cell agent");
+    // Renaming happens in the opened session; a click on the row only opens it.
     const name = node("span", nameOf(run), "agent-name");
     if (titleNote(run)) name.title = titleNote(run);
     agent.append(node("span", prefix, "tree"), name);
+    if (run.local_name) {
+      const mark = node("span", "●", "renamed-mark"); mark.title = "Renamed by you in Spiritboard";
+      mark.setAttribute("role", "img"); mark.setAttribute("aria-label", "renamed by you");
+      agent.append(mark);
+    }
     if (orphan) agent.append(node("span", "parent not yet available", "note"));
     if (context) agent.append(node("span", "context", "note"));
+    if (kids) {
+      const fold = node("span", `${folded ? "▸" : "▾"} ${kids} subagent${kids === 1 ? "" : "s"}`, "fold");
+      fold.title = `${folded ? "Show" : "Hide"} subagents · s`;
+      fold.addEventListener("click", (event) => { event?.stopPropagation?.(); toggleFold(run.run_id, folded); });
+      agent.append(fold);
+      button.dataset.folded = String(folded);
+    }
     // Where the session runs, when it is an app rather than a terminal (Claude desktop).
     if (run.app) agent.append(node("span", run.app, "note"));
     const harness = harnessOf(run);
@@ -514,6 +543,95 @@
     button.append(harnessCell, statusCell, agent, doingCell, rateCell, last);
     button.addEventListener("click", () => selectRun(state.selected === run.run_id ? null : run.run_id));
     return button;
+  }
+  function toggleFold(id, folded) { state.folds.set(id, !folded); renderTable(); }
+  // The focused row, else the opened one, folds or unfolds its subagents.
+  function foldSelected() {
+    const id = document.activeElement?.dataset?.runId || state.selected;
+    const button = id && [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === id && el.dataset.folded);
+    if (button) toggleFold(id, button.dataset.folded === "true");
+  }
+  const byFocusKey = (key) => [...$("runs").querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === key);
+  // The opened session's heading is a button that turns into an input while renaming.
+  function nameControl(run) {
+    if (state.editing === run.run_id) {
+      const input = node("input", null, "name-edit");
+      input.type = "text"; input.value = state.draft; input.maxLength = 120; input.spellcheck = false; input.autocomplete = "off";
+      input.setAttribute("aria-label", "Agent name"); input.dataset.focusKey = "name-edit";
+      input.addEventListener("input", () => { state.draft = input.value; });
+      input.addEventListener("keydown", (event) => {
+        if (event.isComposing) return;
+        if (event.key === "Enter") { event.preventDefault(); endEdit(input.value, true); }
+        else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); endEdit(null, true); }
+      });
+      input.addEventListener("blur", () => endEdit(input.value, false));
+      return input;
+    }
+    const note = titleNote(run);
+    if (state.past) { const text = node("span", nameOf(run), "agent-name"); if (note) text.title = note; return text; }
+    const button = node("button", null, "agent-name rename"); button.type = "button"; button.dataset.focusKey = "name";
+    button.append(node("span", nameOf(run), "name-text"));
+    button.title = run.local_name ? note : [note, "Click to rename"].filter(Boolean).join(" · ");
+    button.setAttribute("aria-label", `Rename ${nameOf(run)}`);
+    button.addEventListener("click", (event) => { event?.stopPropagation?.(); startEdit(run.run_id); });
+    return button;
+  }
+  function startEdit(id) {
+    const run = state.snapshot?.runs.find((r) => r.run_id === id);
+    if (!run || state.past) return;
+    state.editing = id; state.draft = nameOf(run);
+    renderTable(true);
+    const input = byFocusKey("name-edit");
+    if (!input) { state.editing = null; renderTable(); return; }
+    input.focus(); input.select?.();
+  }
+  function endEdit(value, refocus) {
+    const id = state.editing;
+    if (!id) return;
+    state.editing = null;
+    if (value !== null) storeName(id, value.trim());
+    if (!refocus) { settle(); return; }
+    renderTable();
+    byFocusKey("name")?.focus();
+  }
+  // Rebuilding between press and release would swallow the click that ended a rename by blur.
+  let pressed = false, unsettled = false;
+  function settle() { if (pressed) unsettled = true; else renderDetail(); }
+  document.addEventListener("pointerdown", () => { pressed = true; }, true);
+  ["pointerup", "pointercancel"].forEach((name) => document.addEventListener(name, () => {
+    pressed = false;
+    if (unsettled) { unsettled = false; setTimeout(renderDetail, 0); }
+  }, true));
+  function setLocalName(id, value) {
+    [state.latest, state.snapshot].forEach((snapshot) => snapshot?.runs.forEach((run) => {
+      if (run.run_id !== id) return;
+      if (value) run.local_name = value; else delete run.local_name;
+    }));
+  }
+  const RENAME_ERRORS = { 400: "that name is not allowed", 403: "the request was refused", 404: "this agent is no longer listed" };
+  // Saving the empty or the automatic name clears the local one; the next snapshot confirms it.
+  async function storeName(id, text) {
+    const run = state.snapshot?.runs.find((r) => r.run_id === id);
+    if (!run || state.past) return;
+    const wanted = !text || text === autoNameOf(run) ? null : text;
+    const previous = run.local_name || null;
+    if (wanted === previous) return;
+    setLocalName(id, wanted);
+    let saved = wanted, problem = "";
+    try {
+      const response = await fetch(`/api/runs/${encodeURIComponent(id)}/name`, { method: "POST", cache: "no-store",
+        headers: { "X-Spiritboard": "rename", "Content-Type": "application/json" }, body: JSON.stringify({ name: wanted ?? "" }) });
+      if (response.ok) saved = (await response.json())?.local_name ?? null;
+      else problem = RENAME_ERRORS[response.status] || `HTTP ${response.status}`;
+    } catch (_) { problem = "the local collector is unreachable"; }
+    if (!problem) refresh();
+    if (problem) showError(`Could not rename “${previous || autoNameOf(run)}”: ${problem}.`);
+    // A newer snapshot or rename already replaced the optimistic name.
+    if ((state.snapshot?.runs.find((r) => r.run_id === id)?.local_name || null) !== wanted) return;
+    const final = problem ? previous : saved;
+    if (final === wanted) return;
+    setLocalName(id, final);
+    settle();
   }
   function renderHiddenNote(runs, direct) {
     const note = $("hidden-note");
@@ -550,10 +668,17 @@
     const main = node("div", null, "detail-main");
     const head = node("div", null, "detail-head");
     const title = node("div", null, "detail-title");
-    const heading = node("h3", nameOf(run));
-    if (titleNote(run)) heading.title = titleNote(run);
+    const heading = node("h3"); heading.append(nameControl(run));
     title.append(heading, node("span", `${status.glyph} ${status.text}`, `pill g-${status.key}`));
-    if (aiTitleOf(run) && run.ai_summary?.previous_title) title.append(node("span", `was: ${run.ai_summary.previous_title}`, "was"));
+    if (run.local_name) {
+      const renamed = node("span", `Renamed by you in Spiritboard · automatic title: ${autoNameOf(run)}`, "was renamed-note");
+      if (!state.past) {
+        const reset = node("button", "Use automatic title", "link"); reset.type = "button"; reset.dataset.focusKey = "auto-name";
+        reset.addEventListener("click", () => { storeName(run.run_id, ""); settle(); byFocusKey("name")?.focus(); });
+        renamed.append(" · ", reset);
+      }
+      title.append(renamed);
+    } else if (aiTitleOf(run) && run.ai_summary?.previous_title) title.append(node("span", `was: ${run.ai_summary.previous_title}`, "was"));
     const actions = node("div", null, "detail-actions");
     actions.append(...targetControls(run));
     if (status.turn && !state.past) {
@@ -787,14 +912,14 @@
   document.addEventListener("click", (event) => { if (!event.target?.closest?.("#more, #top-actions")) foldMenu(false); });
   document.addEventListener("keydown", (event) => {
     if (document.querySelector?.("dialog[open]")) return;
-    const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(event.target?.tagName);
+    const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(String(event.target?.tagName).toUpperCase());
     if (event.key === "Escape") {
       if ($("more").getAttribute("aria-expanded") === "true") closeMenu(); else if (typing) event.target.blur(); else selectRun(null);
       return;
     }
     if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
     const actions = { "/": () => $("search").focus(), j: () => move(1), ArrowDown: () => move(1), k: () => move(-1), ArrowUp: () => move(-1),
-      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed"), l: backToLive, L: backToLive, r: restSelected,
+      a: () => setView("active"), w: () => setView("waiting"), e: () => setView("all"), v: () => $("overview").classList.toggle("collapsed"), l: backToLive, L: backToLive, r: restSelected, s: foldSelected,
       "?": () => foldKeys($("keys-toggle").getAttribute("aria-expanded") !== "true") };
     if (actions[event.key]) { event.preventDefault(); actions[event.key](); }
   });

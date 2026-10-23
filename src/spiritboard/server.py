@@ -33,6 +33,7 @@ ASSETS = {
     "/fonts/space-mono-700.woff2": ("fonts/space-mono-700.woff2", "font/woff2"),
 }
 FOCUS_ROUTE = re.compile(r"/api/runs/([^/]{1,768})/focus")
+RENAME_ROUTE = re.compile(r"/api/runs/([^/]{1,768})/name")
 DEFAULT_WINDOW = 600
 MAX_WINDOW = 30 * 86400
 # The smallest of these that keeps a chart window within 90 bars.
@@ -237,6 +238,10 @@ class Handler(BaseHTTPRequestHandler):
         if route:
             self._focus(unquote(route[1]))
             return
+        route = RENAME_ROUTE.fullmatch(urlsplit(self.path).path)
+        if route:
+            self._rename(unquote(route[1]))
+            return
         if self.path != "/api/events":
             self.close_connection = True
             self._json(404, {"error": "not found"})
@@ -374,6 +379,39 @@ class Handler(BaseHTTPRequestHandler):
         self._headers("text/plain; charset=utf-8", 0)
         self.send_header("Location", self.server.url)
         self.end_headers()
+
+    def _rename(self, run_id: str):
+        # A custom header forces a CORS preflight, which this server never grants.
+        if not self.headers.get("Origin") or self.headers.get("X-Spiritboard") != "rename":
+            self.close_connection = True
+            self._json(403, {"error": "same-origin dashboard request required"})
+            return
+        try:
+            if (
+                self.headers.get("Transfer-Encoding")
+                or self.headers.get_content_type() != "application/json"
+                or len(run_id) > 256
+            ):
+                raise ValueError
+            size = int(self.headers.get("Content-Length", "-1"))
+            if not 0 < size <= 1024:
+                raise ValueError
+            self.connection.settimeout(3)
+            raw = self.rfile.read(size)
+            if len(raw) != size:
+                raise ValueError
+            body = parse_json(raw)
+            if not isinstance(body, dict) or set(body) != {"name"}:
+                raise ValueError
+            saved = self.server.store.rename(run_id, body["name"])
+        except KeyError:
+            self._json(404, {"error": "unknown run"})
+            return
+        except (ValueError, TypeError, OSError, RecursionError):
+            self.close_connection = True
+            self._json(400, {"error": "invalid name"})
+            return
+        self._json(200, {"ok": True, "local_name": saved})
 
     def _focus(self, run_id: str):
         # A custom header forces a CORS preflight, which this server never grants.

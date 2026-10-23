@@ -110,6 +110,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .run-row.needs.selected { background: #2a2210; }
 .run-row.quiet { color: var(--muted); font-style: italic; animation: flicker 4s ease-in-out infinite; }
 .run-row.closed { color: var(--muted); }
+.run-row.idle, .run-row.idle .agent-name, .run-row.idle .doing { color: var(--muted); }
 .closed-line { color: var(--muted); }
 .run-row.done { color: #b3acc6; }
 .run-row.context { opacity: .65; }
@@ -121,7 +122,19 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .status { font-weight: 600; font-style: normal; }
 .tree { font-family: var(--mono); color: var(--dim); font-style: normal; white-space: pre; }
 .agent-name { font-weight: 600; }
+.cell.agent { display: flex; align-items: center; }
+.agent .tree, .agent .note { flex: none; }
+.agent-name.rename { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; min-height: 0; margin-left: -5px; padding: 0 4px; border: 1px solid transparent; border-radius: 4px; text-align: left; cursor: text; }
+.agent-name.rename .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-name.rename::after { content: "✎"; flex: none; font-size: .85em; font-weight: 400; color: var(--muted); opacity: 0; }
+.agent-name.rename:hover, .agent-name.rename:focus-visible { border-color: var(--border); background: #ffffff08; outline: none; }
+.agent-name.rename:hover::after, .agent-name.rename:focus-visible::after { opacity: 1; }
+.name-edit { min-width: 0; min-height: 0; margin-left: -5px; padding: 0 4px; border-color: var(--run); border-radius: 4px; background: var(--bar); font-weight: 600; outline: none; }
+.detail-title h3 .name-edit { width: min(60ch, 100%); font-weight: inherit; letter-spacing: inherit; }
+.renamed-mark { flex: none; margin-left: 6px; color: var(--run); font-size: 9px; font-style: normal; }
 .note { color: var(--wait); font-size: 11.5px; margin-left: 8px; font-style: normal; }
+.fold { color: var(--muted); font-size: 11.5px; font-weight: 400; margin-left: 8px; padding: 0 4px; border-radius: 4px; cursor: pointer; }
+.fold:hover { color: var(--text); background: #ffffff10; }
 .harness-cell { display: flex; align-items: center; }
 .harness-cell .swatch { width: 8px; height: 8px; border-radius: 2px; }
 .mark { font-style: normal; color: var(--dim); }

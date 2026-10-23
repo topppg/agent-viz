@@ -151,6 +151,10 @@ gets `archived: true` and never counts as active, and the title names it when
 text is shown, after a `/rename` but before the generated `ai-title`. Without
 that folder, or for records without a `cliSessionId`, nothing is joined.
 Remote (cloud VM) and Cowork sessions are not observed.
+For Claude's **now** text, the latest assistant prose is retained across newer
+user requests and tool results. If it falls outside the transcript tail,
+Spiritboard searches backward through at most 32 MiB. Tool
+results and tool arguments are never used as the reply.
 
 Claude subagents are named by the short description their parent gave them,
 read from the sibling `agent-<id>.meta.json` (bounded regular files only, symlinks not followed),
