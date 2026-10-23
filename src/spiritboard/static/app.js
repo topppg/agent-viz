@@ -467,20 +467,26 @@
     if (!direct.size) { host.append(node("p", state.view === "active" ? `Nothing active ${state.past ? "at this moment" : "right now"}. Press e to show all history.` : "No agents match these filters.", "empty")); return; }
     const maxRate = Math.max(1, ...[...visible].map(rateOf));
     const visited = new Set();
+    const revealed = new Set();
     const openPath = new Set();
     for (let r = byId.get(byId.get(state.selected)?.parent_run_id); r && !openPath.has(r.run_id); r = byId.get(r.parent_run_id)) openPath.add(r.run_id);
     const renderRun = (run, prefix, pad, orphan) => {
       if (visited.has(run.run_id) || !visible.has(run.run_id) || state.order.length >= MAX_ROWS) return;
       visited.add(run.run_id);
       state.order.push(run.run_id);
-      const kids = (children.get(run.run_id) || []).filter((c) => visible.has(c.run_id)).sort(compare);
-      // An idle or quiet session folds its settled subagents unless you unfolded it or it is only context for them.
-      const settled = ["idle", "quiet", "rest"].includes(statusOf(run).key) && kids.every((c) => rank(c).rank >= 3)
+      const all = children.get(run.run_id) || [];
+      const inView = all.filter((c) => visible.has(c.run_id));
+      // An idle or quiet session folds its settled subagents unless it is only context for them.
+      const settled = ["idle", "quiet", "rest"].includes(statusOf(run).key) && inView.every((c) => rank(c).rank >= 3)
         && direct.has(run.run_id);
-      const folded = kids.length > 0 && (state.folds.get(run.run_id) ?? settled) && !openPath.has(run.run_id);
-      host.append(row(run, prefix, !direct.has(run.run_id), orphan, maxRate, kids.length, folded));
+      // Your choice wins: true folds them all, false shows them all, even ones outside this view.
+      const choice = state.folds.get(run.run_id);
+      const folded = (choice ?? settled) && !openPath.has(run.run_id);
+      const kids = (folded ? [] : choice === false ? all : inView).sort(compare);
+      kids.forEach((c) => { if (!visible.has(c.run_id)) { visible.add(c.run_id); revealed.add(c.run_id); } });
+      host.append(row(run, prefix, !direct.has(run.run_id) && !revealed.has(run.run_id), orphan, maxRate, all.length, kids.length));
       if (state.selected === run.run_id) host.append(expansion(run, byId));
-      if (!folded) kids.forEach((child, i) => {
+      kids.forEach((child, i) => {
         const last = i === kids.length - 1;
         renderRun(child, `${pad}${last ? "└─ " : "├─ "}`, `${pad}${last ? "   " : "│  "}`, false);
       });
@@ -491,7 +497,7 @@
     if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
     if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
-  function row(run, prefix, context, orphan, maxRate, kids = 0, folded = false) {
+  function row(run, prefix, context, orphan, maxRate, kids = 0, shown = 0) {
     const status = statusOf(run);
     const open = state.selected === run.run_id;
     const depth = Math.round(prefix.length / 3);
@@ -516,11 +522,13 @@
     if (orphan) agent.append(node("span", "parent not yet available", "note"));
     if (context) agent.append(node("span", "context", "note"));
     if (kids) {
-      const fold = node("span", `${folded ? "▸" : "▾"} ${kids} subagent${kids === 1 ? "" : "s"}`, "fold");
-      fold.title = `${folded ? "Show" : "Hide"} subagents · s`;
-      fold.addEventListener("click", (event) => { event?.stopPropagation?.(); toggleFold(run.run_id, folded); });
+      const count = (n, more = "") => `${n} ${more}${n === 1 ? "subagent" : "subagents"}`;
+      const text = shown === kids ? `▾ ${count(kids)}` : `▸ ${shown ? count(kids - shown, "more ") : count(kids)}`;
+      const fold = node("span", text, "fold");
+      fold.title = `${shown === kids ? "Hide" : "Show all"} subagents · s`;
+      fold.addEventListener("click", (event) => { event?.stopPropagation?.(); toggleFold(run.run_id, shown === kids); });
       agent.append(fold);
-      button.dataset.folded = String(folded);
+      button.dataset.folds = String(shown === kids);
     }
     // Where the session runs, when it is an app rather than a terminal (Claude desktop).
     if (run.app) agent.append(node("span", run.app, "note"));
@@ -545,12 +553,12 @@
     button.addEventListener("click", () => selectRun(state.selected === run.run_id ? null : run.run_id));
     return button;
   }
-  function toggleFold(id, folded) { state.folds.set(id, !folded); renderTable(); }
+  function toggleFold(id, fold) { state.folds.set(id, fold); renderTable(); }
   // The focused row, else the opened one, folds or unfolds its subagents.
   function foldSelected() {
     const id = document.activeElement?.dataset?.runId || state.selected;
-    const button = id && [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === id && el.dataset.folded);
-    if (button) toggleFold(id, button.dataset.folded === "true");
+    const button = id && [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === id && el.dataset.folds);
+    if (button) toggleFold(id, button.dataset.folds === "true");
   }
   const byFocusKey = (key) => [...$("runs").querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === key);
   // The opened session's heading is a button that turns into an input while renaming.
