@@ -81,7 +81,7 @@ class StaticTests(unittest.TestCase):
 const fs = require('fs'), vm = require('vm'), assert = require('assert');
 let document;
 class Element {
-  constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.value = ''; this.hidden = false; this._text = ''; this.options = []; this.style = { setProperty(k, v) { this[k] = v; } }; this.attrs = {};
+  constructor(tag) { this.tagName = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.value = ''; this.hidden = false; this._text = ''; this.options = []; this.style = { setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } }; this.attrs = {};
     this.classList = { toggle: (c, force) => { const on = force ?? !(this.className || '').includes(c); this.className = on ? c : ''; } }; }
   getAttribute(key) { return this.attrs[key]; }
   set textContent(value) { this._text = String(value); this.children = []; }
@@ -101,7 +101,13 @@ ids['window-filter'].value = '604800000';
 ['active','waiting','all'].forEach(v => { const b = new Element('button'); b.dataset.view = v; ids.views.children.push(b); });
 ['600','3600'].forEach(v => { const b = new Element('button'); b.dataset.zoom = v; ids.zoom.children.push(b); });
 const docListeners = {};
-document = { getElementById: id => ids[id], createElement: tag => new Element(tag), querySelectorAll: selector => selector === '[data-sort]' ? Object.values(headers) : [], activeElement: null, addEventListener: (k, fn) => { docListeners[k] = fn; } };
+const columnTable = new Element('div');
+const resizers = ['status','agent'].map(key => { const handle = new Element('span'); handle.dataset.resize = key; handle.closest = () => columnTable;
+  handle.parentElement = {getBoundingClientRect: () => ({width:200}), nextElementSibling: {getBoundingClientRect: () => ({width:500})}};
+  handle.setPointerCapture = () => {}; handle.removeEventListener = (k) => { delete handle.listeners[k]; }; return handle; });
+const stored = {'spiritboard.columns': JSON.stringify({agent:300})};
+const localStorage = {getItem: k => stored[k] ?? null, setItem: (k, v) => { stored[k] = v; }};
+document = { getElementById: id => ids[id], createElement: tag => new Element(tag), querySelectorAll: selector => selector === '[data-sort]' ? Object.values(headers) : selector === '[data-resize]' ? resizers : [], activeElement: null, addEventListener: (k, fn) => { docListeners[k] = fn; } };
 const now = new Date().toISOString();
 const old = '2020-01-01T00:00:00Z';
 const run = (id, parent, name, extra = {}) => ({run_id:id,parent_run_id:parent,name,session_id:'codex-work:observed',source:'codex',account:'work',state:'working',health:'observed',inferred:true,task:'Original task',activity:'<img src=x onerror=alert(1)>',last_seen:now,started_at:now,demo:true,operations:[],...extra});
@@ -122,7 +128,7 @@ const requests = [], posts = [], copied = [];
 let renameStatus = 200;
 const targets = {orphan:{available:true,kind:'focus',label:'cmux'}, ask:{available:true,kind:'resume',label:'resume',command:'claude --resume invented-0000'}};
 const navigator = {clipboard:{writeText:async text => { copied.push(text); }}};
-const context = {document,Option,EventSource,navigator,setInterval:() => {},console,fetch:async (url, options = {}) => {
+const context = {document,localStorage,Option,EventSource,navigator,setInterval:() => {},console,fetch:async (url, options = {}) => {
   if (options.method === 'POST') {
     posts.push(options.body ? {url, headers:options.headers, body:JSON.parse(options.body)} : {url, headers:options.headers});
     if (url.endsWith('/name')) return renameStatus === 200 ? {ok:true,json:async()=>({ok:true,local_name:JSON.parse(options.body).name.trim() || null})} : {ok:false,status:renameStatus};
@@ -170,6 +176,25 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(ids.flux.attrs['aria-label'].includes('Codex · work'));
  assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 API calls'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
+ // Status and agent columns resize by drag or arrow keys, clamped and remembered; double-click resets.
+ assert.equal(columnTable.style['--agent-w'], '300px');
+ const [statusHandle, agentHandle] = resizers;
+ statusHandle.listeners.pointerdown({clientX:1000, pointerId:1, preventDefault() {}});
+ statusHandle.listeners.pointermove({clientX:1100});
+ assert.equal(columnTable.style['--status-w'], '300px');
+ statusHandle.listeners.pointermove({clientX:600});
+ assert.equal(columnTable.style['--status-w'], '64px');
+ statusHandle.listeners.lostpointercapture();
+ assert.equal(statusHandle.listeners.pointermove, undefined);
+ agentHandle.listeners.keydown({key:'ArrowRight', preventDefault() {}});
+ assert.equal(columnTable.style['--agent-w'], '216px');
+ agentHandle.listeners.pointerdown({clientX:0, pointerId:1, preventDefault() {}});
+ agentHandle.listeners.pointermove({clientX:5000});
+ assert.equal(columnTable.style['--agent-w'], '580px');
+ assert.deepEqual(JSON.parse(stored['spiritboard.columns']), {agent:580, status:64});
+ agentHandle.listeners.dblclick();
+ assert.equal(columnTable.style['--agent-w'], undefined);
+ assert.deepEqual(JSON.parse(stored['spiritboard.columns']), {status:64});
  // Header sorting reverses on a second click and keeps children with their parent.
  headers.agent.listeners.click();
  assert.deepEqual(rows().map(r => r.dataset.runId), ['orphan','root','child','ask','sdk-run']);

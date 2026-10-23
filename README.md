@@ -150,6 +150,8 @@ turn rest. Click a table heading to sort by
 that column, click again to reverse it, and a third time to restore the default
 attention order. Sorting orders within groups, so busy and needs-you agents stay above
 open idle ones, and those above history. Subagents stay under their parent while sorting.
+Drag the edge of the STATUS or AGENT heading to widen it (arrow keys work when the
+edge is focused); the width is remembered and a double-click resets it.
 
 Zoom the event-rate chart out to the last hour, day, week or 30 days. Click a
 bar to see the board as it was at that moment, rebuilt from the recorded

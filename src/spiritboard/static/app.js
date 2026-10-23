@@ -10,6 +10,7 @@
   const OPEN_IDLE = "open-idle";
   const MAX_ROWS = 300;
   const REST_KEY = "spiritboard.rested";
+  const WIDTH_KEY = "spiritboard.columns";
   const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
   const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested(), editing: null, draft: "", folds: new Map() };
   // Chart windows in seconds: heading, then the left and middle axis labels.
@@ -930,6 +931,39 @@
     [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === next)?.focus({ preventScroll: false });
   }
 
+  // Status and agent columns take a dragged width; WORKING ON keeps what is left.
+  const widths = (() => { try { return JSON.parse(localStorage.getItem(WIDTH_KEY)) || {}; } catch (_) { return {}; } })();
+  function setWidth(handle, width) {
+    const key = handle.dataset.resize;
+    const table = handle.closest(".table");
+    if (width === null) { delete widths[key]; table.style.removeProperty(`--${key}-w`); } else {
+      const room = handle.parentElement.getBoundingClientRect().width + handle.parentElement.nextElementSibling.getBoundingClientRect().width - 120;
+      widths[key] = Math.round(Math.max(key === "status" ? 64 : 100, Math.min(room, width)));
+      table.style.setProperty(`--${key}-w`, `${widths[key]}px`);
+    }
+    try { localStorage.setItem(WIDTH_KEY, JSON.stringify(widths)); } catch (_) { /* widths are a convenience */ }
+  }
+  document.querySelectorAll("[data-resize]").forEach((handle) => {
+    const key = handle.dataset.resize;
+    if (widths[key]) handle.closest(".table").style.setProperty(`--${key}-w`, `${widths[key]}px`);
+    handle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      const start = event.clientX - handle.parentElement.getBoundingClientRect().width;
+      handle.setPointerCapture(event.pointerId);
+      handle.classList.toggle("dragging", true);
+      const drag = (e) => setWidth(handle, e.clientX - start);
+      const stop = () => { handle.classList.toggle("dragging", false); handle.removeEventListener("pointermove", drag); handle.removeEventListener("lostpointercapture", stop); };
+      handle.addEventListener("pointermove", drag);
+      handle.addEventListener("lostpointercapture", stop);
+    });
+    handle.addEventListener("dblclick", () => setWidth(handle, null));
+    handle.addEventListener("keydown", (event) => {
+      const step = { ArrowLeft: -16, ArrowRight: 16 }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      setWidth(handle, handle.parentElement.getBoundingClientRect().width + step);
+    });
+  });
   [...$("views").children].forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
   document.querySelectorAll("[data-sort]").forEach((button) => button.addEventListener("click", () => {
     const key = button.dataset.sort;
