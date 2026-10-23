@@ -35,6 +35,17 @@
     .mac-select-menu li.is-active { background: rgba(183,156,255,.24); color: var(--bright, #f4f0ff); }
     .mac-select-menu li[aria-disabled="true"] { color: var(--dim, #6b6480); }
     .mac-select-menu li[hidden] { display: none; }
+    @media (max-width: 1099px) and (min-height: 601px) and (orientation: portrait) {
+      .harness-panel h2, .harness .sub { display: block; }
+      #harnesses { display: flex; flex-direction: column; gap: 0; }
+      .harness {
+        display: grid; grid-template-columns: 10px minmax(0, 1fr) 32px;
+        width: 100%; padding: 4px 6px; border: 0; border-bottom: 1px solid var(--line-soft);
+        border-radius: 0; background: transparent;
+      }
+      .harness .name { max-width: 60%; }
+      .harness-idle { display: block; }
+    }
     @media (min-height: 601px) and (orientation: portrait) {
       .flux-panel { flex-direction: column; align-items: stretch; gap: 6px; }
       .flux-panel .panel-head { order: 0; }
