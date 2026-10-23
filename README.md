@@ -35,7 +35,7 @@ Mac users can also use a standalone app with its own window and Dock icon. Signe
 and Intel DMGs will be attached to [GitHub Releases](https://github.com/topppg/spiritboard/releases)
 starting with the first release made after Mac signing is configured. No Mac download has been
 published yet; the [macOS app guide](https://github.com/topppg/spiritboard/blob/main/docs/MAC_APP.md)
-also explains how to build one locally.
+also explains how to install one locally from a checkout with `bash src/app/install.sh`.
 The app includes the dashboard code present when it is built; rebuild it to include later web UI
 changes. If it connects to an already running dashboard, it shows that server's web UI instead.
 
