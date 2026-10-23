@@ -111,6 +111,22 @@ def distributions(directory: Path, version: str) -> dict[str, str]:
     return {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(files)}
 
 
+def mac_distributions(directory: Path, version: str) -> dict[str, str]:
+    expected = {
+        f"Spiritboard-{version}-macos-arm64.dmg",
+        f"Spiritboard-{version}-macos-x86_64.dmg",
+    }
+    try:
+        files = list(directory.iterdir())
+    except OSError as exc:
+        raise ReleaseError("Expected both validated Mac disk images") from exc
+    if {path.name for path in files} != expected or any(
+        not path.is_file() or path.is_symlink() for path in files
+    ):
+        raise ReleaseError("Expected both validated Mac disk images and no other files")
+    return {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(files)}
+
+
 def pypi_receipt(version: str) -> dict[str, object] | None:
     url = f"https://pypi.org/pypi/spiritboard/{version}/json"
     try:
@@ -171,7 +187,8 @@ def release_body(repository: str, version: str, sha: str) -> str:
         f"PyPI: https://pypi.org/project/spiritboard/{version}/\n"
         f"Source: https://github.com/{repository}/commit/{sha}\n\n"
         "The attached wheel and source archive are the exact files verified on PyPI.\n"
-        "SHA256SUMS records their SHA-256 digests.\n"
+        "The macOS disk images contain the signed and notarized app for Apple Silicon and Intel.\n"
+        "SHA256SUMS records SHA-256 digests for all four files.\n"
     )
 
 
@@ -203,7 +220,7 @@ def validate_release(
             "Existing GitHub release metadata conflicts; inspect it without overwriting"
         )
     assets = value.get("assets")
-    if not isinstance(assets, list) or len(assets) > 3:
+    if not isinstance(assets, list) or len(assets) > 5:
         raise ReleaseError("Unexpected GitHub release assets; inspect without overwriting")
     existing: dict[str, dict[str, object]] = {}
     for asset in assets:
@@ -223,9 +240,15 @@ def checksum_bytes(hashes: dict[str, str]) -> bytes:
     return "".join(f"{digest}  {name}\n" for name, digest in sorted(hashes.items())).encode()
 
 
-def preflight(repository: str, version: str, sha: str, directory: Path) -> None:
+def preflight(
+    repository: str,
+    version: str,
+    sha: str,
+    directory: Path,
+    mac_directory: Path = Path("mac-dist"),
+) -> None:
     tag = validate_target(repository, version, sha)
-    hashes = distributions(directory, version)
+    hashes = distributions(directory, version) | mac_distributions(mac_directory, version)
     check_tag(repository, version, sha)
     hashes["SHA256SUMS"] = hashlib.sha256(checksum_bytes(hashes)).hexdigest()
     value = github_object(f"repos/{repository}/releases/tags/{tag}")
@@ -233,11 +256,18 @@ def preflight(repository: str, version: str, sha: str, directory: Path) -> None:
         validate_release(repository, version, sha, value, hashes)
 
 
-def pair_release(repository: str, version: str, sha: str, directory: Path) -> None:
+def pair_release(
+    repository: str,
+    version: str,
+    sha: str,
+    directory: Path,
+    mac_directory: Path = Path("mac-dist"),
+) -> None:
     tag = validate_target(repository, version, sha)
-    preflight(repository, version, sha, directory)
-    hashes = distributions(directory, version)
-    verify_pypi(version, hashes)
+    preflight(repository, version, sha, directory, mac_directory)
+    pypi_hashes = distributions(directory, version)
+    hashes = pypi_hashes | mac_distributions(mac_directory, version)
+    verify_pypi(version, pypi_hashes)
     if not check_tag(repository, version, sha):
         github_object(
             f"repos/{repository}/git/refs", payload={"ref": f"refs/tags/{tag}", "sha": sha}
@@ -269,9 +299,12 @@ def pair_release(repository: str, version: str, sha: str, directory: Path) -> No
                     f"https://uploads.github.com/repos/{repository}/releases/{value['id']}/assets"
                     f"?name={urllib.parse.quote(name, safe='')}"
                 )
-                asset = github_object(
-                    endpoint, upload=checksum if name == checksum.name else directory / name
+                upload = (
+                    checksum
+                    if name == checksum.name
+                    else (directory / name if name in pypi_hashes else mac_directory / name)
                 )
+                asset = github_object(endpoint, upload=upload)
                 if asset is None:
                     raise ReleaseError("GitHub did not confirm the release asset upload")
                 verify_asset(repository, asset, name, hashes[name])
@@ -285,13 +318,14 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--sha", required=True)
     parser.add_argument("--dist", type=Path, default=Path("dist"))
+    parser.add_argument("--mac-dist", type=Path, default=Path("mac-dist"))
     args = parser.parse_args()
     try:
         if args.command == "preflight":
-            preflight(args.repository, args.version, args.sha, args.dist)
+            preflight(args.repository, args.version, args.sha, args.dist, args.mac_dist)
             print("Existing tag, release, and assets verified; nothing was changed")
         else:
-            pair_release(args.repository, args.version, args.sha, args.dist)
+            pair_release(args.repository, args.version, args.sha, args.dist, args.mac_dist)
     except (ReleaseError, OSError, subprocess.TimeoutExpired) as exc:
         message = str(exc) if isinstance(exc, ReleaseError) else "Release operation failed"
         parser.exit(1, f"{message}\n")

@@ -83,6 +83,17 @@ def artifacts(tmp_path: Path) -> Path:
     return directory
 
 
+@pytest.fixture
+def mac_artifacts(tmp_path: Path) -> Path:
+    directory = tmp_path / "mac-dist"
+    directory.mkdir()
+    for arch in ("arm64", "x86_64"):
+        (directory / f"Spiritboard-{VERSION}-macos-{arch}.dmg").write_bytes(
+            f"synthetic {arch} disk image".encode()
+        )
+    return directory
+
+
 def receipt(directory: Path) -> dict[str, object]:
     return {
         "info": {"name": "spiritboard", "version": VERSION},
@@ -97,12 +108,40 @@ def receipt(directory: Path) -> dict[str, object]:
 
 
 @pytest.fixture
-def services(monkeypatch: pytest.MonkeyPatch, artifacts: Path) -> FakeGitHub:
+def services(monkeypatch: pytest.MonkeyPatch, artifacts: Path, mac_artifacts: Path) -> FakeGitHub:
     github = FakeGitHub()
+    monkeypatch.chdir(mac_artifacts.parent)
     monkeypatch.setattr(release, "github", github)
     monkeypatch.setattr(release, "pypi_receipt", lambda version: receipt(artifacts))
     monkeypatch.setattr(release.time, "sleep", lambda duration: None)
     return github
+
+
+@pytest.mark.parametrize("change", ["missing", "extra", "symlink", "version"])
+def test_mac_artifact_validation_rejects_unexpected_files(mac_artifacts: Path, change: str) -> None:
+    arm = mac_artifacts / f"Spiritboard-{VERSION}-macos-arm64.dmg"
+    if change == "missing":
+        arm.unlink()
+    elif change == "extra":
+        (mac_artifacts / "unreviewed.txt").write_text("extra")
+    elif change == "symlink":
+        arm.unlink()
+        arm.symlink_to(mac_artifacts / f"Spiritboard-{VERSION}-macos-x86_64.dmg")
+    else:
+        arm.rename(mac_artifacts / "Spiritboard-9.9.9-macos-arm64.dmg")
+    with pytest.raises(release.ReleaseError, match="Mac disk images"):
+        release.mac_distributions(mac_artifacts, VERSION)
+
+
+def test_mac_checksum_includes_both_dmg_files(artifacts: Path, mac_artifacts: Path) -> None:
+    hashes = release.distributions(artifacts, VERSION) | release.mac_distributions(
+        mac_artifacts, VERSION
+    )
+    lines = release.checksum_bytes(hashes).decode().splitlines()
+    assert len(lines) == 4
+    assert all(
+        path.name in "\n".join(lines) for path in (*artifacts.iterdir(), *mac_artifacts.iterdir())
+    )
 
 
 @pytest.mark.parametrize("annotated", [False, True])
@@ -139,7 +178,7 @@ def test_unsafe_or_unsupported_version_rejected(services: FakeGitHub, version: s
 
 
 def test_pairing_creates_exact_tag_release_and_matching_artifacts(
-    services: FakeGitHub, artifacts: Path
+    services: FakeGitHub, artifacts: Path, mac_artifacts: Path
 ) -> None:
     release.pair_release(REPOSITORY, VERSION, SHA, artifacts)
     assert services.tag == {"type": "commit", "sha": SHA}
@@ -149,14 +188,18 @@ def test_pairing_creates_exact_tag_release_and_matching_artifacts(
     assert f"https://github.com/{REPOSITORY}/commit/{SHA}" in body
     assert "https://pypi.org/project/spiritboard/0.1.0/" in body
     attached = {asset["name"]: services.assets[asset["id"]] for asset in services.release["assets"]}
-    for path in artifacts.iterdir():
+    for path in (*artifacts.iterdir(), *mac_artifacts.iterdir()):
         assert attached[path.name] == path.read_bytes()
-    assert set(attached) == {path.name for path in artifacts.iterdir()} | {"SHA256SUMS"}
+    assert set(attached) == {
+        path.name for path in (*artifacts.iterdir(), *mac_artifacts.iterdir())
+    } | {"SHA256SUMS"}
     assert (
         attached["SHA256SUMS"]
         == "".join(
             f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
-            for path in sorted(artifacts.iterdir())
+            for path in sorted(
+                (*artifacts.iterdir(), *mac_artifacts.iterdir()), key=lambda path: path.name
+            )
         ).encode()
     )
     assert len(list(artifacts.iterdir())) == 2
@@ -179,7 +222,7 @@ def test_partial_github_failure_can_retry_without_republishing_pypi(
     services.fail_upload = False
     services.calls.clear()
     release.pair_release(REPOSITORY, VERSION, SHA, artifacts)
-    assert len(services.writes) == 3
+    assert len(services.writes) == 5
     assert all(call[2] is not None for call in services.writes)
 
 
@@ -196,6 +239,22 @@ def test_conflicting_asset_is_not_overwritten(services: FakeGitHub, artifacts: P
     release.pair_release(REPOSITORY, VERSION, SHA, artifacts)
     services.assets[1] = b"not the validated checksum file"
     services.calls.clear()
+    with pytest.raises(release.ReleaseError, match="refusing to overwrite"):
+        release.pair_release(REPOSITORY, VERSION, SHA, artifacts)
+    assert services.writes == []
+
+
+def test_conflicting_mac_asset_blocks_preflight_before_pypi(
+    services: FakeGitHub, artifacts: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release.pair_release(REPOSITORY, VERSION, SHA, artifacts)
+    assert services.release is not None
+    mac_asset = next(
+        asset for asset in services.release["assets"] if asset["name"].endswith("arm64.dmg")
+    )
+    services.assets[mac_asset["id"]] = b"changed disk image"
+    services.calls.clear()
+    monkeypatch.setattr(release, "pypi_receipt", lambda version: pytest.fail("Must not query PyPI"))
     with pytest.raises(release.ReleaseError, match="refusing to overwrite"):
         release.pair_release(REPOSITORY, VERSION, SHA, artifacts)
     assert services.writes == []
@@ -287,6 +346,23 @@ def test_unexpected_local_artifact_is_rejected(services: FakeGitHub, artifacts: 
     assert services.calls == []
 
 
+def test_pypi_verification_uses_only_python_artifacts(
+    services: FakeGitHub, artifacts: Path
+) -> None:
+    release.pair_release(REPOSITORY, VERSION, SHA, artifacts)
+    assert services.release is not None
+    assert len(services.release["assets"]) == 5
+
+
+def test_missing_mac_artifact_blocks_release_before_public_writes(
+    services: FakeGitHub, artifacts: Path, mac_artifacts: Path
+) -> None:
+    (mac_artifacts / f"Spiritboard-{VERSION}-macos-arm64.dmg").unlink()
+    with pytest.raises(release.ReleaseError, match="Mac disk images"):
+        release.pair_release(REPOSITORY, VERSION, SHA, artifacts)
+    assert services.calls == []
+
+
 def test_github_client_uses_argument_array_and_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[tuple[list[str], dict[str, object]]] = []
 
@@ -326,12 +402,17 @@ def test_github_errors_are_not_mistaken_for_missing_tags(monkeypatch: pytest.Mon
 
 def test_workflow_pairs_after_publish_with_separate_permissions() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    mac = workflow.split("\n  mac-app:\n", 1)[1].split("\n  publish:\n", 1)[0]
     publish, pairing = workflow.split("\n  publish:\n", 1)[1].split("\n  github-release:\n", 1)
+    assert "needs: build" in mac and "environment: macos-release" in mac
+    assert "macos-15" in mac and "macos-15-intel" in mac
+    assert "xcrun stapler validate" in mac
+    assert "needs: [build, mac-app]" in publish
     assert "github.ref == 'refs/heads/main' && inputs.publish" in publish
     assert "github.ref == 'refs/heads/main' && inputs.publish" in pairing
     assert "contents: read" in publish and "id-token: write" in publish
     assert "contents: write" not in publish
-    assert "needs: [build, publish]" in pairing
+    assert "needs: [build, mac-app, publish]" in pairing
     assert "contents: write" in pairing and "id-token:" not in pairing
     assert "paired_release.py preflight" in publish
     assert publish.index("paired_release.py preflight") < publish.index("uv publish")
@@ -340,4 +421,8 @@ def test_workflow_pairs_after_publish_with_separate_permissions() -> None:
     assert "RELEASE_SHA: ${{ github.sha }}" in pairing
     assert '--version "$RELEASE_VERSION" --sha "$RELEASE_SHA"' in pairing
     assert "name: spiritboard-dist" in publish and "name: spiritboard-dist" in pairing
+    for arch in ("arm64", "x86_64"):
+        assert f"name: spiritboard-mac-{arch}" in publish
+        assert f"name: spiritboard-mac-{arch}" in pairing
+    assert "--mac-dist mac-dist" in publish and "--mac-dist mac-dist" in pairing
     assert "uv publish" not in pairing

@@ -31,6 +31,14 @@ your local dashboard in the browser. No repo checkout or API key is needed. Supp
 Codex, Claude, opencode, Pi, DeepSeek Harness and Grok Bot storage is discovered
 automatically, without opening authentication files or tables.
 
+Mac users can also use a standalone app with its own window and Dock icon. Signed Apple Silicon
+and Intel DMGs will be attached to [GitHub Releases](https://github.com/topppg/spiritboard/releases)
+starting with the first release made after Mac signing is configured. No Mac download has been
+published yet; the [macOS app guide](https://github.com/topppg/spiritboard/blob/main/docs/MAC_APP.md)
+also explains how to build one locally.
+The app includes the dashboard code present when it is built; rebuild it to include later web UI
+changes. If it connects to an already running dashboard, it shows that server's web UI instead.
+
 Leave the terminal running. Ctrl-C stops only Spiritboard, never an agent. Running
 the same command again reopens the existing board instead of starting a second
 collector. The terminal prints the local URL; if port 8766 is busy, a free port is chosen.
