@@ -854,7 +854,8 @@
     const run = state.selected && state.snapshot.runs.find((r) => r.run_id === state.selected);
     if (run && statusOf(run).turn && !state.past) toggleRest(run);
   }
-  // Opening a session lists all its subagents; closing it folds them, unless you moved into one of them.
+  // Opening a session lists all its subagents; closing it folds back to the default (only busy or
+  // needs-you subagents), unless you moved into one of them.
   function within(id, ancestor) {
     const byId = new Map(state.snapshot.runs.map((r) => [r.run_id, r]));
     for (let r = byId.get(id), seen = 0; r && seen < 64; r = byId.get(r.parent_run_id), seen++) if (r.run_id === ancestor) return true;
@@ -862,7 +863,7 @@
   }
   async function selectRun(id) {
     const previous = state.selected;
-    if (previous && previous !== id && !(id && within(id, previous))) state.folds.set(previous, true);
+    if (previous && previous !== id && !(id && within(id, previous))) state.folds.delete(previous);
     if (id && id !== previous) state.folds.set(id, false);
     state.selected = id; state.events = []; state.nextCursor = 0; state.more = false; state.historyOpen = false;
     state.target = null; state.targetNote = ""; state.targetFallback = false;
@@ -897,10 +898,14 @@
     finally { state.fetching = false; $("refresh").disabled = false; }
   }
   function setView(view) { state.view = view; renderViews(); if (state.snapshot) renderTable(); }
+  // j/k step between top-level agents; from a subagent they step from its top-level agent.
   function move(step) {
-    if (!state.order.length) return;
-    const index = state.order.indexOf(state.selected);
-    const next = state.order[Math.min(state.order.length - 1, Math.max(0, index === -1 ? 0 : index + step))];
+    const byId = new Map(state.snapshot.runs.map((r) => [r.run_id, r]));
+    const tops = state.order.filter((id) => !byId.has(byId.get(id)?.parent_run_id));
+    if (!tops.length) return;
+    const top = tops.find((id) => state.selected && within(state.selected, id));
+    const index = tops.indexOf(top);
+    const next = tops[Math.min(tops.length - 1, Math.max(0, index === -1 ? 0 : index + step))];
     selectRun(next);
     [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === next)?.focus({ preventScroll: false });
   }

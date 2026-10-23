@@ -286,8 +286,12 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.equal(detail(), undefined);
  docListeners.keydown({key:'j', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
  assert.equal(expanded(), 'root');
+ // j/k skip subagents and step between top-level agents.
  docListeners.keydown({key:'j', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
- assert.equal(expanded(), 'ask');
+ assert.equal(expanded(), 'orphan');
+ rows().find(r => r.dataset.runId === 'ask').listeners.click(); await tick();
+ docListeners.keydown({key:'k', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.equal(expanded(), 'root');
  docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
  assert.equal(detail(), undefined);
  // The header menu closes on Escape without closing the open agent, and focus returns to its button.
