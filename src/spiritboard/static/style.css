@@ -111,6 +111,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .run-row.quiet { color: var(--muted); font-style: italic; animation: flicker 4s ease-in-out infinite; }
 .run-row.closed { color: var(--muted); }
 .run-row.idle, .run-row.idle .agent-name, .run-row.idle .doing { color: var(--muted); }
+.group-row { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; min-height: 0; padding: 6px 14px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.group-row:hover, .group-row:focus-visible { color: var(--text); background: #ffffff08; }
 .closed-line { color: var(--muted); }
 .run-row.done { color: #b3acc6; }
 .run-row.context { opacity: .65; }
