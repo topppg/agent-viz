@@ -29,7 +29,16 @@ with the app, so changes to them always need an app rebuild.
 
 ## Build
 
-On a Mac with Xcode command-line tools and uv:
+On a Mac with Xcode command-line tools and uv, run this from a clean `main` checkout to
+update it, build the latest app, install it in `~/Applications`, and open it:
+
+```sh
+bash src/app/install.sh
+```
+
+Run the same command to update the app later. The installer stops if the checkout has
+local changes or is on another branch. It keeps the current installed app if the new
+copy fails. To build a DMG without installing the app, run:
 
 ```sh
 bash src/app/build.sh
