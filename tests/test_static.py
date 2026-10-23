@@ -375,7 +375,12 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.equal(Number(/(\d+) running/.exec(ids.counts.textContent)[1]), runningBefore);
  assert.ok(ids.counts.textContent.includes('0 idle'));
  stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, pending]})}); await tick();
- // An open session stays active however long it idles; its settled subagents fold until it is opened.
+ // Open idle sessions gather under one folded line; its settled subagents fold until it is opened.
+ const group = () => flatten(ids.runs).find(x => x.className === 'group-row');
+ assert.equal(rows().find(r => r.dataset.runId === 'open'), undefined);
+ assert.equal(group().textContent, '▸ 1 open · idle');
+ group().listeners.click(); await tick();
+ assert.equal(group().textContent, '▾ 1 open · idle');
  const openRow = rows().find(r => r.dataset.runId === 'open');
  assert.ok(openRow.textContent.includes('open · idle') && openRow.textContent.includes('1 subagent'));
  assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);

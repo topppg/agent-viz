@@ -7,6 +7,7 @@
   const QUIET_WINDOW = 30 * 60 * 1000;
   // A turn left unanswered in a still-open session stays yours this long.
   const OPEN_TURN_WINDOW = 12 * 3600 * 1000;
+  const OPEN_IDLE = "open-idle";
   const MAX_ROWS = 300;
   const REST_KEY = "spiritboard.rested";
   const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
@@ -494,11 +495,28 @@
         renderRun(child, `${pad}${last ? "└─ " : "├─ "}`, `${pad}${last ? "   " : "│  "}`, false);
       });
     };
-    runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare)
-      .forEach((r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id)));
+    const roots = runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare);
+    const renderRoot = (r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id));
+    // Open idle sessions gather under one line, folded unless one of them is opened.
+    const resting = roots.filter((r) => visible.has(r.run_id) && statusOf(r).key === "idle" && r.live === true);
+    const groupFolded = (state.folds.get(OPEN_IDLE) ?? true) && !resting.some((r) => r.run_id === state.selected || openPath.has(r.run_id));
+    roots.forEach((r) => {
+      if (!resting.includes(r)) { renderRoot(r); return; }
+      if (r !== resting[0]) return;
+      host.append(groupRow(resting.length, groupFolded));
+      if (!groupFolded) resting.forEach(renderRoot);
+    });
     if (!state.selected) state.frozen = new Map(state.order.map((id, i) => [id, i]));
     if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
     if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
+  }
+  function groupRow(count, folded) {
+    const button = node("button", `${folded ? "▸" : "▾"} ${count} open · idle`, "group-row");
+    button.type = "button"; button.dataset.focusKey = `group:${OPEN_IDLE}`;
+    button.setAttribute("aria-expanded", String(!folded));
+    button.title = `${folded ? "Show" : "Hide"} sessions still open but idle`;
+    button.addEventListener("click", () => toggleFold(OPEN_IDLE, !folded));
+    return button;
   }
   function row(run, prefix, context, orphan, maxRate, kids = 0, shown = 0) {
     const status = statusOf(run);
