@@ -101,11 +101,15 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .find input { width: 260px; max-width: 60vw; font-family: var(--sans); }
 #hidden-note { margin-left: auto; font-size: 13px; }
 .table-wrap { container-type: inline-size; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--table); }
-.row { display: grid; grid-template-columns: 76px 140px minmax(0, 1.4fr) minmax(0, 2.6fr) 112px 80px; gap: 14px; align-items: center; padding: 6px 14px; }
+.row { display: grid; grid-template-columns: 76px var(--status-w, 140px) var(--agent-w, minmax(0, 1.4fr)) minmax(0, 2.6fr) 112px 80px; gap: 14px; align-items: center; padding: 6px 14px; }
 .row.head { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .1em; padding-top: 7px; padding-bottom: 7px; }
 .row.head button { border: 0; border-radius: 3px; padding: 0; min-height: 24px; color: inherit; font: inherit; letter-spacing: inherit; white-space: nowrap; }
 .row.head button:hover, .row.head button[aria-pressed="true"] { color: var(--bright); }
 .row.head button[aria-pressed="true"]::after { content: " " attr(data-arrow); color: var(--run); }
+.row.head .resizable { position: relative; }
+.resize { position: absolute; top: -7px; bottom: -7px; right: -11px; width: 8px; cursor: col-resize; touch-action: none; }
+.resize::after { content: ""; position: absolute; top: 6px; bottom: 6px; left: 3px; width: 2px; border-radius: 1px; background: var(--line); }
+.resize:hover::after, .resize:focus-visible::after, .resize.dragging::after { background: var(--run); }
 .run-row { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; min-height: 0; }
 .run-row:hover { background: #15111f; }
 .run-row.selected { background: #1f1733; }
@@ -209,6 +213,7 @@ kbd { font-family: var(--mono); font-size: 11.5px; background: #1d1830; border: 
 /* Below the full table width each agent becomes two lines: status, name and numbers, then what it is working on. */
 @container (max-width: 880px) {
   .row.head { display: flex; flex-wrap: wrap; gap: 0 16px; }
+  .resize { display: none; }
   .run-row { grid-template-columns: 8px auto minmax(0, 1fr) auto auto; grid-template-areas: "harness status agent rate seen" ". doing doing doing doing"; gap: 1px 10px; padding-top: 7px; padding-bottom: 7px; }
   .run-row .harness-cell { grid-area: harness; }
   .run-row .status { grid-area: status; }
