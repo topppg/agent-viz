@@ -5,6 +5,8 @@
   const terminal = new Set(["completed", "failed", "cancelled"]);
   const PALETTE = ["#8fa8ff", "#c4b5fd", "#f0abfc", "#fda4af", "#7dd3fc", "#fdba74", "#a7f3d0", "#e9d5ff"];
   const QUIET_WINDOW = 30 * 60 * 1000;
+  // A turn left unanswered in a still-open session stays yours this long.
+  const OPEN_TURN_WINDOW = 12 * 3600 * 1000;
   const MAX_ROWS = 300;
   const REST_KEY = "spiritboard.rested";
   const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
@@ -89,7 +91,7 @@
     // An unanswered approval stops a transcript from changing; it still needs you.
     if (run.state === "waiting_user") return { key: "needs", glyph: "◐", text: "needs you" };
     // A top-level session that recently finished its turn is waiting for your next direction.
-    if (run.state === "idle" && !run.parent_run_id && serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW) {
+    if (run.state === "idle" && !run.parent_run_id && serverNow() - (time(run.last_seen) || 0) <= (run.live === true ? OPEN_TURN_WINDOW : QUIET_WINDOW)) {
       if (!state.past && state.rested.get(run.run_id) === run.last_seen) return { key: "rest", turn: true, glyph: "☾", text: "at rest" };
       return { key: "needs", turn: true, glyph: "◐", text: "your turn" };
     }
