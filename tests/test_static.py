@@ -384,6 +384,13 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(sortedIds.indexOf('open') > sortedIds.indexOf('sdk-run'));
  headers.agent.listeners.click(); headers.agent.listeners.click();
  assert.equal(headers.agent.attrs['aria-pressed'], 'false');
+ // A parent shown only as context never folds away the subagent that matched.
+ const longAgo = new Date(Date.now() - 13 * 3600000).toISOString();
+ const elder = run('elder', null, 'Elder', {state:'idle', health:'stale', last_seen:longAgo});
+ const kid = run('kid', 'elder', 'Kid', {state:'idle'});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, elder, kid]})}); await tick();
+ assert.ok(rows().find(r => r.dataset.runId === 'elder').textContent.includes('context'));
+ assert.ok(rows().some(r => r.dataset.runId === 'kid'));
  goneRow.listeners.click(); await tick();
  assert.ok(detail().textContent.includes('no running process owns this session'));
  // A user-named Claude desktop session is tagged; an archived one is never active; resume says terminal.

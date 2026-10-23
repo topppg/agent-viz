@@ -474,8 +474,9 @@
       visited.add(run.run_id);
       state.order.push(run.run_id);
       const kids = (children.get(run.run_id) || []).filter((c) => visible.has(c.run_id)).sort(compare);
-      // An idle or quiet session folds its settled subagents unless you unfolded it.
-      const settled = ["idle", "quiet", "rest"].includes(statusOf(run).key) && kids.every((c) => rank(c).rank >= 3);
+      // An idle or quiet session folds its settled subagents unless you unfolded it or it is only context for them.
+      const settled = ["idle", "quiet", "rest"].includes(statusOf(run).key) && kids.every((c) => rank(c).rank >= 3)
+        && direct.has(run.run_id);
       const folded = kids.length > 0 && (state.folds.get(run.run_id) ?? settled) && !openPath.has(run.run_id);
       host.append(row(run, prefix, !direct.has(run.run_id), orphan, maxRate, kids.length, folded));
       if (state.selected === run.run_id) host.append(expansion(run, byId));
