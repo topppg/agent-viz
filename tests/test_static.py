@@ -384,7 +384,28 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(sortedIds.indexOf('open') > sortedIds.indexOf('sdk-run'));
  headers.agent.listeners.click(); headers.agent.listeners.click();
  assert.equal(headers.agent.attrs['aria-pressed'], 'false');
- goneRow.listeners.click(); await tick();
+ // A parent shown only as context never folds away the subagent that matched.
+ const longAgo = new Date(Date.now() - 13 * 3600000).toISOString();
+ const elder = run('elder', null, 'Elder', {state:'idle', health:'stale', last_seen:longAgo});
+ const kid = run('kid', 'elder', 'Kid', {state:'idle'});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, elder, kid]})}); await tick();
+ assert.ok(rows().find(r => r.dataset.runId === 'elder').textContent.includes('context'));
+ assert.ok(rows().some(r => r.dataset.runId === 'kid'));
+ // The toggle counts subagents outside the view too; showing all reveals them without a context tag.
+ const lone = run('lone', null, 'Lone', {health:'fresh'});
+ const old = run('old', 'lone', 'Old', {state:'idle', health:'stale', last_seen:longAgo});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, lone, old]})}); await tick();
+
+ const loneFold = () => flatten(rows().find(r => r.dataset.runId === 'lone')).find(x => x.className === 'fold');
+ assert.equal(loneFold().textContent, '▸ 1 subagent');
+ assert.equal(rows().find(r => r.dataset.runId === 'old'), undefined);
+ loneFold().listeners.click(); await tick();
+ assert.equal(loneFold().textContent, '▾ 1 subagent');
+ assert.ok(!rows().find(r => r.dataset.runId === 'old').textContent.includes('context'));
+ loneFold().listeners.click(); await tick();
+ assert.equal(rows().find(r => r.dataset.runId === 'old'), undefined);
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper]})}); await tick();
+ rows().find(r => r.dataset.runId === 'gone').listeners.click(); await tick();
  assert.ok(detail().textContent.includes('no running process owns this session'));
  // A user-named Claude desktop session is tagged; an archived one is never active; resume says terminal.
  const mine = {session_id:'claude-personal:observed',source:'claude',account:'personal',app:'Claude desktop'};
