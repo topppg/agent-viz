@@ -353,15 +353,36 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const gone = run('gone', null, 'Gone', {state:'idle', live:false, activity:'Wrapped up the release'});
  const hours = new Date(Date.now() - 2 * 3600000).toISOString();
  const open = run('open', null, 'Open', {state:'idle', live:true, last_seen:hours});
- stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open]})}); await tick();
+ const helper = run('helper', 'open', 'Helper', {state:'idle', live:true, last_seen:hours});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper]})}); await tick();
  const goneRow = rows().find(r => r.dataset.runId === 'gone');
  assert.ok(goneRow.textContent.includes('■ closed'));
  assert.ok(goneRow.textContent.includes('last said: Wrapped up the release'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
- assert.equal(rows().find(r => r.dataset.runId === 'open'), undefined);
- ids.views.children[2].listeners.click();
- assert.ok(rows().find(r => r.dataset.runId === 'open').textContent.includes('open · idle'));
- ids.views.children[0].listeners.click();
+ // An open session stays active however long it idles; its settled subagents fold until it is opened.
+ const openRow = rows().find(r => r.dataset.runId === 'open');
+ assert.ok(openRow.textContent.includes('open · idle') && openRow.textContent.includes('1 subagent'));
+ assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
+ // Opening the session leaves the list folded; the toggle and the s key fold it without opening.
+ openRow.listeners.click(); await tick();
+ assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
+ rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
+ const foldOf = (id) => flatten(rows().find(r => r.dataset.runId === id)).find(x => x.className === 'fold');
+ assert.equal(foldOf('open').textContent, '▸ 1 subagent');
+ foldOf('open').listeners.click(); await tick();
+ assert.equal(detail(), undefined);
+ assert.ok(rows().some(r => r.dataset.runId === 'helper'));
+ assert.equal(foldOf('open').textContent, '▾ 1 subagent');
+ document.activeElement = rows().find(r => r.dataset.runId === 'open');
+ docListeners.keydown({key:'s', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ document.activeElement = null;
+ assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
+ // A column sort still lists busy agents before open idle ones.
+ headers.agent.listeners.click();
+ const sortedIds = rows().map(r => r.dataset.runId);
+ assert.ok(sortedIds.indexOf('open') > sortedIds.indexOf('sdk-run'));
+ headers.agent.listeners.click(); headers.agent.listeners.click();
+ assert.equal(headers.agent.attrs['aria-pressed'], 'false');
  goneRow.listeners.click(); await tick();
  assert.ok(detail().textContent.includes('no running process owns this session'));
  // A user-named Claude desktop session is tagged; an archived one is never active; resume says terminal.
