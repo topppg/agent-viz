@@ -356,21 +356,25 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('◐ your turn'));
  // Checked liveness: no owning process means closed, never "your turn"; an open idle session stays visible.
  const gone = run('gone', null, 'Gone', {state:'idle', live:false, activity:'Wrapped up the release'});
- const hours = new Date(Date.now() - 2 * 3600000).toISOString();
+ const hours = new Date(Date.now() - 13 * 3600000).toISOString();
+ const twoHours = new Date(Date.now() - 2 * 3600000).toISOString();
  const open = run('open', null, 'Open', {state:'idle', live:true, last_seen:hours});
  const helper = run('helper', 'open', 'Helper', {state:'idle', live:true, last_seen:hours});
- stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper]})}); await tick();
+ const pending = run('pending', null, 'Pending', {state:'idle', live:true, last_seen:twoHours});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, pending]})}); await tick();
+ // An unanswered turn in an open session stays yours for 12 hours.
+ assert.ok(rows().find(r => r.dataset.runId === 'pending').textContent.includes('◐ your turn'));
  const goneRow = rows().find(r => r.dataset.runId === 'gone');
  assert.ok(goneRow.textContent.includes('■ closed'));
  assert.ok(goneRow.textContent.includes('last said: Wrapped up the release'));
- assert.ok(ids.counts.textContent.includes('1 needs you'));
+ assert.ok(ids.counts.textContent.includes('2 needs you'));
  // An open idle session is counted as idle, never as running.
  const runningBefore = Number(/(\d+) running/.exec(ids.counts.textContent)[1]);
  assert.ok(ids.counts.textContent.includes('2 idle'));
- stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone]})}); await tick();
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, pending]})}); await tick();
  assert.equal(Number(/(\d+) running/.exec(ids.counts.textContent)[1]), runningBefore);
  assert.ok(ids.counts.textContent.includes('0 idle'));
- stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper]})}); await tick();
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, pending]})}); await tick();
  // An open session stays active however long it idles; its settled subagents fold until it is opened.
  const openRow = rows().find(r => r.dataset.runId === 'open');
  assert.ok(openRow.textContent.includes('open · idle') && openRow.textContent.includes('1 subagent'));
