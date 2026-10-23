@@ -151,7 +151,8 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(ids.runs.textContent.includes('parent not yet available'));
  assert.ok(ids.runs.textContent.includes('├─ '));
  const asker = rows().find(r => r.dataset.runId === 'ask');
- assert.ok(asker.textContent.includes('needs you~'));
+ assert.ok(asker.textContent.includes('needs you') && !asker.textContent.includes('~'));
+ assert.equal(flatten(asker).find(x => (x.className || '').includes('status')).title, 'Inferred from the transcript');
  assert.ok(asker.textContent.includes('Retry tuning'));
  assert.ok(asker.textContent.includes('Tuning retry limits') && !asker.textContent.includes('✦'));
  assert.ok(flatten(asker).some(x => (x.className || '').includes('doing needs')));
@@ -285,8 +286,12 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.equal(detail(), undefined);
  docListeners.keydown({key:'j', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
  assert.equal(expanded(), 'root');
+ // j/k skip subagents and step between top-level agents.
  docListeners.keydown({key:'j', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
- assert.equal(expanded(), 'ask');
+ assert.equal(expanded(), 'orphan');
+ rows().find(r => r.dataset.runId === 'ask').listeners.click(); await tick();
+ docListeners.keydown({key:'k', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.equal(expanded(), 'root');
  docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}});
  assert.equal(detail(), undefined);
  // The header menu closes on Escape without closing the open agent, and focus returns to its button.
@@ -328,7 +333,7 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, turn, replied]})}); await tick();
  assert.ok(rows().find(r => r.dataset.runId === 'replied').textContent.includes('Fixed it; the suite passes.'));
  const turnRow = rows().find(r => r.dataset.runId === 'turn');
- assert.ok(turnRow.textContent.includes('↩ your turn~'));
+ assert.ok(turnRow.textContent.includes('◐ your turn'));
  assert.ok(turnRow.textContent.includes('Original task'));
  assert.ok(ids.counts.textContent.includes('3 needs you'));
  turnRow.listeners.click(); await tick();
@@ -336,38 +341,67 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  // Letting a turn rest calms it until the agent acts again.
  assert.equal(control('rest').textContent, '☾ let it rest');
  control('rest').listeners.click(); await tick();
- assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('☾ at rest~'));
+ assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('☾ at rest'));
  assert.ok(detail().textContent.includes('you checked this turn'));
- assert.equal(control('rest').textContent, '↩ back to your turn');
+ assert.equal(control('rest').textContent, '◐ back to your turn');
  assert.ok(ids.counts.textContent.includes('2 needs you') && ids.counts.textContent.includes('1 at rest'));
  docListeners.keydown({key:'w', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
  assert.ok(!rows().some(r => r.dataset.runId === 'turn'));
  docListeners.keydown({key:'a', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
  docListeners.keydown({key:'r', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
- assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('↩ your turn~'));
+ assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('◐ your turn'));
  docListeners.keydown({key:'r', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
  const stirred = {...turn, last_seen:new Date(Date.parse(now) + 1000).toISOString()};
  stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, stirred, replied]})}); await tick();
- assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('↩ your turn~'));
+ assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('◐ your turn'));
  // Checked liveness: no owning process means closed, never "your turn"; an open idle session stays visible.
  const gone = run('gone', null, 'Gone', {state:'idle', live:false, activity:'Wrapped up the release'});
- const hours = new Date(Date.now() - 2 * 3600000).toISOString();
+ const hours = new Date(Date.now() - 13 * 3600000).toISOString();
+ const twoHours = new Date(Date.now() - 2 * 3600000).toISOString();
  const open = run('open', null, 'Open', {state:'idle', live:true, last_seen:hours});
  const helper = run('helper', 'open', 'Helper', {state:'idle', live:true, last_seen:hours});
- stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper]})}); await tick();
+ const pending = run('pending', null, 'Pending', {state:'idle', live:true, last_seen:twoHours});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, pending]})}); await tick();
+ // An unanswered turn in an open session stays yours for 12 hours.
+ assert.ok(rows().find(r => r.dataset.runId === 'pending').textContent.includes('◐ your turn'));
  const goneRow = rows().find(r => r.dataset.runId === 'gone');
  assert.ok(goneRow.textContent.includes('■ closed'));
  assert.ok(goneRow.textContent.includes('last said: Wrapped up the release'));
- assert.ok(ids.counts.textContent.includes('1 needs you'));
- // An open session stays active however long it idles; its settled subagents fold until it is opened.
+ assert.ok(ids.counts.textContent.includes('2 needs you'));
+ // An open idle session is counted as idle, never as running.
+ const runningBefore = Number(/(\d+) running/.exec(ids.counts.textContent)[1]);
+ assert.ok(ids.counts.textContent.includes('2 idle'));
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, pending]})}); await tick();
+ assert.equal(Number(/(\d+) running/.exec(ids.counts.textContent)[1]), runningBefore);
+ assert.ok(ids.counts.textContent.includes('0 idle'));
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, pending]})}); await tick();
+ // Open idle sessions gather under one folded line; its settled subagents fold until it is opened.
+ const group = () => flatten(ids.runs).find(x => x.className === 'group-row');
+ assert.equal(rows().find(r => r.dataset.runId === 'open'), undefined);
+ assert.equal(group().textContent, '▸ 1 open · idle');
+ group().listeners.click(); await tick();
+ assert.equal(group().textContent, '▾ 1 open · idle');
  const openRow = rows().find(r => r.dataset.runId === 'open');
  assert.ok(openRow.textContent.includes('open · idle') && openRow.textContent.includes('1 subagent'));
  assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
- // Opening the session leaves the list folded; the toggle and the s key fold it without opening.
- openRow.listeners.click(); await tick();
- assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
- rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
+ // Opening the session lists its subagents and closing it folds them again.
  const foldOf = (id) => flatten(rows().find(r => r.dataset.runId === id)).find(x => x.className === 'fold');
+ openRow.listeners.click(); await tick();
+ assert.ok(detail());
+ assert.ok(rows().some(r => r.dataset.runId === 'helper'));
+ // Moving into a subagent keeps the parent's list open.
+ rows().find(r => r.dataset.runId === 'helper').listeners.click(); await tick();
+ assert.ok(rows().some(r => r.dataset.runId === 'helper'));
+ rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
+ rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
+ assert.equal(detail(), undefined);
+ assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
+ // With the panel open, the toggle closes the panel and the list together.
+ rows().find(r => r.dataset.runId === 'open').listeners.click(); await tick();
+ foldOf('open').listeners.click(); await tick();
+ assert.equal(detail(), undefined);
+ assert.equal(rows().find(r => r.dataset.runId === 'helper'), undefined);
+ // With the panel closed, the toggle and the s key fold the list without opening it.
  assert.equal(foldOf('open').textContent, '▸ 1 subagent');
  foldOf('open').listeners.click(); await tick();
  assert.equal(detail(), undefined);
@@ -383,7 +417,28 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(sortedIds.indexOf('open') > sortedIds.indexOf('sdk-run'));
  headers.agent.listeners.click(); headers.agent.listeners.click();
  assert.equal(headers.agent.attrs['aria-pressed'], 'false');
- goneRow.listeners.click(); await tick();
+ // A parent shown only as context never folds away the subagent that matched.
+ const longAgo = new Date(Date.now() - 13 * 3600000).toISOString();
+ const elder = run('elder', null, 'Elder', {state:'idle', health:'stale', last_seen:longAgo});
+ const kid = run('kid', 'elder', 'Kid', {state:'idle'});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, elder, kid]})}); await tick();
+ assert.ok(rows().find(r => r.dataset.runId === 'elder').textContent.includes('context'));
+ assert.ok(rows().some(r => r.dataset.runId === 'kid'));
+ // The toggle counts subagents outside the view too; showing all reveals them without a context tag.
+ const lone = run('lone', null, 'Lone', {health:'fresh'});
+ const old = run('old', 'lone', 'Old', {state:'idle', health:'stale', last_seen:longAgo});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, lone, old]})}); await tick();
+
+ const loneFold = () => flatten(rows().find(r => r.dataset.runId === 'lone')).find(x => x.className === 'fold');
+ assert.equal(loneFold().textContent, '▸ 1 subagent');
+ assert.equal(rows().find(r => r.dataset.runId === 'old'), undefined);
+ loneFold().listeners.click(); await tick();
+ assert.equal(loneFold().textContent, '▾ 1 subagent');
+ assert.ok(!rows().find(r => r.dataset.runId === 'old').textContent.includes('context'));
+ loneFold().listeners.click(); await tick();
+ assert.equal(rows().find(r => r.dataset.runId === 'old'), undefined);
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper]})}); await tick();
+ rows().find(r => r.dataset.runId === 'gone').listeners.click(); await tick();
  assert.ok(detail().textContent.includes('no running process owns this session'));
  // A user-named Claude desktop session is tagged; an archived one is never active; resume says terminal.
  const mine = {session_id:'claude-personal:observed',source:'claude',account:'personal',app:'Claude desktop'};
@@ -510,7 +565,8 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const renamedRuns = runs.map(r => r.run_id === 'root' ? {...r, local_name:'Release train'} : r);
  stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:renamedRuns})}); await tick();
  ids.search.value = 'release train'; ids.search.listeners.input();
- assert.deepEqual(rows().map(r => r.dataset.runId), ['root']);
+ // Root is open, so its subagents are listed under it too.
+ assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask','child']);
  ids.search.value = ''; ids.search.listeners.input();
  // The heading says it was renamed here; Escape cancels an edit without saving.
  assert.ok(flatten(detail()).find(x => (x.className || '').includes('renamed-note')).textContent.startsWith('Renamed by you in Spiritboard · automatic title: Root'));

@@ -114,6 +114,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .run-row.quiet { color: var(--muted); font-style: italic; animation: flicker 4s ease-in-out infinite; }
 .run-row.closed { color: var(--muted); }
 .run-row.idle, .run-row.idle .agent-name, .run-row.idle .doing { color: var(--muted); }
+.group-row { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; min-height: 0; padding: 6px 14px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.group-row:hover, .group-row:focus-visible { color: var(--text); background: #ffffff08; }
 .closed-line { color: var(--muted); }
 .run-row.done { color: #b3acc6; }
 .run-row.context { opacity: .65; }
@@ -126,7 +128,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .tree { font-family: var(--mono); color: var(--dim); font-style: normal; white-space: pre; }
 .agent-name { font-weight: 600; }
 .cell.agent { display: flex; align-items: center; }
-.agent .tree, .agent .note { flex: none; }
+.agent .tree, .agent .note, .agent .fold { flex: none; }
+.cell.agent > .agent-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .agent-name.rename { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; min-height: 0; margin-left: -5px; padding: 0 4px; border: 1px solid transparent; border-radius: 4px; text-align: left; cursor: text; }
 .agent-name.rename .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-name.rename::after { content: "✎"; flex: none; font-size: .85em; font-weight: 400; color: var(--muted); opacity: 0; }

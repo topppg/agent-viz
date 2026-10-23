@@ -5,6 +5,9 @@
   const terminal = new Set(["completed", "failed", "cancelled"]);
   const PALETTE = ["#8fa8ff", "#c4b5fd", "#f0abfc", "#fda4af", "#7dd3fc", "#fdba74", "#a7f3d0", "#e9d5ff"];
   const QUIET_WINDOW = 30 * 60 * 1000;
+  // A turn left unanswered in a still-open session stays yours this long.
+  const OPEN_TURN_WINDOW = 12 * 3600 * 1000;
+  const OPEN_IDLE = "open-idle";
   const MAX_ROWS = 300;
   const REST_KEY = "spiritboard.rested";
   const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
@@ -80,27 +83,26 @@
     render();
   }
   function statusOf(run) {
-    const inferred = run.inferred ? "~" : "";
-    if (run.state === "completed") return { key: "done", glyph: "✓", text: `done${inferred}` };
-    if (run.state === "failed") return { key: "failed", glyph: "✗", text: `failed${inferred}` };
-    if (run.state === "cancelled") return { key: "done", glyph: "–", text: `cancelled${inferred}` };
+    if (run.state === "completed") return { key: "done", glyph: "✓", text: "done" };
+    if (run.state === "failed") return { key: "failed", glyph: "✗", text: "failed" };
+    if (run.state === "cancelled") return { key: "done", glyph: "–", text: "cancelled" };
     if (run.archived) return { key: "closed", glyph: "■", text: `archived ${age(run.last_seen)}` };
     // No live process owns it (checked, not guessed): the session has ended.
     if (run.live === false) return { key: "closed", glyph: "■", text: `closed ${age(run.last_seen)}` };
     // An unanswered approval stops a transcript from changing; it still needs you.
-    if (run.state === "waiting_user") return { key: "needs", glyph: "◐", text: `needs you${inferred}` };
+    if (run.state === "waiting_user") return { key: "needs", glyph: "◐", text: "needs you" };
     // A top-level session that recently finished its turn is waiting for your next direction.
-    if (run.state === "idle" && !run.parent_run_id && serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW) {
-      if (!state.past && state.rested.get(run.run_id) === run.last_seen) return { key: "rest", turn: true, glyph: "☾", text: `at rest${inferred}` };
-      return { key: "needs", turn: true, glyph: "↩", text: `your turn${inferred}` };
+    if (run.state === "idle" && !run.parent_run_id && serverNow() - (time(run.last_seen) || 0) <= (run.live === true ? OPEN_TURN_WINDOW : QUIET_WINDOW)) {
+      if (!state.past && state.rested.get(run.run_id) === run.last_seen) return { key: "rest", turn: true, glyph: "☾", text: "at rest" };
+      return { key: "needs", turn: true, glyph: "◐", text: "your turn" };
     }
     if (run.state === "idle" && run.live === true && !run.parent_run_id) return { key: "idle", glyph: "◌", text: `open · idle ${age(run.last_seen)}` };
     if (!["fresh", "observed"].includes(healthOf(run))) return { key: "quiet", glyph: "○", text: `quiet ${age(run.last_seen)}` };
     // Waiting on a tool or a child is ordinary work, not something for you.
-    if (String(run.state).startsWith("waiting")) return { key: "running", glyph: "●", text: `running${inferred}` };
-    if (run.state === "idle") return { key: "idle", glyph: "◌", text: `idle${inferred}` };
+    if (String(run.state).startsWith("waiting")) return { key: "running", glyph: "●", text: "running" };
+    if (run.state === "idle") return { key: "idle", glyph: "◌", text: "idle" };
     if (run.state === "unknown") return { key: "unknown", glyph: "?", text: "unknown" };
-    return { key: "running", glyph: "●", text: `running${inferred}` };
+    return { key: "running", glyph: "●", text: "running" };
   }
   function doingOf(run, status) {
     if (terminal.has(run.state)) return { mark: "›", text: run.summary || run.activity || run.task || "finished", cls: "" };
@@ -204,12 +206,13 @@
     // Same scope as the active view: long-quiet history is not counted.
     return runs.filter((run) => !terminal.has(run.state) && !run.archived && (statusOf(run).key !== "quiet" || serverNow() - (time(run.last_seen) || 0) <= QUIET_WINDOW)).map(statusOf);
   }
-  const BUSY = new Set(["running", "waiting", "idle", "unknown"]);
+  const BUSY = new Set(["running", "waiting", "unknown"]);
   function renderCounts() {
     const statuses = activeStatuses(state.snapshot.runs);
     const counts = [["running", "●", statuses.filter((s) => BUSY.has(s.key)).length, "running"],
       ["needs", "◐", statuses.filter((s) => s.key === "needs").length, "needs you"],
       ["rest", "☾", statuses.filter((s) => s.key === "rest").length, "at rest"],
+      ["idle", "◌", statuses.filter((s) => s.key === "idle").length, "idle"],
       ["quiet", "○", statuses.filter((s) => s.key === "quiet").length, "quiet"]];
     $("counts").replaceChildren(...counts.map(([key, glyph, value, text]) => {
       const item = node("span"); item.append(node("span", glyph, `g-${key}`), " ", node("strong", value), node("span", ` ${text}`, "count-word")); return item;
@@ -259,7 +262,7 @@
     const focused = document.activeElement?.dataset?.focusKey;
     const host = $("harnesses");
     // Only harnesses with something running (or the one filtered on); idle ones stay in the filter.
-    const running = (h) => h.rate > 0 || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs");
+    const running = (h) => h.rate > 0 || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs" || s.key === "idle");
     const shown = list.filter((h) => running(h) || $("harness-filter").value === h.key);
     host.replaceChildren(...shown.map((h) => {
       const button = node("button", null, `harness${$("harness-filter").value === h.key ? " is-selected" : ""}`);
@@ -267,7 +270,7 @@
       button.setAttribute("aria-pressed", String($("harness-filter").value === h.key));
       const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(h.key);
       const statuses = activeStatuses(h.runs);
-      const parts = [[(s) => BUSY.has(s.key), "running"], [(s) => s.key === "needs", "needs you"], [(s) => s.key === "quiet", "quiet"]]
+      const parts = [[(s) => BUSY.has(s.key), "running"], [(s) => s.key === "needs", "needs you"], [(s) => s.key === "idle", "idle"], [(s) => s.key === "quiet", "quiet"]]
         .map(([test, text]) => [statuses.filter(test).length, text]).filter(([n]) => n).map(([n, text]) => `${n} ${text}`);
       const sub = parts.join(" · ") || (h.runs.length ? "nothing active" : "no observations yet");
       const name = node("span", null, "who"); name.title = `${h.label} · ${sub}`; name.append(node("span", h.label, "name"), node("span", sub, "sub"));
@@ -468,30 +471,54 @@
     if (!direct.size) { host.append(node("p", state.view === "active" ? `Nothing active ${state.past ? "at this moment" : "right now"}. Press e to show all history.` : "No agents match these filters.", "empty")); return; }
     const maxRate = Math.max(1, ...[...visible].map(rateOf));
     const visited = new Set();
+    const revealed = new Set();
     const openPath = new Set();
     for (let r = byId.get(byId.get(state.selected)?.parent_run_id); r && !openPath.has(r.run_id); r = byId.get(r.parent_run_id)) openPath.add(r.run_id);
     const renderRun = (run, prefix, pad, orphan) => {
       if (visited.has(run.run_id) || !visible.has(run.run_id) || state.order.length >= MAX_ROWS) return;
       visited.add(run.run_id);
       state.order.push(run.run_id);
-      const kids = (children.get(run.run_id) || []).filter((c) => visible.has(c.run_id)).sort(compare);
-      // An idle or quiet session folds its settled subagents unless you unfolded it.
-      const settled = ["idle", "quiet", "rest"].includes(statusOf(run).key) && kids.every((c) => rank(c).rank >= 3);
-      const folded = kids.length > 0 && (state.folds.get(run.run_id) ?? settled) && !openPath.has(run.run_id);
-      host.append(row(run, prefix, !direct.has(run.run_id), orphan, maxRate, kids.length, folded));
+      const all = children.get(run.run_id) || [];
+      const inView = all.filter((c) => visible.has(c.run_id));
+      // An idle or quiet session folds its settled subagents unless it is only context for them.
+      const settled = ["idle", "quiet", "rest"].includes(statusOf(run).key) && inView.every((c) => rank(c).rank >= 3)
+        && direct.has(run.run_id);
+      // Your choice wins: true folds them all, false shows them all, even ones outside this view.
+      const choice = state.folds.get(run.run_id);
+      const folded = (choice ?? settled) && !openPath.has(run.run_id);
+      const kids = (folded ? [] : choice === false ? all : inView).sort(compare);
+      kids.forEach((c) => { if (!visible.has(c.run_id)) { visible.add(c.run_id); revealed.add(c.run_id); } });
+      host.append(row(run, prefix, !direct.has(run.run_id) && !revealed.has(run.run_id), orphan, maxRate, all.length, kids.length));
       if (state.selected === run.run_id) host.append(expansion(run, byId));
-      if (!folded) kids.forEach((child, i) => {
+      kids.forEach((child, i) => {
         const last = i === kids.length - 1;
         renderRun(child, `${pad}${last ? "└─ " : "├─ "}`, `${pad}${last ? "   " : "│  "}`, false);
       });
     };
-    runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare)
-      .forEach((r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id)));
+    const roots = runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare);
+    const renderRoot = (r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id));
+    // Open idle sessions gather under one line, folded unless one of them is opened.
+    const resting = roots.filter((r) => visible.has(r.run_id) && statusOf(r).key === "idle" && r.live === true);
+    const groupFolded = (state.folds.get(OPEN_IDLE) ?? true) && !resting.some((r) => r.run_id === state.selected || openPath.has(r.run_id));
+    roots.forEach((r) => {
+      if (!resting.includes(r)) { renderRoot(r); return; }
+      if (r !== resting[0]) return;
+      host.append(groupRow(resting.length, groupFolded));
+      if (!groupFolded) resting.forEach(renderRoot);
+    });
     if (!state.selected) state.frozen = new Map(state.order.map((id, i) => [id, i]));
     if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
     if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
-  function row(run, prefix, context, orphan, maxRate, kids = 0, folded = false) {
+  function groupRow(count, folded) {
+    const button = node("button", `${folded ? "▸" : "▾"} ${count} open · idle`, "group-row");
+    button.type = "button"; button.dataset.focusKey = `group:${OPEN_IDLE}`;
+    button.setAttribute("aria-expanded", String(!folded));
+    button.title = `${folded ? "Show" : "Hide"} sessions still open but idle`;
+    button.addEventListener("click", () => toggleFold(OPEN_IDLE, !folded));
+    return button;
+  }
+  function row(run, prefix, context, orphan, maxRate, kids = 0, shown = 0) {
     const status = statusOf(run);
     const open = state.selected === run.run_id;
     const depth = Math.round(prefix.length / 3);
@@ -502,6 +529,7 @@
     button.setAttribute("aria-current", String(open));
     button.setAttribute("aria-expanded", String(open));
     const statusCell = node("span", `${open ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status g-${status.key}`);
+    if (run.inferred) statusCell.title = "Inferred from the transcript";
     const agent = node("span", null, "cell agent");
     // Renaming happens in the opened session; a click on the row only opens it.
     const name = node("span", nameOf(run), "agent-name");
@@ -515,11 +543,13 @@
     if (orphan) agent.append(node("span", "parent not yet available", "note"));
     if (context) agent.append(node("span", "context", "note"));
     if (kids) {
-      const fold = node("span", `${folded ? "▸" : "▾"} ${kids} subagent${kids === 1 ? "" : "s"}`, "fold");
-      fold.title = `${folded ? "Show" : "Hide"} subagents · s`;
-      fold.addEventListener("click", (event) => { event?.stopPropagation?.(); toggleFold(run.run_id, folded); });
+      const count = (n, more = "") => `${n} ${more}${n === 1 ? "subagent" : "subagents"}`;
+      const text = shown === kids ? `▾ ${count(kids)}` : `▸ ${shown ? count(kids - shown, "more ") : count(kids)}`;
+      const fold = node("span", text, "fold");
+      fold.title = `${shown === kids ? "Hide" : "Show all"} subagents · s`;
+      fold.addEventListener("click", (event) => { event?.stopPropagation?.(); toggleFold(run.run_id, shown === kids); });
       agent.append(fold);
-      button.dataset.folded = String(folded);
+      button.dataset.folds = String(shown === kids);
     }
     // Where the session runs, when it is an app rather than a terminal (Claude desktop).
     if (run.app) agent.append(node("span", run.app, "note"));
@@ -544,12 +574,16 @@
     button.addEventListener("click", () => selectRun(state.selected === run.run_id ? null : run.run_id));
     return button;
   }
-  function toggleFold(id, folded) { state.folds.set(id, !folded); renderTable(); }
+  function toggleFold(id, fold) {
+    // With its panel open, the toggle closes the panel and the list together.
+    if (state.selected === id) { selectRun(null); return; }
+    state.folds.set(id, fold); renderTable();
+  }
   // The focused row, else the opened one, folds or unfolds its subagents.
   function foldSelected() {
     const id = document.activeElement?.dataset?.runId || state.selected;
-    const button = id && [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === id && el.dataset.folded);
-    if (button) toggleFold(id, button.dataset.folded === "true");
+    const button = id && [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === id && el.dataset.folds);
+    if (button) toggleFold(id, button.dataset.folds === "true");
   }
   const byFocusKey = (key) => [...$("runs").querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === key);
   // The opened session's heading is a button that turns into an input while renaming.
@@ -682,7 +716,7 @@
     const actions = node("div", null, "detail-actions");
     actions.append(...targetControls(run));
     if (status.turn && !state.past) {
-      const rest = node("button", status.key === "rest" ? "↩ back to your turn" : "☾ let it rest", "link rest-link"); rest.type = "button"; rest.dataset.focusKey = "rest";
+      const rest = node("button", status.key === "rest" ? "◐ back to your turn" : "☾ let it rest", "link rest-link"); rest.type = "button"; rest.dataset.focusKey = "rest";
       rest.addEventListener("click", () => toggleRest(run));
       actions.append(rest);
     }
@@ -707,7 +741,7 @@
       rest.append(node("span", " · stirs again when the agent does anything", "rest-where"));
       main.append(rest);
     } else if (status.turn) {
-      const turn = node("p", `↩ finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
+      const turn = node("p", `finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
       turn.append(node("span", ` · continue it in ${harness.label}`, "needs-where"));
       main.append(turn);
     } else if (run.archived) {
@@ -840,7 +874,17 @@
     const run = state.selected && state.snapshot.runs.find((r) => r.run_id === state.selected);
     if (run && statusOf(run).turn && !state.past) toggleRest(run);
   }
+  // Opening a session lists all its subagents; closing it folds back to the default (only busy or
+  // needs-you subagents), unless you moved into one of them.
+  function within(id, ancestor) {
+    const byId = new Map(state.snapshot.runs.map((r) => [r.run_id, r]));
+    for (let r = byId.get(id), seen = 0; r && seen < 64; r = byId.get(r.parent_run_id), seen++) if (r.run_id === ancestor) return true;
+    return false;
+  }
   async function selectRun(id) {
+    const previous = state.selected;
+    if (previous && previous !== id && !(id && within(id, previous))) state.folds.delete(previous);
+    if (id && id !== previous) state.folds.set(id, false);
     state.selected = id; state.events = []; state.nextCursor = 0; state.more = false; state.historyOpen = false;
     state.target = null; state.targetNote = ""; state.targetFallback = false;
     renderDetail();
@@ -874,10 +918,14 @@
     finally { state.fetching = false; $("refresh").disabled = false; }
   }
   function setView(view) { state.view = view; renderViews(); if (state.snapshot) renderTable(); }
+  // j/k step between top-level agents; from a subagent they step from its top-level agent.
   function move(step) {
-    if (!state.order.length) return;
-    const index = state.order.indexOf(state.selected);
-    const next = state.order[Math.min(state.order.length - 1, Math.max(0, index === -1 ? 0 : index + step))];
+    const byId = new Map(state.snapshot.runs.map((r) => [r.run_id, r]));
+    const tops = state.order.filter((id) => !byId.has(byId.get(id)?.parent_run_id));
+    if (!tops.length) return;
+    const top = tops.find((id) => state.selected && within(state.selected, id));
+    const index = tops.indexOf(top);
+    const next = tops[Math.min(tops.length - 1, Math.max(0, index === -1 ? 0 : index + step))];
     selectRun(next);
     [...$("runs").querySelectorAll("[data-run-id]")].find((el) => el.dataset.runId === next)?.focus({ preventScroll: false });
   }

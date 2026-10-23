@@ -99,9 +99,10 @@ for upgrades, removal and publishing.
 | **Grok Bot** (macOS app) | the app's local cache, `GROK_BOT_HOME` | unknown: its agents run in the cloud | the exact agent in the app | — |
 | **Your own agents** | the Python SDK below | heartbeats | — | — |
 
-Claude Code, Codex and opencode are checked against real sessions. The Claude
-desktop marker, Pi and DeepSeek Harness are built from each app's own code and
-documentation and covered by tests, but have seen little or no real data yet.
+Claude Code, Codex and opencode are checked against real sessions, and Pi against
+a real Pi 0.73 session (reading, liveness and resume). The Claude desktop marker
+and DeepSeek Harness are built from each app's own code and documentation and
+covered by tests, but have seen little or no real data yet.
 Grok Bot is read from the app's local cache, whose undocumented format was observed
 on one machine and may change; unrecognized versions are skipped with a warning.
 New harnesses plug in as one module each (see [the source guide](https://github.com/topppg/spiritboard/blob/main/docs/SOURCES.md#adding-a-harness)).
@@ -118,10 +119,10 @@ New harnesses plug in as one module each (see [the source guide](https://github.
   | Status | Meaning |
   | --- | --- |
   | ◐ **needs you** | Waiting for your approval. |
-  | ↩ **your turn** | Finished its turn in the last 30 minutes and is waiting for your next direction. |
+  | ◐ **your turn** | Finished its turn and is waiting for your next direction: for 12 hours while the session is still open, otherwise for 30 minutes. |
   | ☾ **at rest** | A turn you checked with **let it rest** (or `r`) in its detail view; nothing needed now. It goes back to your turn as soon as the agent does anything. Kept in this browser only. |
   | ● **running** | Working, including while it waits on a tool or a subagent. |
-  | ◌ **open · idle** | Still open in a terminal or app, idle for longer. It stays in the active view however long it idles, dimmed, with its subagents folded. Click **▸ N subagents** on any row (or press `s`) to fold or unfold its subagents without opening the session. Its summary and title are not refreshed while it idles. |
+  | ◌ **open · idle** | Still open in a terminal or app, idle for longer. It stays in the active view however long it idles, dimmed, grouped under one folded **▸ N open · idle** line, with its subagents folded. Opening a session lists all its subagents and closing it folds them again, keeping only ones that are running or need you; **▸ N subagents** (or `s`) folds or unfolds them without opening the session, and closes both when its panel is open. Its summary and title are not refreshed while it idles. |
   | ○ **quiet** | No recent activity, and liveness could not be checked. Quiet never means failed. |
   | ■ **closed** | No running process owns the session any more. |
   | ✓ **done** | An SDK run reported that it finished. |
@@ -143,7 +144,7 @@ New harnesses plug in as one module each (see [the source guide](https://github.
 
 <sub>Synthetic data: invented sessions, projects and activity.</sub>
 
-Click a row to open it in place; `/` finds, `j`/`k` move, `Esc` closes, `a` / `w`
+Click a row to open it in place; `/` finds, `j`/`k` move between top-level agents, `Esc` closes, `a` / `w`
 / `e` switch between active, needs-you and all, and `r` lets the open session's
 turn rest. Click a table heading to sort by
 that column, click again to reverse it, and a third time to restore the default

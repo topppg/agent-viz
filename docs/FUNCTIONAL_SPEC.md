@@ -75,7 +75,7 @@ Rules:
 - Parent identity is fixed once declared. Do not guess a parent from similar names.
 - Terminal runs cannot be revived by a delayed heartbeat or status event. A new
   execution uses a new ID.
-- Inferred adapter states must be visibly marked inferred; “unknown” is preferable
+- Inferred adapter states must be marked inferred (the status tooltip says so); “unknown” is preferable
   to false certainty. Codex/Claude transcript adapters are now in the functional
   version; they are observations, not a universal runtime-control protocol.
 
