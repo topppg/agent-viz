@@ -133,6 +133,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 18px 32px; display: flex; fle
 .detail-title h3 .name-edit { width: min(60ch, 100%); font-weight: inherit; letter-spacing: inherit; }
 .renamed-mark { flex: none; margin-left: 6px; color: var(--run); font-size: 9px; font-style: normal; }
 .note { color: var(--wait); font-size: 11.5px; margin-left: 8px; font-style: normal; }
+.fold { color: var(--muted); font-size: 11.5px; font-weight: 400; margin-left: 8px; padding: 0 4px; border-radius: 4px; cursor: pointer; }
+.fold:hover { color: var(--text); background: #ffffff10; }
 .harness-cell { display: flex; align-items: center; }
 .harness-cell .swatch { width: 8px; height: 8px; border-radius: 2px; }
 .mark { font-style: normal; color: var(--dim); }
