@@ -456,7 +456,7 @@
     const live = (a, b) => rank(a).rank - rank(b).rank || rank(b).seen - rank(a).seen || a.run_id.localeCompare(b.run_id);
     // While a run is open, keep the order from before it opened so rows don't jump; unseen runs go after.
     const frozen = (run) => state.frozen.get(run.run_id) ?? Infinity;
-    // Column sorts order within tiers: busy or needing you, then open or resting, then history.
+    // Column sorts order within tiers: busy or needing you, then resting, then history; open idle sessions follow.
     const tier = (run) => { const r = rank(run).rank; return r < 3 ? 0 : r === 3 ? 1 : 2; };
     const sorted = (a, b) => {
       if (state.sort !== "status" && tier(a) !== tier(b)) return tier(a) - tier(b);
@@ -498,15 +498,14 @@
     };
     const roots = runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare);
     const renderRoot = (r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id));
-    // Open idle sessions gather under one line, folded unless one of them is opened.
+    // Open idle sessions gather under one line at the bottom, folded unless one of them is opened.
     const resting = roots.filter((r) => visible.has(r.run_id) && statusOf(r).key === "idle" && r.live === true);
     const groupFolded = (state.folds.get(OPEN_IDLE) ?? true) && !resting.some((r) => r.run_id === state.selected || openPath.has(r.run_id));
-    roots.forEach((r) => {
-      if (!resting.includes(r)) { renderRoot(r); return; }
-      if (r !== resting[0]) return;
+    roots.filter((r) => !resting.includes(r)).forEach(renderRoot);
+    if (resting.length) {
       host.append(groupRow(resting.length, groupFolded));
       if (!groupFolded) resting.forEach(renderRoot);
-    });
+    }
     if (!state.selected) state.frozen = new Map(state.order.map((id, i) => [id, i]));
     if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
     if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });

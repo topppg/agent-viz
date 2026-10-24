@@ -413,6 +413,11 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const group = () => flatten(ids.runs).find(x => x.className === 'group-row');
  assert.equal(rows().find(r => r.dataset.runId === 'open'), undefined);
  assert.equal(group().textContent, '▸ 1 open · idle');
+ // The group stays at the bottom, below recently closed sessions, also while one of them is open.
+ assert.equal(ids.runs.children.at(-1), group());
+ rows().find(r => r.dataset.runId === 'gone').listeners.click(); await tick();
+ assert.equal(ids.runs.children.at(-1), group());
+ rows().find(r => r.dataset.runId === 'gone').listeners.click(); await tick();
  group().listeners.click(); await tick();
  assert.equal(group().textContent, '▾ 1 open · idle');
  const openRow = rows().find(r => r.dataset.runId === 'open');

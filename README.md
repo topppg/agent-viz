@@ -122,7 +122,7 @@ New harnesses plug in as one module each (see [the source guide](https://github.
   | ◐ **your turn** | Finished its turn and is waiting for your next direction: for 12 hours while the session is still open, otherwise for 30 minutes. |
   | ☾ **at rest** | A turn you checked with **let it rest** (or `r`) in its detail view; nothing needed now. It goes back to your turn as soon as the agent does anything. Kept in this browser only. |
   | ● **running** | Working, including while it waits on a tool or a subagent. |
-  | ◌ **open · idle** | Still open in a terminal or app, idle for longer. It stays in the active view however long it idles, dimmed, grouped under one folded **▸ N open · idle** line, with its subagents folded. Opening a session lists all its subagents and closing it folds them again, keeping only ones that are running or need you; **▸ N subagents** (or `s`) folds or unfolds them without opening the session, and closes both when its panel is open. Its summary and title are not refreshed while it idles. |
+  | ◌ **open · idle** | Still open in a terminal or app, idle for longer. It stays in the active view however long it idles, dimmed, grouped under one folded **▸ N open · idle** line at the bottom of the list, with its subagents folded. Opening a session lists all its subagents and closing it folds them again, keeping only ones that are running or need you; **▸ N subagents** (or `s`) folds or unfolds them without opening the session, and closes both when its panel is open. Its summary and title are not refreshed while it idles. |
   | ○ **quiet** | No recent activity, and liveness could not be checked. Quiet never means failed. |
   | ■ **closed** | No running process owns the session any more. |
   | ✓ **done** | An SDK run reported that it finished. |
@@ -149,7 +149,8 @@ Click a row to open it in place; `/` finds, `j`/`k` move between top-level agent
 turn rest. Click a table heading to sort by
 that column, click again to reverse it, and a third time to restore the default
 attention order. Sorting orders within groups, so busy and needs-you agents stay above
-open idle ones, and those above history. Subagents stay under their parent while sorting.
+resting ones, those stay above history, and open idle sessions stay at the bottom.
+Subagents stay under their parent while sorting.
 Drag the edge of the STATUS or AGENT heading to widen it (arrow keys work when the
 edge is focused); the width is remembered and a double-click resets it.
 
