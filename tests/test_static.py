@@ -1,5 +1,6 @@
 """Dependency-free browser asset checks; optional Node exercises DOM behavior."""
 
+import re
 import shutil
 import subprocess
 import unittest
@@ -74,6 +75,14 @@ class StaticTests(unittest.TestCase):
             "eval(",
         ):
             self.assertNotIn(forbidden, script)
+
+    def test_rename_button_is_wide_enough_for_the_whole_title(self):
+        # The button shifts left by its negative margin; without that much extra width
+        # the session title in the opened panel always ends in an ellipsis.
+        css = (STATIC / "style.css").read_text()
+        rule = re.search(r"\.agent-name\.rename \{([^}]*)\}", css).group(1)
+        shift = re.search(r"margin-left: -(\d+)px", rule).group(1)
+        self.assertIn(f"max-width: calc(100% + {shift}px)", rule)
 
     @unittest.skipUnless(shutil.which("node"), "Node is optional; browser syntax/DOM check skipped")
     def test_browser_renders_table_harnesses_and_private_text_safely(self):
