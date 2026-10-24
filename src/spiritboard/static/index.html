@@ -34,7 +34,7 @@
         <div id="harnesses"></div>
       </div>
       <div class="flux-panel">
-        <div class="panel-head"><h2>Events · <span id="flux-window">last 10 min</span></h2><span class="head-tools"><span id="flux-note" class="muted">events/min</span><span id="zoom" class="zoom" role="group" aria-label="Chart window"><button type="button" data-zoom="600" aria-pressed="true">10m</button><button type="button" data-zoom="3600">1h</button><button type="button" data-zoom="86400">24h</button><button type="button" data-zoom="604800">7d</button><button type="button" data-zoom="2592000">30d</button></span></span></div>
+        <div class="panel-head"><h2>Events · <span id="flux-window">last 10 min</span></h2><span class="head-tools"><span id="flux-note">events/min</span><span id="zoom" class="zoom" role="group" aria-label="Chart window"><button type="button" data-zoom="600" aria-pressed="true">10m</button><button type="button" data-zoom="3600">1h</button><button type="button" data-zoom="86400">24h</button><button type="button" data-zoom="604800">7d</button><button type="button" data-zoom="2592000">30d</button></span></span></div>
         <div id="flux" class="flux" role="img" aria-label="Event rate chart" title="Click a bar to view the board at that moment"></div>
         <div id="axis" class="axis"><span>-10m</span><span>-5m</span><span class="now">now</span></div>
       </div>
@@ -50,8 +50,8 @@
         </div>
         <label id="window-label" hidden><span class="label-text">Window</span> <select id="window-filter"><option value="3600000">1h</option><option value="86400000">24h</option><option value="604800000" selected>7d</option><option value="">everything kept</option></select></label>
         <label><span class="label-text sr-only">Harness</span> <select id="harness-filter"><option value="">all harnesses</option></select></label>
-        <label class="find"><input id="search" type="search" placeholder="Find agent, task or activity" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
-        <button id="hidden-note" class="link" type="button"></button>
+        <label class="find"><input id="search" type="search" placeholder="Find agent, task or activity" aria-label="Find agent, task or activity" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
+        <button id="hidden-note" class="link" type="button" hidden></button>
       </div>
       <p id="past-bar" class="past-bar" role="status" hidden></p>
       <div class="table-wrap">

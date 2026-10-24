@@ -104,7 +104,7 @@ class Element {
   querySelectorAll(selector) { const key = (selector.match(/^\[data-([a-z-]+)\]$/) || [])[1]; const prop = key ? key.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) : 'focusKey'; return flatten(this).filter(x => x.dataset[prop] !== undefined); }
 }
 function flatten(el) { return el.children.filter(c => typeof c !== 'string').flatMap(c => [c, ...flatten(c)]); }
-const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs','past-bar','zoom','flux-window','flux-note','axis','more','top-actions','keys-toggle','keys'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
+const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs','past-bar','zoom','flux-window','flux-note','axis','more','top-actions','keys-toggle','keys','summary-settings-open'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
 const headers = Object.fromEntries(['status','agent','doing','rate','seen'].map(key => { const button = new Element('button'); button.dataset.sort = key; button.textContent = key; return [key, button]; }));
 ids['window-filter'].value = '604800000';
 ['active','waiting','all'].forEach(v => { const b = new Element('button'); b.dataset.view = v; ids.views.children.push(b); });
@@ -149,7 +149,7 @@ const context = {document,localStorage,Option,EventSource,navigator,setInterval:
   }
   if (url.startsWith('/api/snapshot?at=')) return {ok:true,json:async()=>past};
   if (url.startsWith('/api/activity?window=')) return {ok:true,json:async()=>({bucket_seconds:60,buckets:60,end:now,runs:{root:[...new Array(59).fill(0),5]}})};
-  return {ok:true,json:async()=>url.startsWith('/api/runs/') ? {events:[{type:'run.activity',payload:{text:'<script>not executable</script>'},received_at:now}],next_cursor:1,has_more:false} : snapshot}; }};
+  return {ok:true,json:async()=>url.startsWith('/api/runs/') ? {events:[{type:'run.heartbeat',payload:{},received_at:now},{type:'run.activity',payload:{text:'<script>not executable</script>'},received_at:now}],next_cursor:2,has_more:false} : snapshot}; }};
 vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),context);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const rows = () => ids.runs.children.filter(x => typeof x !== 'string' && x.dataset.runId);
@@ -164,9 +164,15 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  // The note opens everything it hides; elsewhere it only counts.
  ids['hidden-note'].listeners.click();
  assert.equal(ids.views.children[2].attrs['aria-pressed'], 'true');
- assert.equal(ids['hidden-note'].disabled, true);
+ assert.equal(ids['hidden-note'].attrs['aria-disabled'], 'true');
+ ids['hidden-note'].listeners.click();
+ assert.equal(ids.views.children[2].attrs['aria-pressed'], 'true');
  ids.views.children[0].listeners.click();
- assert.equal(ids['hidden-note'].disabled, false);
+ assert.equal(ids['hidden-note'].attrs['aria-disabled'], 'false');
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:runs.filter(r => !['done','ancient'].includes(r.run_id))})});
+ assert.equal(ids['hidden-note'].hidden, true);
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)});
+ assert.equal(ids['hidden-note'].hidden, false);
  assert.ok(ids.runs.textContent.includes('<img src=x onerror=alert(1)>'));
  assert.ok(!flatten(ids.runs).some(x => x.tagName === 'img'));
  assert.ok(ids.runs.textContent.includes('parent not yet available'));
@@ -193,7 +199,7 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(ids.flux.attrs['aria-label'].includes('Codex · work'));
  // Spend stays in the tooltip; the header only says summaries are on.
  assert.equal(ids['ai-status'].textContent, 'Summaries');
- assert.ok(ids['ai-status'].title.includes('$0.0021 spent · 2 API calls'));
+ assert.ok(ids['summary-settings-open'].title.includes('$0.0021 spent · 2 API calls'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
  // Status and agent columns resize by drag or arrow keys, clamped and remembered; double-click resets.
  assert.equal(columnTable.style['--agent-w'], '300px');
@@ -289,6 +295,8 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  flatten(detail()).find(x => x.dataset.focusKey === 'history').listeners.click(); await tick();
  assert.ok(detail().textContent.includes('<script>not executable</script>'));
  assert.ok(!flatten(detail()).some(x => x.tagName === 'script'));
+ // An event without a detail names its type instead of leaving a bare time.
+ assert.ok(flatten(detail()).some(x => x.tagName === 'li' && x.textContent === 'just nowrun heartbeat'));
  // A subagent opens from its own row; the parent link moves the open row back up.
  rows().find(r => r.dataset.runId === 'ask').listeners.click(); await tick();
  assert.equal(expanded(), 'ask');
@@ -298,7 +306,7 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(detail().textContent.includes('Original task'));
  assert.ok(!detail().textContent.includes('you asked'));
  rows().find(r => r.dataset.runId === 'ask').listeners.click(); await tick();
- assert.ok(detail().textContent.includes('Needs you · waiting'));
+ assert.ok(detail().textContent.includes('Needs you · asked just now'));
  assert.ok(detail().textContent.includes('answer in “Root”'));
  assert.ok(detail().textContent.includes('Tuning retry limits'));
  // A stopped session offers a resume command to copy, never to run.
@@ -365,7 +373,9 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const rootLoads = () => requests.filter(x => x === '/api/runs/root/events?after=0&limit=100').length;
  const before = rootLoads();
  stream.onerror(); assert.ok(ids.connection.textContent.includes('disconnected'));
+ assert.equal(ids.connection.className, 'down');
  stream.listeners.snapshot({data:JSON.stringify(snapshot)}); assert.equal(ids.connection.textContent,'live');
+ assert.equal(ids.connection.className, 'connected');
  stream.listeners.reset({data:JSON.stringify({...snapshot,cursor:0})}); await tick();
  assert.ok(ids.connection.textContent.includes('history reset'));
  assert.equal(rootLoads(), before + 1);
@@ -519,11 +529,12 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(deskRow.textContent.includes('Desktop title'));
  assert.ok(!deskRow.textContent.includes('Old generated title'));
  const nameOfRow = (r) => flatten(r).find(x => x.className === 'agent-name');
- assert.ok(!nameOfRow(deskRow).title);
+ assert.equal(nameOfRow(deskRow).title, 'Claude · personal · Claude desktop');
+ assert.ok(flatten(deskRow).some(x => x.className === 'sr-only' && x.textContent === 'Claude · personal · Claude desktop'));
  // An evolving AI title wins over the native name and keeps the title it replaced findable.
  const evolvedRow = rows().find(r => r.dataset.runId === 'evolved');
  assert.ok(evolvedRow.textContent.includes('Ship retry budget'));
- assert.equal(nameOfRow(evolvedRow).title, 'AI title · native: native-slug · Renamed from “Tune retry limits”');
+ assert.equal(nameOfRow(evolvedRow).title, 'Codex · work · AI title · native: native-slug · Renamed from “Tune retry limits”');
  ids.search.value = 'tune retry'; ids.search.listeners.input(); await tick();
  assert.ok(rows().some(r => r.dataset.runId === 'evolved'));
  ids.search.value = ''; ids.search.listeners.input(); await tick();
@@ -690,14 +701,21 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(ids.harnesses.children.some(x => x.tagName === 'button' && x.textContent.includes('DeepSeek Harness')));
  stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
  assert.ok(!ids.harnesses.children.some(x => x.tagName === 'button' && x.textContent.includes('DeepSeek Harness')));
+ const sdkButton = () => ids.harnesses.children.find(x => x.tagName === 'button' && x.dataset.focusKey.includes('sdk'));
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:runs.map(r => r.run_id === 'sdk-run' ? {...r, live:false} : r)})}); await tick();
+ assert.ok(sdkButton() && !sdkButton().textContent.includes('idle'));
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
  // Direct API usage has no dollar receipt; never call it free or ChatGPT plan usage.
  for (const provider of ['openai', 'anthropic']) {
    stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:true,status:'ready',provider,api_calls:1,subscription_calls:0,known_cost_usd:0,actual_cost_usd:null,unknown_cost_calls:1}})});
    assert.ok(ids['ai-status'].textContent.includes(provider === 'openai' ? 'OpenAI API' : 'Anthropic'));
-   assert.ok(ids['ai-status'].title.includes('cost unavailable'));
-   assert.ok(!ids['ai-status'].title.includes('$0.0000 spent'));
-   assert.ok(!ids['ai-status'].title.includes('plan calls'));
+   assert.ok(ids['summary-settings-open'].title.includes('cost unavailable'));
+   assert.ok(!ids['summary-settings-open'].title.includes('$0.0000 spent'));
+   assert.ok(!ids['summary-settings-open'].title.includes('plan calls'));
  }
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:true,status:'error',error:'Invented quota error',provider:'openrouter',api_calls:3,known_cost_usd:.01,actual_cost_usd:.01,unknown_cost_calls:0}})});
+ assert.equal(ids['ai-status'].textContent, 'Summaries need attention');
+ assert.ok(ids['summary-settings-open'].title.startsWith('Invented quota error · $0.0100 spent · 3 API calls'));
  // Summaries off and empty chart.
  stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:false},activity:{bucket_seconds:10,buckets:60,end:now,runs:{}}})});
  assert.equal(ids['ai-status'].textContent, 'Summaries off');

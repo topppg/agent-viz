@@ -42,12 +42,16 @@
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
     return `${Math.floor(seconds / 86400)}d`;
   };
+  // Under a minute reads "just now", so open panels don't tick while you read them.
+  const ago = (value) => time(value) !== null && serverNow() - time(value) < 60000 ? "just now" : `${age(value)} ago`;
   function showError(message) { $("error").hidden = !message; $("error").textContent = message || ""; }
-  let connection = ["Connecting…", false];
-  function setConnection(text, connected) { connection = [text, connected]; showConnection(); }
+  // Modes: "connecting" and "connected" stay quiet; only "down" asks for attention.
+  let connection = ["Connecting…", "connecting"];
+  function setConnection(text, mode) { connection = [text, mode]; showConnection(); }
   function showConnection() {
     if (state.past) { $("connection").textContent = "past · not live"; $("connection").className = "past"; return; }
-    $("connection").textContent = connection[0]; $("connection").className = connection[1] ? "connected" : "muted";
+    const [text, mode] = connection;
+    $("connection").textContent = text; $("connection").className = mode;
   }
   function accountOf(run) { return typeof run.account === "object" ? (run.account?.label || run.account?.id || "unknown") : (run.account || "unknown"); }
   function sourceOf(run) { return typeof run.source === "object" ? (run.source?.kind || run.source?.label || "unknown") : (run.source || "unknown"); }
@@ -226,7 +230,9 @@
   function renderAi() {
     const ai = state.snapshot.ai || {};
     const host = $("ai-status"); host.replaceChildren();
-    if (!ai.enabled) { host.append(node("span", "Summaries off", "muted")); host.title = "Open AI summaries to connect a provider or resume summaries"; return; }
+    // Usage stays one hover away on the button; the header only says whether summaries work.
+    const button = $("summary-settings-open");
+    if (!ai.enabled) { host.append(node("span", "Summaries off", "muted")); button.title = "Open AI summaries to connect a provider or resume summaries"; return; }
     const known = ai.known_cost_usd ?? ai.actual_cost_usd ?? 0;
     const spent = ai.unknown_cost_calls && known === 0 ? "cost unavailable" : `$${known.toFixed(4)}${ai.unknown_cost_calls ? "+ known spend" : " spent"}`;
     const usage = [];
@@ -234,9 +240,8 @@
     if (ai.subscription_calls) usage.push(`${ai.subscription_calls} ChatGPT plan calls`);
     if (!usage.length) usage.push("no provider calls yet");
     const provider = ({ codex: "ChatGPT", openrouter: "OpenRouter", anthropic: "Anthropic", openai: "OpenAI API" })[ai.provider] || "";
-    // Usage stays one hover away; the header only says whether summaries work.
-    host.append(node("span", ai.status === "error" ? "Summaries need attention" : `Summaries${provider ? ` · ${provider}` : ""}`, ai.status === "error" ? "pending" : ""));
-    host.title = ai.error || `${usage.join(" · ")} · opt-in: bounded redacted context goes only to connected providers`;
+    host.append(node("span", ai.status === "error" ? "Summaries need attention" : `Summaries${provider ? ` · ${provider}` : ""}`, ai.status === "error" ? "bad" : ""));
+    button.title = [ai.error, ...usage, "opt-in: bounded redacted context goes only to connected providers"].filter(Boolean).join(" · ");
   }
   function renderWarnings() {
     const raw = state.snapshot.source_errors || [];
@@ -274,9 +279,12 @@
       const needs = statuses.filter((s) => s.key === "needs").length;
       const parts = [[(s) => BUSY.has(s.key), "running"], [(s) => s.key === "needs", needs === 1 ? "needs you" : "need you"]]
         .map(([test, text]) => [statuses.filter(test).length, text]).filter(([n]) => n).map(([n, text]) => `${n} ${text}`);
-      const sub = parts.join(" · ") || (h.runs.length ? (h.latest ? `idle ${age(h.latest)}` : "nothing active") : "no observations yet");
-      const name = node("span", null, "who"); name.title = `${h.label} · ${sub}`; name.append(node("span", h.label, "name"), node("span", sub, "sub"));
+      // With nothing running or waiting, the idle age shows once events stop, in whole minutes so it never ticks.
+      const idleFor = h.latest && serverNow() - h.latest >= 60000 ? `idle ${age(h.latest)}` : "idle";
+      const sub = parts.join(" · ") || (!h.runs.length ? "no observations yet" : h.rate ? "" : idleFor);
+      const name = node("span", null, "who"); name.title = sub ? `${h.label} · ${sub}` : h.label; name.append(node("span", h.label, "name"), node("span", sub, "sub"));
       const rate = node("span", h.rate || "", "rate");
+      if (h.rate) rate.title = `${h.rate} events in the last minute`;
       button.append(swatch, name, rate);
       button.addEventListener("click", () => { $("harness-filter").value = $("harness-filter").value === h.key ? "" : h.key; render(); });
       return button;
@@ -284,7 +292,7 @@
     if (!list.length) host.append(node("p", "No harnesses yet. Start the demo or configure a source profile.", "empty"));
     else if (!shown.length) host.append(node("p", state.past ? "Nothing running at this moment." : "Nothing running right now.", "empty"));
     const idle = list.length - shown.length;
-    if (idle) host.append(node("p", `+ ${idle} idle, in the harness filter`, "harness-idle muted"));
+    if (idle) host.append(node("p", `+ ${idle} idle, in the harness filter`, "harness-idle"));
     if (focused) [...host.children].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
   function chartData() {
@@ -521,12 +529,13 @@
     if (run.inferred) statusCell.title = "Inferred from the transcript";
     const agent = node("span", null, "cell agent");
     const harness = harnessOf(run);
-    // The harness lives in the tooltip and the opened panel; rows carry status colour only.
-    agent.title = run.app ? `${harness.label} · ${run.app}` : harness.label;
+    // The harness lives in tooltips, the accessible name and the opened panel; rows carry status colour only.
+    const where = run.app ? `${harness.label} · ${run.app}` : harness.label;
+    agent.title = where;
     // Renaming happens in the opened session; a click on the row only opens it.
     const name = node("span", nameOf(run), "agent-name");
-    if (titleNote(run)) name.title = titleNote(run);
-    agent.append(name);
+    name.title = titleNote(run) ? `${where} · ${titleNote(run)}` : where;
+    agent.append(name, node("span", where, "sr-only"));
     if (run.local_name) {
       const mark = node("span", "✎", "renamed-mark"); mark.title = "Renamed by you in Spiritboard";
       mark.setAttribute("role", "img"); mark.setAttribute("aria-label", "renamed by you");
@@ -658,7 +667,8 @@
   function renderHiddenNote(runs, direct) {
     const note = $("hidden-note");
     // In the active view the note opens everything it hides; elsewhere it only counts.
-    note.disabled = state.view !== "active";
+    // aria-disabled rather than disabled, so the focus stays on it after the click.
+    note.setAttribute("aria-disabled", String(state.view !== "active"));
     note.title = state.view === "active" ? "Show all (e)" : "";
     const hidden = state.view === "active" ? runs.filter((r) => !inView(r)).length : 0;
     note.textContent = state.view === "all" ? `${direct.size} of ${runs.length} agents in window`
@@ -676,11 +686,13 @@
     events.forEach((event) => {
       const payload = event.payload || {};
       // Only display safe selected labels, never raw arguments, results, paths or headers.
-      const detail = payload.text || payload.summary || payload.detail || payload.reason || payload.task || payload.label || payload.name || payload.state || payload.outcome || "";
+      const named = payload.text || payload.summary || payload.detail || payload.reason || payload.task || payload.label || payload.name || "";
+      const detail = named || payload.state || payload.outcome || "";
       const key = `${event.type}\u0000${detail}`;
       const last = groups[groups.length - 1];
       if (last && last.key === key) { last.count += 1; last.stamp = event.received_at || event.occurred_at; }
-      else groups.push({ key, type: event.type, detail, count: 1, stamp: event.received_at || event.occurred_at, late: event.applied === false });
+      // A bare state or outcome, or no detail at all, needs the event type to make sense.
+      else groups.push({ key, type: event.type, detail, plain: !named, count: 1, stamp: event.received_at || event.occurred_at, late: event.applied === false });
     });
     return groups;
   }
@@ -723,18 +735,18 @@
     fact("", swatch, harness.label);
     if (run.app) fact("in", run.app);
     if (run.project) fact("project", run.project);
-    if (terminal.has(run.state) || status.key === "closed") fact("ran for", age(run.started_at, time(run.ended_at) || serverNow()));
-    else fact("started", `${age(run.started_at)} ago`);
+    if (run.started_at && (terminal.has(run.state) || status.key === "closed")) fact("ran for", age(run.started_at, time(run.ended_at) || serverNow()));
+    else if (run.started_at) fact("started", ago(run.started_at));
     const seen = node("span", seenText(run.last_seen)); seen.dataset.seen = run.last_seen || "";
     fact("last seen", seen);
     main.append(head, meta);
     // One status line under the title: what state it is in and where to act.
     const line = (cls, glyph, text, where) => { const p = node("p", null, `state-line ${cls}`); p.append(node("span", glyph, "glyph"), ` ${text}`); if (where) p.append(node("span", ` · ${where}`, "where")); main.append(p); };
     if (status.key === "rest") line("g-rest", "☾", "At rest · you checked this turn", "back when the agent acts again");
-    else if (status.turn) line("g-needs", "◐", `Your turn · finished ${age(run.last_seen)} ago`);
-    else if (run.archived) line("g-closed", "■", `Archived in ${run.app || "its app"} · last active ${age(run.last_seen)} ago`);
-    else if (status.key === "closed") line("g-closed", "■", `Closed ${age(run.last_seen)} ago`, "no running process owns this session");
-    else if (status.key === "needs") line("g-needs", "◐", `Needs you · waiting ${age(run.last_seen)}`, parent ? `answer in “${nameOf(parent)}”` : "");
+    else if (status.turn) line("g-needs", "◐", `Your turn · finished ${ago(run.last_seen)}`);
+    else if (run.archived) line("g-closed", "■", `Archived in ${run.app || "its app"} · last active ${ago(run.last_seen)}`);
+    else if (status.key === "closed") line("g-closed", "■", `Closed ${ago(run.last_seen)}`, "no running process owns this session");
+    else if (status.key === "needs") line("g-needs", "◐", `Needs you · asked ${ago(run.last_seen)}`, parent ? `answer in “${nameOf(parent)}”` : "");
     else if (status.key !== "running") line(`g-${status.key}`, status.glyph, status.text[0].toUpperCase() + status.text.slice(1));
     // A subagent's goal is the task its parent gave it, unless a summary exists.
     const goal = run.ai_summary?.text || (run.parent_run_id ? run.task : "");
@@ -842,9 +854,11 @@
     const timeline = node("ol", null, "timeline"); timeline.id = "timeline";
     compressEvents(state.events).reverse().forEach((group) => {
       const item = node("li"); const stamp = time(group.stamp);
-      item.title = `${label(group.type || "event")} · ${stamp ? new Date(stamp).toLocaleTimeString() : "unknown time"}`;
-      item.append(node("span", stamp ? `${age(stamp)} ago` : "", "t"),
-        node("span", `${group.detail}${group.count > 1 ? ` ×${group.count}` : ""}${group.late ? " · late, not applied" : ""}`));
+      const type = label(group.type || "event");
+      item.title = `${type} · ${stamp ? new Date(stamp).toLocaleTimeString() : "unknown time"}`;
+      const text = group.plain ? [type.replaceAll(".", " "), group.detail].filter(Boolean).join(" · ") : group.detail;
+      item.append(node("span", stamp ? ago(stamp) : "", "t"),
+        node("span", `${text}${group.count > 1 ? ` ×${group.count}` : ""}${group.late ? " · late, not applied" : ""}`));
       timeline.append(item);
     });
     box.append(timeline);
@@ -896,8 +910,8 @@
       const response = await fetch("/api/snapshot", { cache: "no-store" });
       if (!response.ok) throw new Error(`Snapshot unavailable (HTTP ${response.status}).`);
       applySnapshot(await response.json());
-      if (!state.live) setConnection("snapshot loaded · reconnecting live stream", false);
-    } catch (error) { showError(error.message || "Cannot reach the local collector."); setConnection("disconnected · retrying", false); }
+      if (!state.live) setConnection("snapshot loaded · reconnecting live stream", "connecting");
+    } catch (error) { showError(error.message || "Cannot reach the local collector."); setConnection("disconnected · retrying", "down"); }
     finally { state.fetching = false; $("refresh").disabled = false; }
   }
   function setView(view) { state.view = view; renderViews(); if (state.snapshot) renderTable(); }
@@ -965,7 +979,7 @@
   $("window-filter").addEventListener("change", () => { if (state.snapshot) renderTable(); });
   $("search").addEventListener("input", () => { if (state.snapshot) renderTable(); });
   $("refresh").addEventListener("click", refresh);
-  $("hidden-note").addEventListener("click", () => setView("all"));
+  $("hidden-note").addEventListener("click", () => { if (state.view === "active") setView("all"); });
   // On narrow screens the header actions and the shortcut list fold behind a button each.
   const fold = (button, host, open) => { button.setAttribute("aria-expanded", String(open)); host.classList.toggle("open", open); };
   const foldMenu = (open) => fold($("more"), $("top-actions"), open);
@@ -991,10 +1005,10 @@
   renderViews();
   refresh();
   const stream = new EventSource("/api/events?after=0");
-  stream.onopen = () => { state.live = true; setConnection("live", true); };
-  stream.onerror = () => { state.live = false; setConnection("live stream disconnected · retrying", false); };
+  stream.onopen = () => { state.live = true; setConnection("live", "connected"); };
+  stream.onerror = () => { state.live = false; setConnection("live stream disconnected · retrying", "down"); };
   ["snapshot", "reset"].forEach((name) => stream.addEventListener(name, (event) => {
-    try { applySnapshot(JSON.parse(event.data), name === "reset"); state.live = true; setConnection(name === "reset" ? "live · history reset" : "live", true); }
+    try { applySnapshot(JSON.parse(event.data), name === "reset"); state.live = true; setConnection(name === "reset" ? "live · history reset" : "live", "connected"); }
     catch (_) { showError("Received an invalid update. Refresh to recover."); }
   }));
   setInterval(() => { if (!state.live || Date.now() - state.lastSnapshotAt > 5000) refresh(); }, 2000);
