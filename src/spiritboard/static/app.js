@@ -3,8 +3,9 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const terminal = new Set(["completed", "failed", "cancelled"]);
-  // Validated for the dark surface; amber, green and red stay reserved for statuses.
-  const PALETTE = ["#8b77c4", "#009b9c", "#bd7042", "#5488ca", "#b76896", "#2092be"];
+  // Any two differ by OKLab ΔE ≥ 15, and by ≥ 8 with simulated red-green colour blindness; each reaches 3:1
+  // on every surface and stays ≥ 15 from the status colours. Bars draw them at full opacity. Re-check any edit.
+  const PALETTE = ["#2795d8", "#93551e", "#018676", "#b36ca8", "#4460a2", "#85a149"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   // A turn left unanswered in a still-open session stays yours this long.
   const OPEN_TURN_WINDOW = 12 * 3600 * 1000;
