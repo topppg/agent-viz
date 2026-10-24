@@ -17,14 +17,14 @@ server there or shows other data instead. **File › Use Default Data Folder** r
 
 The app opens dashboard dropdowns as a compact Mac-style menu instead of WebKit's legacy popup.
 It brings this menu itself (`src/app/select-menu.js`), so it also works with an older dashboard.
-Harnesses stay in rows and the event graph grows smoothly as the Mac window gets taller.
+Everything else uses the dashboard's own layout, so the window looks like the browser at every size.
 
 ## Updates
 
 The app bundles the dashboard code in this checkout when `src/app/build.sh` runs. Rebuild the app
 after changing the web dashboard to include those changes in its own server. If a dashboard is
 already running for the selected data folder, the app connects to it and shows that server's web
-UI; restart that server to load its updated code. Mac-specific controls and layout are bundled
+UI; restart that server to load its updated code. Mac-specific controls are bundled
 with the app, so changes to them always need an app rebuild.
 
 ## Build

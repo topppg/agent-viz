@@ -245,7 +245,7 @@ says so.
 
 ## Optional goal summaries
 
-Open **AI summaries** in the dashboard. Read the excerpt-sharing notice, choose
+Open **Summaries** in the dashboard header. Read the excerpt-sharing notice, choose
 a provider, then sign in or add a key. OpenRouter supports sign-in or an API key;
 Anthropic and OpenAI support API keys. **Continue with ChatGPT** uses an eligible
 Plus or Pro account; Enterprise workspaces are not supported by that sign-in route.
@@ -262,7 +262,7 @@ Anthropic API. If needed, another explicitly connected provider can be tried.
 Pause summaries or disconnect at any time.
 
 API-key connections use separate API billing; ChatGPT sign-in uses your plan
-allowance and its limits. The header separates known API charges, API calls
+allowance and its limits. The **Summaries** tooltip separates known API charges, API calls
 with unknown cost, and ChatGPT plan calls rather than treating usage as free.
 Excerpts are redacted on a best-effort basis,
 not guaranteed safe for confidential work. Read the [summary guide](https://github.com/topppg/spiritboard/blob/main/docs/SUMMARIES.md).

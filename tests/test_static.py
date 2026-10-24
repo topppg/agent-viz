@@ -105,7 +105,7 @@ class Element {
 }
 function flatten(el) { return el.children.filter(c => typeof c !== 'string').flatMap(c => [c, ...flatten(c)]); }
 const ids = Object.fromEntries(['connection','refresh','demo-banner','error','source-errors','counts','ai-status','harnesses','flux','overview','views','harness-filter','window-filter','window-label','search','hidden-note','runs','past-bar','zoom','flux-window','flux-note','axis','more','top-actions','keys-toggle','keys'].map(id => [id, new Element(id.endsWith('filter') ? 'select' : 'div')]));
-const headers = Object.fromEntries(['harness','status','agent','doing','rate','seen'].map(key => { const button = new Element('button'); button.dataset.sort = key; button.textContent = key; return [key, button]; }));
+const headers = Object.fromEntries(['status','agent','doing','rate','seen'].map(key => { const button = new Element('button'); button.dataset.sort = key; button.textContent = key; return [key, button]; }));
 ids['window-filter'].value = '604800000';
 ['active','waiting','all'].forEach(v => { const b = new Element('button'); b.dataset.view = v; ids.views.children.push(b); });
 ['600','3600'].forEach(v => { const b = new Element('button'); b.dataset.zoom = v; ids.zoom.children.push(b); });
@@ -160,11 +160,17 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.equal(ids['demo-banner'].hidden,false);
  // Active view: finished and long-quiet runs are hidden; needs-you sorts first.
  assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask','child','orphan','sdk-run']);
- assert.ok(ids['hidden-note'].textContent.includes('1 finished · 1 older hidden'));
+ assert.equal(ids['hidden-note'].textContent, '2 finished or older · show all');
+ // The note opens everything it hides; elsewhere it only counts.
+ ids['hidden-note'].listeners.click();
+ assert.equal(ids.views.children[2].attrs['aria-pressed'], 'true');
+ assert.equal(ids['hidden-note'].disabled, true);
+ ids.views.children[0].listeners.click();
+ assert.equal(ids['hidden-note'].disabled, false);
  assert.ok(ids.runs.textContent.includes('<img src=x onerror=alert(1)>'));
  assert.ok(!flatten(ids.runs).some(x => x.tagName === 'img'));
  assert.ok(ids.runs.textContent.includes('parent not yet available'));
- assert.ok(ids.runs.textContent.includes('├─ '));
+ assert.equal(rows().find(r => r.dataset.runId === 'child').style['--depth'], '1');
  const asker = rows().find(r => r.dataset.runId === 'ask');
  assert.ok(asker.textContent.includes('needs you') && !asker.textContent.includes('~'));
  assert.equal(flatten(asker).find(x => (x.className || '').includes('status')).title, 'Inferred from the transcript');
@@ -172,18 +178,22 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(asker.textContent.includes('Tuning retry limits') && !asker.textContent.includes('✦'));
  assert.ok(flatten(asker).some(x => (x.className || '').includes('doing needs')));
  assert.ok(rows().find(r => r.dataset.runId === 'root').textContent.includes('40'));
- // Harnesses: only those with something running; idle ones are counted, the dominant one flagged noisy.
+ // A zero rate is left blank.
+ assert.equal(flatten(asker).find(x => x.className === 'rate-cell').children.length, 0);
+ // Harnesses: only those with something running; idle ones are counted, and no rate is flagged.
  const harnessButtons = ids.harnesses.children.filter(x => x.tagName === 'button');
  assert.equal(harnessButtons.length, 3);
  assert.ok(!ids.harnesses.textContent.includes('Empty profile'));
  // Labels that already name the tool are not prefixed with its kind.
  assert.ok([...ids['harness-filter'].children].some(o => o.textContent === 'Grok Bot'));
  assert.ok(![...ids['harness-filter'].children].some(o => /grokbot ·|dsh ·/.test(o.textContent)));
- assert.ok(ids.harnesses.textContent.includes('3 idle harnesses · pick one in the harness filter'));
- assert.ok(harnessButtons.find(b => b.textContent.includes('Codex · work')).textContent.includes('▲ noisy'));
+ assert.ok(ids.harnesses.textContent.includes('+ 3 idle, in the harness filter'));
+ assert.ok(!ids.harnesses.textContent.includes('noisy'));
  assert.ok(ids.flux.children.some(x => x.className === 'col'));
  assert.ok(ids.flux.attrs['aria-label'].includes('Codex · work'));
- assert.ok(ids['ai-status'].textContent.includes('$0.0021 spent · 2 API calls'));
+ // Spend stays in the tooltip; the header only says summaries are on.
+ assert.equal(ids['ai-status'].textContent, 'Summaries');
+ assert.ok(ids['ai-status'].title.includes('$0.0021 spent · 2 API calls'));
  assert.ok(ids.counts.textContent.includes('1 needs you'));
  // Status and agent columns resize by drag or arrow keys, clamped and remembered; double-click resets.
  assert.equal(columnTable.style['--agent-w'], '300px');
@@ -220,9 +230,6 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.equal(headers.doing.attrs['aria-pressed'], 'true');
  headers.status.listeners.click();
  assert.deepEqual(rows().map(r => r.dataset.runId), ['root','ask','child','orphan','sdk-run']);
- headers.harness.listeners.click();
- assert.equal(rows()[0].dataset.runId, 'orphan');
- headers.status.listeners.click();
  headers.status.listeners.click();
  headers.status.listeners.click();
  assert.equal(headers.status.attrs['aria-pressed'], 'false');
@@ -291,7 +298,8 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(detail().textContent.includes('Original task'));
  assert.ok(!detail().textContent.includes('you asked'));
  rows().find(r => r.dataset.runId === 'ask').listeners.click(); await tick();
- assert.ok(detail().textContent.includes('waiting on you'));
+ assert.ok(detail().textContent.includes('Needs you · waiting'));
+ assert.ok(detail().textContent.includes('answer in “Root”'));
  assert.ok(detail().textContent.includes('Tuning retry limits'));
  // A stopped session offers a resume command to copy, never to run.
  assert.equal(control('open-app'), undefined);
@@ -369,16 +377,16 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const turnRow = rows().find(r => r.dataset.runId === 'turn');
  assert.ok(turnRow.textContent.includes('◐ your turn'));
  assert.ok(turnRow.textContent.includes('Original task'));
- assert.ok(ids.counts.textContent.includes('3 needs you'));
+ assert.ok(ids.counts.textContent.includes('3 need you'));
  turnRow.listeners.click(); await tick();
- assert.ok(detail().textContent.includes('waiting for your next direction'));
+ assert.ok(detail().textContent.includes('Your turn · finished'));
  // Letting a turn rest calms it until the agent acts again.
  assert.equal(control('rest').textContent, '☾ let it rest');
  control('rest').listeners.click(); await tick();
  assert.ok(rows().find(r => r.dataset.runId === 'turn').textContent.includes('☾ at rest'));
  assert.ok(detail().textContent.includes('you checked this turn'));
  assert.equal(control('rest').textContent, '◐ back to your turn');
- assert.ok(ids.counts.textContent.includes('2 needs you') && ids.counts.textContent.includes('1 at rest'));
+ assert.ok(ids.counts.textContent.includes('2 need you') && ids.counts.textContent.includes('1 at rest'));
  docListeners.keydown({key:'w', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
  assert.ok(!rows().some(r => r.dataset.runId === 'turn'));
  docListeners.keydown({key:'a', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
@@ -400,14 +408,15 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(rows().find(r => r.dataset.runId === 'pending').textContent.includes('◐ your turn'));
  const goneRow = rows().find(r => r.dataset.runId === 'gone');
  assert.ok(goneRow.textContent.includes('■ closed'));
- assert.ok(goneRow.textContent.includes('last said: Wrapped up the release'));
- assert.ok(ids.counts.textContent.includes('2 needs you'));
+ assert.ok(goneRow.textContent.includes('Wrapped up the release') && !goneRow.textContent.includes('last said'));
+ assert.ok(ids.counts.textContent.includes('2 need you'));
  // An open idle session is counted as idle, never as running.
  const runningBefore = Number(/(\d+) running/.exec(ids.counts.textContent)[1]);
  assert.ok(ids.counts.textContent.includes('2 idle'));
  stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, pending]})}); await tick();
  assert.equal(Number(/(\d+) running/.exec(ids.counts.textContent)[1]), runningBefore);
- assert.ok(ids.counts.textContent.includes('0 idle'));
+ // A count of zero is left out.
+ assert.ok(!ids.counts.textContent.includes('idle'));
  stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, pending]})}); await tick();
  // Open idle sessions gather under one folded line; its settled subagents fold until it is opened.
  const group = () => flatten(ids.runs).find(x => x.className === 'group-row');
@@ -521,8 +530,8 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  rows().find(r => r.dataset.runId === 'evolved').listeners.click(); await tick();
  assert.ok(flatten(detail()).some(x => x.className === 'was' && x.textContent === 'was: Tune retry limits'));
  rows().find(r => r.dataset.runId === 'evolved').listeners.click(); await tick();
- assert.ok(flatten(deskRow).some(x => x.className === 'note' && x.textContent === 'Claude desktop'));
- assert.equal(flatten(deskRow).find(x => (x.className || '').includes('harness-cell')).title, 'Claude · personal · Claude desktop');
+ assert.ok(flatten(deskRow).some(x => x.className === 'note app-note' && x.textContent === 'Claude desktop'));
+ assert.equal(flatten(deskRow).find(x => x.className === 'cell agent').title, 'Claude · personal · Claude desktop');
  assert.equal(rows().find(r => r.dataset.runId === 'shelved'), undefined);
  assert.ok(ids.counts.textContent.includes('1 needs you'));
  deskRow.listeners.click(); await tick();
@@ -534,7 +543,7 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const shelvedRow = rows().find(r => r.dataset.runId === 'shelved');
  assert.ok(shelvedRow.textContent.includes('■ archived'));
  shelvedRow.listeners.click(); await tick();
- assert.ok(detail().textContent.includes('archived in Claude desktop'));
+ assert.ok(detail().textContent.includes('Archived in Claude desktop'));
  ids.views.children[0].listeners.click();
  // Zoom asks the server for a wider window; the chart keeps its place.
  ids.zoom.children[1].listeners.click(); await tick();
@@ -685,13 +694,13 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  for (const provider of ['openai', 'anthropic']) {
    stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:true,status:'ready',provider,api_calls:1,subscription_calls:0,known_cost_usd:0,actual_cost_usd:null,unknown_cost_calls:1}})});
    assert.ok(ids['ai-status'].textContent.includes(provider === 'openai' ? 'OpenAI API' : 'Anthropic'));
-   assert.ok(ids['ai-status'].textContent.includes('cost unavailable'));
-   assert.ok(!ids['ai-status'].textContent.includes('$0.0000 spent'));
-   assert.ok(!ids['ai-status'].textContent.includes('plan calls'));
+   assert.ok(ids['ai-status'].title.includes('cost unavailable'));
+   assert.ok(!ids['ai-status'].title.includes('$0.0000 spent'));
+   assert.ok(!ids['ai-status'].title.includes('plan calls'));
  }
  // Summaries off and empty chart.
  stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:false},activity:{bucket_seconds:10,buckets:60,end:now,runs:{}}})});
- assert.ok(ids['ai-status'].textContent.includes('summaries off'));
+ assert.equal(ids['ai-status'].textContent, 'Summaries off');
  assert.ok(ids.flux.textContent.includes('No events in the last 10 minutes'));
 })().catch(error => { console.error(error);process.exitCode=1; });
 """

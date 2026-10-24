@@ -14,13 +14,12 @@
 </head>
 <body>
   <header class="top">
-    <div class="brand"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="3.6" r="1.6"/><circle class="wait" cx="18.57" cy="6.76" r="1.6"/><circle class="idle" cx="20.19" cy="13.87" r="1.45"/><circle class="idle" cx="15.64" cy="19.57" r="1.45"/><circle class="idle" cx="8.36" cy="19.57" r="1.45"/><circle class="idle" cx="3.81" cy="13.87" r="1.45"/><circle cx="5.43" cy="6.76" r="1.6"/><circle class="lens" cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="1.3"/></svg><span class="logo">spiritboard</span><span class="muted">your agents. one board.</span><span class="cursor" aria-hidden="true">▌</span></div>
+    <div class="brand"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="3.6" r="1.6"/><circle class="wait" cx="18.57" cy="6.76" r="1.6"/><circle class="idle" cx="20.19" cy="13.87" r="1.45"/><circle class="idle" cx="15.64" cy="19.57" r="1.45"/><circle class="idle" cx="8.36" cy="19.57" r="1.45"/><circle class="idle" cx="3.81" cy="13.87" r="1.45"/><circle cx="5.43" cy="6.76" r="1.6"/><circle class="lens" cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="1.3"/></svg><span class="logo">spiritboard</span></div>
     <div id="counts" class="counts" aria-label="Agent counts"></div>
     <span id="connection" role="status">Connecting…</span>
     <button id="more" type="button" aria-label="More actions" aria-expanded="false" aria-controls="top-actions">⋯</button>
     <div id="top-actions" class="top-actions">
-      <span id="ai-status" class="ai-status"></span>
-      <button id="summary-settings-open" type="button" aria-haspopup="dialog">AI summaries</button>
+      <button id="summary-settings-open" type="button" aria-haspopup="dialog"><span id="ai-status" class="ai-status">Summaries</span></button>
       <button id="refresh" type="button">Refresh</button>
     </div>
   </header>
@@ -31,11 +30,11 @@
 
     <section id="overview" class="overview" aria-label="Harness overview">
       <div class="harness-panel">
-        <h2>HARNESSES · events per minute</h2>
+        <h2>Harnesses</h2>
         <div id="harnesses"></div>
       </div>
       <div class="flux-panel">
-        <div class="panel-head"><h2>EVENT RATE · <span id="flux-window">last 10 min</span> · stacked by harness</h2><span class="head-tools"><span id="flux-note" class="muted">height = events/min · dots = latest events</span><span id="zoom" class="zoom" role="group" aria-label="Chart window"><button type="button" data-zoom="600" aria-pressed="true">10m</button><button type="button" data-zoom="3600">1h</button><button type="button" data-zoom="86400">24h</button><button type="button" data-zoom="604800">7d</button><button type="button" data-zoom="2592000">30d</button></span></span></div>
+        <div class="panel-head"><h2>Events · <span id="flux-window">last 10 min</span></h2><span class="head-tools"><span id="flux-note" class="muted">events/min</span><span id="zoom" class="zoom" role="group" aria-label="Chart window"><button type="button" data-zoom="600" aria-pressed="true">10m</button><button type="button" data-zoom="3600">1h</button><button type="button" data-zoom="86400">24h</button><button type="button" data-zoom="604800">7d</button><button type="button" data-zoom="2592000">30d</button></span></span></div>
         <div id="flux" class="flux" role="img" aria-label="Event rate chart" title="Click a bar to view the board at that moment"></div>
         <div id="axis" class="axis"><span>-10m</span><span>-5m</span><span class="now">now</span></div>
       </div>
@@ -50,15 +49,14 @@
           <button type="button" data-view="all">all</button>
         </div>
         <label id="window-label" hidden><span class="label-text">Window</span> <select id="window-filter"><option value="3600000">1h</option><option value="86400000">24h</option><option value="604800000" selected>7d</option><option value="">everything kept</option></select></label>
-        <label><span class="label-text">Harness</span> <select id="harness-filter"><option value="">all harnesses</option></select></label>
-        <label class="find">/ <input id="search" type="search" placeholder="find agent, task, activity" autocomplete="off"></label>
-        <span id="hidden-note" class="muted"></span>
+        <label><span class="label-text sr-only">Harness</span> <select id="harness-filter"><option value="">all harnesses</option></select></label>
+        <label class="find"><input id="search" type="search" placeholder="Find agent, task or activity" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
+        <button id="hidden-note" class="link" type="button"></button>
       </div>
       <p id="past-bar" class="past-bar" role="status" hidden></p>
       <div class="table-wrap">
         <div class="table">
           <div class="row head" role="group" aria-label="Sort agents">
-            <span><button type="button" data-sort="harness">HARNESS</button></span>
             <span class="resizable"><button type="button" data-sort="status">STATUS</button><span class="resize" data-resize="status" role="separator" aria-orientation="vertical" aria-label="Resize status column" tabindex="0" title="Drag to resize · double-click to reset"></span></span>
             <span class="resizable"><button type="button" data-sort="agent">AGENT</button><span class="resize" data-resize="agent" role="separator" aria-orientation="vertical" aria-label="Resize agent column" tabindex="0" title="Drag to resize · double-click to reset"></span></span>
             <span><button type="button" data-sort="doing">WORKING ON</button></span>
@@ -75,7 +73,7 @@
     <button id="keys-toggle" type="button" aria-expanded="false"><kbd>?</kbd>Shortcuts</button>
     <span><kbd>/</kbd>Find</span><span><kbd>j k</kbd>Move</span><span><kbd>⏎</kbd>Open</span><span><kbd>Esc</kbd>Close</span>
     <span><kbd>a</kbd>Active</span><span><kbd>w</kbd>Needs you</span><span><kbd>e</kbd>All</span><span><kbd>v</kbd>Chart</span><span><kbd>L</kbd>Live</span><span><kbd>r</kbd>Rest</span><span><kbd>s</kbd>Subagents</span>
-    <span class="legend">› raw activity · quiet ≠ failed · observer only</span>
+    <span class="legend">quiet ≠ failed · observer only</span>
   </footer>
 </body>
 </html>

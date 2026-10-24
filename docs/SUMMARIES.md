@@ -7,7 +7,7 @@ dashboard keeps the original status evidence next to them.
 
 ## Connect from the dashboard
 
-Open **AI summaries**, read the sharing notice, and check the consent box before
+Open **Summaries** in the header, read the sharing notice, and check the consent box before
 connecting a provider. Choose a service from **Provider**, then sign in or add
 its API key. Connecting enables summaries and makes that service the first choice.
 
@@ -156,10 +156,10 @@ Spiritboard never executes provider output or changes the original task or statu
 
 There is no spend or call cap. Each OpenRouter request's actual charge is read from
 OpenRouter's `usage.cost` field and recorded; a timeout or missing cost is counted
-as unknown rather than zero. The header shows total known spend and the number
-of API calls. Direct OpenAI and Anthropic responses report token usage, not a
+as unknown rather than zero. The tooltip of the header's **Summaries** button shows
+total known spend and the number of API calls. Direct OpenAI and Anthropic responses report token usage, not a
 final billed dollar charge; those calls count as unknown cost, never as free or
-as an estimated "actual" charge. When no charge is known, the header says
+as an estimated "actual" charge. When no charge is known, the tooltip says
 **cost unavailable**. ChatGPT requests are reported separately as plan calls: they use
 your account allowance, and no dollar charge is invented. A total dollar cost
 is unknown if any API attempt has no receipt or any plan call is present.

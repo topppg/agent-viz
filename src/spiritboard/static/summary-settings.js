@@ -199,6 +199,7 @@
       nodes.use.hidden = value.connected !== true;
       nodes.use.textContent = settings.preferred_provider === name ? 'Preferred for summaries' : 'Use for summaries';
       nodes.use.disabled = !canConnect(name) || settings.preferred_provider === name;
+      nodes.use.dataset.preferred = String(settings.preferred_provider === name);
       nodes.revocation.hidden = demo || name !== 'codex' || value.revocation_unconfirmed !== true;
       nodes.disconnect.hidden = !value.connected && !value.pending && !value.error;
       nodes.disconnect.textContent = value.pending ? 'Cancel sign-in' : 'Disconnect';
