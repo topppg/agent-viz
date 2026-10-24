@@ -12,7 +12,7 @@
   const REST_KEY = "spiritboard.rested";
   const WIDTH_KEY = "spiritboard.columns";
   const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
-  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested(), editing: null, draft: "", folds: new Map() };
+  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), split: 0, colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested(), editing: null, draft: "", folds: new Map() };
   // Chart windows in seconds: heading, then the left and middle axis labels.
   const ZOOMS = { 600: ["last 10 minutes", "-10m", "-5m"], 3600: ["last hour", "-1h", "-30m"], 86400: ["last 24 hours", "-24h", "-12h"],
     604800: ["last 7 days", "-7d", "-3.5d"], 2592000: ["last 30 days", "-30d", "-15d"] };
@@ -199,7 +199,7 @@
     // The chart always shows the live journal; colours follow its harnesses.
     const current = harnesses(state.latest.runs);
     const list = state.past ? harnesses(state.snapshot.runs, false) : current;
-    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list); renderFlux(current); renderPast();
+    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list, renderFlux(current)); renderPast();
     // Rebuild the table only when something visible changed, so clicks and focus survive live ticks.
     if (tableKey() !== state.tableKey) renderTable(); else updateSeen();
   }
@@ -256,14 +256,14 @@
       if ([...select.options].some((o) => o.value === current)) select.value = current;
     }
   }
-  function renderHarnesses(list) {
+  function renderHarnesses(list, drawn) {
     const total = list.reduce((sum, h) => sum + h.rate, 0);
     const busiest = Math.max(0, ...list.map((h) => h.rate));
     const active = list.filter((h) => h.rate > 0).length;
     const focused = document.activeElement?.dataset?.focusKey;
     const host = $("harnesses");
-    // Only harnesses with something running (or the one filtered on); idle ones stay in the filter.
-    const running = (h) => h.rate > 0 || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs" || s.key === "idle");
+    // Harnesses with something running or drawn in the chart (or the one filtered on); idle ones stay in the filter.
+    const running = (h) => h.rate > 0 || drawn.has(h.key) || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs" || s.key === "idle");
     const shown = list.filter((h) => running(h) || $("harness-filter").value === h.key);
     host.replaceChildren(...shown.map((h) => {
       const button = node("button", null, `harness${$("harness-filter").value === h.key ? " is-selected" : ""}`);
@@ -358,9 +358,11 @@
       h.runs.forEach((run) => (data.runs?.[run.run_id] || []).forEach((v, i) => { series[i] += v; }));
       return { key: h.key, label: h.label, series };
     }).filter((h) => h.series.some(Boolean));
+    // The harnesses drawn here, so the list can show each of them.
+    const drawn = new Set(byHarness.map((h) => h.key));
     const totals = new Array(count).fill(0).map((_, i) => byHarness.reduce((sum, h) => sum + h.series[i], 0));
     const peak = Math.max(...totals);
-    if (!peak) { host.append(node("span", `No events in the ${windowText}`, "empty")); host.setAttribute("aria-label", `No events in the ${windowText}`); return; }
+    if (!peak) { host.append(node("span", `No events in the ${windowText}`, "empty")); host.setAttribute("aria-label", `No events in the ${windowText}`); return drawn; }
     // Percent heights let the same bars fill the full chart or the compact sparkline.
     const unit = 100 / Math.max(peak, 3);
     totals.forEach((_, i) => {
@@ -399,6 +401,7 @@
     const recent = Math.max(1, Math.round(scale));
     const busiest = byHarness.map((h) => [h.label, h.series.slice(-recent).reduce((a, b) => a + b, 0)]).sort((a, b) => b[1] - a[1])[0];
     host.setAttribute("aria-label", `Events over the ${windowText}, stacked by harness. Busiest in the latest ${bucket <= 60 ? "minute" : span(bucket)}: ${busiest[0]} with ${busiest[1]}.`);
+    return drawn;
   }
 
   function workRank(run) {
@@ -456,7 +459,7 @@
     const live = (a, b) => rank(a).rank - rank(b).rank || rank(b).seen - rank(a).seen || a.run_id.localeCompare(b.run_id);
     // While a run is open, keep the order from before it opened so rows don't jump; unseen runs go after.
     const frozen = (run) => state.frozen.get(run.run_id) ?? Infinity;
-    // Column sorts order within tiers: busy or needing you, then open or resting, then history.
+    // Column sorts order within tiers: busy or needing you, then at rest, then history; open idle sessions follow.
     const tier = (run) => { const r = rank(run).rank; return r < 3 ? 0 : r === 3 ? 1 : 2; };
     const sorted = (a, b) => {
       if (state.sort !== "status" && tier(a) !== tier(b)) return tier(a) - tier(b);
@@ -475,8 +478,10 @@
     const revealed = new Set();
     const openPath = new Set();
     for (let r = byId.get(byId.get(state.selected)?.parent_run_id); r && !openPath.has(r.run_id); r = byId.get(r.parent_run_id)) openPath.add(r.run_id);
+    let cap = MAX_ROWS, cut = false;
     const renderRun = (run, prefix, pad, orphan) => {
-      if (visited.has(run.run_id) || !visible.has(run.run_id) || state.order.length >= MAX_ROWS) return;
+      if (visited.has(run.run_id) || !visible.has(run.run_id)) return;
+      if (state.order.length >= cap) { cut = true; return; }
       visited.add(run.run_id);
       state.order.push(run.run_id);
       const all = children.get(run.run_id) || [];
@@ -498,17 +503,21 @@
     };
     const roots = runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare);
     const renderRoot = (r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id));
-    // Open idle sessions gather under one line, folded unless one of them is opened.
-    const resting = roots.filter((r) => visible.has(r.run_id) && statusOf(r).key === "idle" && r.live === true);
-    const groupFolded = (state.folds.get(OPEN_IDLE) ?? true) && !resting.some((r) => r.run_id === state.selected || openPath.has(r.run_id));
-    roots.forEach((r) => {
-      if (!resting.includes(r)) { renderRoot(r); return; }
-      if (r !== resting[0]) return;
-      host.append(groupRow(resting.length, groupFolded));
-      if (!groupFolded) resting.forEach(renderRoot);
-    });
-    if (!state.selected) state.frozen = new Map(state.order.map((id, i) => [id, i]));
-    if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
+    // Open idle sessions with nothing busy below them gather under one line at the bottom, folded unless one is opened.
+    // While a row is open, sessions listed above that line stay there, so the open row never jumps.
+    const openIdle = roots.filter((r) => visible.has(r.run_id) && statusOf(r).key === "idle" && r.live === true
+      && rank(r).rank >= 3 && !(state.selected && frozen(r) < state.split));
+    const groupFolded = (state.folds.get(OPEN_IDLE) ?? true) && !openIdle.some((r) => r.run_id === state.selected || openPath.has(r.run_id));
+    roots.filter((r) => !openIdle.includes(r)).forEach(renderRoot);
+    const split = state.order.length;
+    if (cut) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
+    if (openIdle.length) {
+      // The group has its own row budget, so a long history never hides it.
+      cap = split + MAX_ROWS;
+      host.append(groupRow(openIdle.length, groupFolded));
+      if (!groupFolded) openIdle.forEach(renderRoot);
+    }
+    if (!state.selected) { state.frozen = new Map(state.order.map((id, i) => [id, i])); state.split = split; }
     if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
   function groupRow(count, folded) {

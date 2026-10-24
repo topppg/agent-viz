@@ -1,5 +1,6 @@
 """Dependency-free browser asset checks; optional Node exercises DOM behavior."""
 
+import re
 import shutil
 import subprocess
 import unittest
@@ -74,6 +75,14 @@ class StaticTests(unittest.TestCase):
             "eval(",
         ):
             self.assertNotIn(forbidden, script)
+
+    def test_rename_button_is_wide_enough_for_the_whole_title(self):
+        # The button shifts left by its negative margin; without that much extra width
+        # the session title in the opened panel always ends in an ellipsis.
+        css = (STATIC / "style.css").read_text()
+        rule = re.search(r"\.agent-name\.rename \{([^}]*)\}", css).group(1)
+        shift = re.search(r"margin-left: -(\d+)px", rule).group(1)
+        self.assertIn(f"max-width: calc(100% + {shift}px)", rule)
 
     @unittest.skipUnless(shutil.which("node"), "Node is optional; browser syntax/DOM check skipped")
     def test_browser_renders_table_harnesses_and_private_text_safely(self):
@@ -404,6 +413,25 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  const group = () => flatten(ids.runs).find(x => x.className === 'group-row');
  assert.equal(rows().find(r => r.dataset.runId === 'open'), undefined);
  assert.equal(group().textContent, '▸ 1 open · idle');
+ // The group stays at the bottom, below recently closed sessions, also while one of them is open.
+ assert.equal(ids.runs.children.at(-1), group());
+ rows().find(r => r.dataset.runId === 'gone').listeners.click(); await tick();
+ assert.equal(ids.runs.children.at(-1), group());
+ rows().find(r => r.dataset.runId === 'gone').listeners.click(); await tick();
+ // A session that turns open · idle while it is open keeps its place until it closes.
+ rows().find(r => r.dataset.runId === 'pending').listeners.click(); await tick();
+ const pendingAt = rows().findIndex(r => r.dataset.runId === 'pending');
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, {...pending, last_seen:hours}]})}); await tick();
+ assert.equal(rows().findIndex(r => r.dataset.runId === 'pending'), pendingAt);
+ assert.ok(rows()[pendingAt].textContent.includes('open · idle'));
+ docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.equal(group().textContent, '▸ 2 open · idle');
+ // An open idle session whose subagent needs you stays in the list instead of folding away.
+ const asking = run('asking', 'open', 'Asking', {state:'waiting_user'});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, asking, pending]})}); await tick();
+ assert.ok(rows().some(r => r.dataset.runId === 'asking'));
+ assert.equal(group(), undefined);
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, pending]})}); await tick();
  group().listeners.click(); await tick();
  assert.equal(group().textContent, '▾ 1 open · idle');
  const openRow = rows().find(r => r.dataset.runId === 'open');
@@ -442,6 +470,12 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(sortedIds.indexOf('open') > sortedIds.indexOf('sdk-run'));
  headers.agent.listeners.click(); headers.agent.listeners.click();
  assert.equal(headers.agent.attrs['aria-pressed'], 'false');
+ // The idle group keeps its own row budget, so a long history never hides it.
+ const many = Array.from({length: 300}, (_, i) => run(`closed-${i}`, null, `Closed ${i}`, {state:'idle', live:false}));
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, ...many, gone, open, helper]})}); await tick();
+ const capNote = ids.runs.children.findIndex(x => x.className === 'empty' && x.textContent.startsWith('Showing the first 300'));
+ assert.ok(capNote > -1 && capNote < ids.runs.children.indexOf(group()));
+ assert.ok(rows().some(r => r.dataset.runId === 'open'));
  // A parent shown only as context never folds away the subagent that matched.
  const longAgo = new Date(Date.now() - 13 * 3600000).toISOString();
  const elder = run('elder', null, 'Elder', {state:'idle', health:'stale', last_seen:longAgo});
@@ -528,6 +562,8 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(rows()[0].textContent.includes('Earlier step'));
  assert.equal(control('open-app').disabled, true);
  assert.ok(ids.flux.children.some(x => x.className === 'marker'));
+ // The past board still lists every harness the live chart draws.
+ assert.ok(ids.harnesses.children.some(x => x.tagName === 'button' && x.textContent.includes('Codex · work')));
  control('open-app').listeners.click(); await tick();
  assert.equal(posts.length, 1);
  // Live updates keep the chart current but leave the past table alone.
@@ -638,6 +674,13 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  docListeners.keydown({key:'L', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
  if (expanded() !== 'root') { rootRow().listeners.click(); await tick(); }
  assert.ok(nameButton(headingOf()));
+ // Every harness the chart draws gets a row, even when nothing of it runs now.
+ const deep = run('deep', null, 'Deep', {session_id:'dsh-home:observed', source:'dsh', account:'home', state:'idle', live:false});
+ const earlier = [...new Array(30).fill(0), 4, ...new Array(29).fill(0)];
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, deep], activity:{...snapshot.activity, runs:{...snapshot.activity.runs, deep:earlier}}})}); await tick();
+ assert.ok(ids.harnesses.children.some(x => x.tagName === 'button' && x.textContent.includes('DeepSeek Harness')));
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
+ assert.ok(!ids.harnesses.children.some(x => x.tagName === 'button' && x.textContent.includes('DeepSeek Harness')));
  // Direct API usage has no dollar receipt; never call it free or ChatGPT plan usage.
  for (const provider of ['openai', 'anthropic']) {
    stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:true,status:'ready',provider,api_calls:1,subscription_calls:0,known_cost_usd:0,actual_cost_usd:null,unknown_cost_calls:1}})});
