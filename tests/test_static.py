@@ -562,6 +562,8 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(rows()[0].textContent.includes('Earlier step'));
  assert.equal(control('open-app').disabled, true);
  assert.ok(ids.flux.children.some(x => x.className === 'marker'));
+ // The past board still lists every harness the live chart draws.
+ assert.ok(ids.harnesses.children.some(x => x.tagName === 'button' && x.textContent.includes('Codex · work')));
  control('open-app').listeners.click(); await tick();
  assert.equal(posts.length, 1);
  // Live updates keep the chart current but leave the past table alone.

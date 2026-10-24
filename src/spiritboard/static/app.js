@@ -199,7 +199,7 @@
     // The chart always shows the live journal; colours follow its harnesses.
     const current = harnesses(state.latest.runs);
     const list = state.past ? harnesses(state.snapshot.runs, false) : current;
-    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list); renderFlux(current); renderPast();
+    renderHarnessFilter(list); renderCounts(); renderAi(); renderWarnings(); renderHarnesses(list, renderFlux(current)); renderPast();
     // Rebuild the table only when something visible changed, so clicks and focus survive live ticks.
     if (tableKey() !== state.tableKey) renderTable(); else updateSeen();
   }
@@ -256,15 +256,14 @@
       if ([...select.options].some((o) => o.value === current)) select.value = current;
     }
   }
-  function renderHarnesses(list) {
+  function renderHarnesses(list, drawn) {
     const total = list.reduce((sum, h) => sum + h.rate, 0);
     const busiest = Math.max(0, ...list.map((h) => h.rate));
     const active = list.filter((h) => h.rate > 0).length;
     const focused = document.activeElement?.dataset?.focusKey;
     const host = $("harnesses");
     // Harnesses with something running or drawn in the chart (or the one filtered on); idle ones stay in the filter.
-    const drawn = (h) => h.runs.some((run) => (chartData().runs?.[run.run_id] || []).some(Boolean));
-    const running = (h) => h.rate > 0 || drawn(h) || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs" || s.key === "idle");
+    const running = (h) => h.rate > 0 || drawn.has(h.key) || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs" || s.key === "idle");
     const shown = list.filter((h) => running(h) || $("harness-filter").value === h.key);
     host.replaceChildren(...shown.map((h) => {
       const button = node("button", null, `harness${$("harness-filter").value === h.key ? " is-selected" : ""}`);
@@ -359,9 +358,11 @@
       h.runs.forEach((run) => (data.runs?.[run.run_id] || []).forEach((v, i) => { series[i] += v; }));
       return { key: h.key, label: h.label, series };
     }).filter((h) => h.series.some(Boolean));
+    // The harnesses drawn here, so the list can show each of them.
+    const drawn = new Set(byHarness.map((h) => h.key));
     const totals = new Array(count).fill(0).map((_, i) => byHarness.reduce((sum, h) => sum + h.series[i], 0));
     const peak = Math.max(...totals);
-    if (!peak) { host.append(node("span", `No events in the ${windowText}`, "empty")); host.setAttribute("aria-label", `No events in the ${windowText}`); return; }
+    if (!peak) { host.append(node("span", `No events in the ${windowText}`, "empty")); host.setAttribute("aria-label", `No events in the ${windowText}`); return drawn; }
     // Percent heights let the same bars fill the full chart or the compact sparkline.
     const unit = 100 / Math.max(peak, 3);
     totals.forEach((_, i) => {
@@ -400,6 +401,7 @@
     const recent = Math.max(1, Math.round(scale));
     const busiest = byHarness.map((h) => [h.label, h.series.slice(-recent).reduce((a, b) => a + b, 0)]).sort((a, b) => b[1] - a[1])[0];
     host.setAttribute("aria-label", `Events over the ${windowText}, stacked by harness. Busiest in the latest ${bucket <= 60 ? "minute" : span(bucket)}: ${busiest[0]} with ${busiest[1]}.`);
+    return drawn;
   }
 
   function workRank(run) {
