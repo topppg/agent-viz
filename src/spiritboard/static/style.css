@@ -271,4 +271,14 @@ kbd { font-family: var(--mono); font-size: 11.5px; background: #1d1830; border: 
   .expansion { padding-left: 16px; }
   .ops li, .timeline li { grid-template-columns: 1fr; }
 }
+
+/* Sidecar beside a terminal: one line per agent, only needs-you rows say what they want; an open agent fills the screen. */
+@media (max-width: 520px) {
+  .overview, .keys, .toolbar label:not(.find), #hidden-note, .row.head { display: none; }
+  .find { flex-basis: 120px; min-width: 0; }
+  .run-row { grid-template-columns: 8px auto minmax(0, 1fr) auto; grid-template-areas: "harness status agent seen" ". doing doing doing"; }
+  .run-row .rate-cell, .run-row:not(.needs) .doing { display: none; }
+  .agents:has(.expansion) .toolbar, .table-wrap:has(.expansion) .run-row:not(.selected) { display: none; }
+  .expansion { padding: 14px 16px 16px; }
+}
 .harness-idle { font-size: 12px; padding: 6px 2px; margin: 0; }
