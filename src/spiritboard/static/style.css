@@ -80,11 +80,11 @@ main { max-width: 1400px; margin: 0 auto; padding: 20px 32px; display: flex; fle
 .zoom button:hover { color: var(--text); }
 .zoom button[aria-pressed="true"] { background: #b79cff33; color: var(--bright); }
 .flux { position: relative; height: 96px; overflow: hidden; border-bottom: 1px solid var(--line); display: flex; align-items: flex-end; gap: 2px; }
-.flux .col { flex: 1; display: flex; flex-direction: column; min-width: 0; opacity: .72; }
+.flux .col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .flux .col { align-self: stretch; justify-content: flex-end; cursor: pointer; }
 .flux .col > span + span { border-top: 1px solid var(--panel); }
 .flux .col > span:first-child { border-radius: 2px 2px 0 0; }
-.flux .col:hover { opacity: 1; background: #ffffff0a; }
+.flux .col:hover { background: #ffffff0a; }
 .flux .ymax, .flux .marker { pointer-events: none; }
 .flux .marker { position: absolute; top: 0; bottom: 0; z-index: 1; width: 2px; margin-left: -1px; background: var(--wait); }
 .flux .ymax { position: absolute; left: 4px; top: 0; color: var(--dim); font-family: var(--mono); font-size: var(--fs-xs); }

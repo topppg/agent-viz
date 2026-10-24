@@ -14,7 +14,7 @@ waiting for you or gone, and a button that takes you straight to it.
 It only reads what the agents already write to disk. It never starts, steers or
 stops an agent, and nothing leaves your machine unless you turn on summaries.
 
-![Spiritboard showing sixteen agents across Claude Code, Codex, opencode and Pi](https://raw.githubusercontent.com/topppg/spiritboard/9e586f4e56a640c59285907a56e8fe4ab7c42975/docs/dashboard.png)
+![Spiritboard showing sixteen agents across Claude Code, Codex, opencode and Pi](https://raw.githubusercontent.com/topppg/spiritboard/062a77d179c2fadc1402a0a91f3ff8bb444ab7f7/docs/dashboard.png)
 
 <sub>Synthetic data: invented sessions, projects and activity.</sub>
 
@@ -140,7 +140,7 @@ New harnesses plug in as one module each (see [the source guide](https://github.
   iTerm2, Terminal, VS Code, the ChatGPT, Claude or DeepSeek Harness app), or copy a
   resume command when it is closed.
 
-![An open session with its summary, latest request and an open in Ghostty button beside the title](https://raw.githubusercontent.com/topppg/spiritboard/9e586f4e56a640c59285907a56e8fe4ab7c42975/docs/session-open.png)
+![An open session with its summary, latest request and an open in Ghostty button on its title line](https://raw.githubusercontent.com/topppg/spiritboard/062a77d179c2fadc1402a0a91f3ff8bb444ab7f7/docs/session-open.png)
 
 <sub>Synthetic data: invented sessions, projects and activity.</sub>
 
