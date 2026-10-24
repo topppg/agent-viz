@@ -3,7 +3,8 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const terminal = new Set(["completed", "failed", "cancelled"]);
-  const PALETTE = ["#8fa8ff", "#c4b5fd", "#f0abfc", "#fda4af", "#7dd3fc", "#fdba74", "#a7f3d0", "#e9d5ff"];
+  // Validated for the dark surface; amber, green and red stay reserved for statuses.
+  const PALETTE = ["#8b77c4", "#009b9c", "#bd7042", "#5488ca", "#b76896", "#2092be"];
   const QUIET_WINDOW = 30 * 60 * 1000;
   // A turn left unanswered in a still-open session stays yours this long.
   const OPEN_TURN_WINDOW = 12 * 3600 * 1000;
@@ -41,12 +42,16 @@
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
     return `${Math.floor(seconds / 86400)}d`;
   };
+  // Under a minute reads "just now", so open panels don't tick while you read them.
+  const ago = (value) => time(value) !== null && serverNow() - time(value) < 60000 ? "just now" : `${age(value)} ago`;
   function showError(message) { $("error").hidden = !message; $("error").textContent = message || ""; }
-  let connection = ["Connecting…", false];
-  function setConnection(text, connected) { connection = [text, connected]; showConnection(); }
+  // Modes: "connecting" and "connected" stay quiet; only "down" asks for attention.
+  let connection = ["Connecting…", "connecting"];
+  function setConnection(text, mode) { connection = [text, mode]; showConnection(); }
   function showConnection() {
     if (state.past) { $("connection").textContent = "past · not live"; $("connection").className = "past"; return; }
-    $("connection").textContent = connection[0]; $("connection").className = connection[1] ? "connected" : "muted";
+    const [text, mode] = connection;
+    $("connection").textContent = text; $("connection").className = mode;
   }
   function accountOf(run) { return typeof run.account === "object" ? (run.account?.label || run.account?.id || "unknown") : (run.account || "unknown"); }
   function sourceOf(run) { return typeof run.source === "object" ? (run.source?.kind || run.source?.label || "unknown") : (run.source || "unknown"); }
@@ -87,9 +92,9 @@
     if (run.state === "completed") return { key: "done", glyph: "✓", text: "done" };
     if (run.state === "failed") return { key: "failed", glyph: "✗", text: "failed" };
     if (run.state === "cancelled") return { key: "done", glyph: "–", text: "cancelled" };
-    if (run.archived) return { key: "closed", glyph: "■", text: `archived ${age(run.last_seen)}` };
+    if (run.archived) return { key: "closed", glyph: "■", text: "archived" };
     // No live process owns it (checked, not guessed): the session has ended.
-    if (run.live === false) return { key: "closed", glyph: "■", text: `closed ${age(run.last_seen)}` };
+    if (run.live === false) return { key: "closed", glyph: "■", text: "closed" };
     // An unanswered approval stops a transcript from changing; it still needs you.
     if (run.state === "waiting_user") return { key: "needs", glyph: "◐", text: "needs you" };
     // A top-level session that recently finished its turn is waiting for your next direction.
@@ -97,8 +102,8 @@
       if (!state.past && state.rested.get(run.run_id) === run.last_seen) return { key: "rest", turn: true, glyph: "☾", text: "at rest" };
       return { key: "needs", turn: true, glyph: "◐", text: "your turn" };
     }
-    if (run.state === "idle" && run.live === true && !run.parent_run_id) return { key: "idle", glyph: "◌", text: `open · idle ${age(run.last_seen)}` };
-    if (!["fresh", "observed"].includes(healthOf(run))) return { key: "quiet", glyph: "○", text: `quiet ${age(run.last_seen)}` };
+    if (run.state === "idle" && run.live === true && !run.parent_run_id) return { key: "idle", glyph: "◌", text: "open · idle" };
+    if (!["fresh", "observed"].includes(healthOf(run))) return { key: "quiet", glyph: "○", text: "quiet" };
     // Waiting on a tool or a child is ordinary work, not something for you.
     if (String(run.state).startsWith("waiting")) return { key: "running", glyph: "●", text: "running" };
     if (run.state === "idle") return { key: "idle", glyph: "◌", text: "idle" };
@@ -106,15 +111,15 @@
     return { key: "running", glyph: "●", text: "running" };
   }
   function doingOf(run, status) {
-    if (terminal.has(run.state)) return { mark: "›", text: run.summary || run.activity || run.task || "finished", cls: "" };
+    if (terminal.has(run.state)) return { text: run.summary || run.activity || run.task || "finished", cls: "" };
     const summary = run.ai_summary;
-    if (summary?.text) return { mark: "", ai: true, text: summary.text, cls: status.key === "needs" ? "needs" : summary.stale ? "stale-summary" : "" };
+    if (summary?.text) return { ai: true, text: summary.text, cls: status.key === "needs" ? "needs" : summary.stale ? "stale-summary" : "" };
     // The last reply says most about a finished turn; the request is the fallback.
     const replied = run.activity && !run.activity.startsWith("Turn ended");
     const raw = status.turn && !replied ? run.task || run.activity : run.activity || run.task;
-    if (!raw) return { mark: "›", text: run.inferred ? "text hidden · enable include_text" : "no activity reported", cls: "dim" };
-    if (status.key === "quiet" || status.key === "closed") return { mark: "›", text: `last said: ${raw}`, cls: "dim" };
-    return { mark: "›", text: raw, cls: status.key === "needs" ? "needs" : "" };
+    if (!raw) return { text: run.inferred ? "text hidden · enable include_text" : "no activity reported", cls: "dim" };
+    if (status.key === "quiet" || status.key === "closed") return { text: raw, cls: "dim" };
+    return { text: raw, cls: status.key === "needs" ? "needs" : "" };
   }
   // A name the user set (/rename, session name) always beats the AI title.
   const aiTitleOf = (run) => (run.title_source !== "user" && run.ai_summary?.title) || "";
@@ -210,20 +215,24 @@
   const BUSY = new Set(["running", "waiting", "unknown"]);
   function renderCounts() {
     const statuses = activeStatuses(state.snapshot.runs);
+    const needs = statuses.filter((s) => s.key === "needs").length;
     const counts = [["running", "●", statuses.filter((s) => BUSY.has(s.key)).length, "running"],
-      ["needs", "◐", statuses.filter((s) => s.key === "needs").length, "needs you"],
+      ["needs", "◐", needs, needs === 1 ? "needs you" : "need you"],
       ["rest", "☾", statuses.filter((s) => s.key === "rest").length, "at rest"],
       ["idle", "◌", statuses.filter((s) => s.key === "idle").length, "idle"],
       ["quiet", "○", statuses.filter((s) => s.key === "quiet").length, "quiet"]];
-    $("counts").replaceChildren(...counts.map(([key, glyph, value, text]) => {
-      const item = node("span"); item.append(node("span", glyph, `g-${key}`), " ", node("strong", value), node("span", ` ${text}`, "count-word")); return item;
+    // Zero counts say nothing; only what is there takes space.
+    $("counts").replaceChildren(...counts.filter(([, , value]) => value).map(([key, glyph, value, text]) => {
+      const item = node("span", null, `count c-${key}`); item.append(node("span", glyph, `g-${key}`), " ", node("strong", value), node("span", ` ${text}`, "count-word")); return item;
     }));
     if (state.past) $("counts").append(node("span", `at ${new Date(state.past.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`, "counts-at"));
   }
   function renderAi() {
     const ai = state.snapshot.ai || {};
     const host = $("ai-status"); host.replaceChildren();
-    if (!ai.enabled) { host.append(node("span", "summaries off", "muted")); host.title = "Open AI summaries to connect a provider or resume summaries"; return; }
+    // Usage stays one hover away on the button; the header only says whether summaries work.
+    const button = $("summary-settings-open");
+    if (!ai.enabled) { host.append(node("span", "Summaries off", "muted")); button.title = "Open AI summaries to connect a provider or resume summaries"; return; }
     const known = ai.known_cost_usd ?? ai.actual_cost_usd ?? 0;
     const spent = ai.unknown_cost_calls && known === 0 ? "cost unavailable" : `$${known.toFixed(4)}${ai.unknown_cost_calls ? "+ known spend" : " spent"}`;
     const usage = [];
@@ -231,9 +240,8 @@
     if (ai.subscription_calls) usage.push(`${ai.subscription_calls} ChatGPT plan calls`);
     if (!usage.length) usage.push("no provider calls yet");
     const provider = ({ codex: "ChatGPT", openrouter: "OpenRouter", anthropic: "Anthropic", openai: "OpenAI API" })[ai.provider] || "";
-    host.append(node("span", `summaries ${ai.status === "error" ? "error" : "on"}${provider ? ` · ${provider}` : ""}`, "ai-mark"),
-      node("span", ` · ${usage.join(" · ")}`, "muted"));
-    host.title = ai.error || "Opt-in: bounded redacted context goes only to connected providers; ChatGPT uses plan allowance, not a reported USD charge";
+    host.append(node("span", ai.status === "error" ? "Summaries need attention" : `Summaries${provider ? ` · ${provider}` : ""}`, ai.status === "error" ? "bad" : ""));
+    button.title = [ai.error, ...usage, "opt-in: bounded redacted context goes only to connected providers"].filter(Boolean).join(" · ");
   }
   function renderWarnings() {
     const raw = state.snapshot.source_errors || [];
@@ -257,9 +265,6 @@
     }
   }
   function renderHarnesses(list, drawn) {
-    const total = list.reduce((sum, h) => sum + h.rate, 0);
-    const busiest = Math.max(0, ...list.map((h) => h.rate));
-    const active = list.filter((h) => h.rate > 0).length;
     const focused = document.activeElement?.dataset?.focusKey;
     const host = $("harnesses");
     // Harnesses with something running or drawn in the chart (or the one filtered on); idle ones stay in the filter.
@@ -271,21 +276,23 @@
       button.setAttribute("aria-pressed", String($("harness-filter").value === h.key));
       const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(h.key);
       const statuses = activeStatuses(h.runs);
-      const parts = [[(s) => BUSY.has(s.key), "running"], [(s) => s.key === "needs", "needs you"], [(s) => s.key === "idle", "idle"], [(s) => s.key === "quiet", "quiet"]]
+      const needs = statuses.filter((s) => s.key === "needs").length;
+      const parts = [[(s) => BUSY.has(s.key), "running"], [(s) => s.key === "needs", needs === 1 ? "needs you" : "need you"]]
         .map(([test, text]) => [statuses.filter(test).length, text]).filter(([n]) => n).map(([n, text]) => `${n} ${text}`);
-      const sub = parts.join(" · ") || (h.runs.length ? "nothing active" : "no observations yet");
-      const name = node("span", null, "who"); name.title = `${h.label} · ${sub}`; name.append(node("span", h.label, "name"), node("span", sub, "sub"));
-      const rate = node("span", h.rate, "rate"); if (h.rate === busiest && h.rate) rate.style.color = state.colors.get(h.key);
-      const noisy = active > 1 && h.rate === busiest && h.rate >= 30 && h.rate >= total * .5;
-      const flag = node("span", noisy ? "▲ noisy" : h.rate ? "" : h.latest ? `idle ${age(h.latest)}` : "", `flag${noisy ? " noisy" : ""}`);
-      button.append(swatch, name, rate, flag);
+      // With nothing running or waiting, the idle age shows once events stop, in whole minutes so it never ticks.
+      const idleFor = h.latest && serverNow() - h.latest >= 60000 ? `idle ${age(h.latest)}` : "idle";
+      const sub = parts.join(" · ") || (!h.runs.length ? "no observations yet" : h.rate ? "" : idleFor);
+      const name = node("span", null, "who"); name.title = sub ? `${h.label} · ${sub}` : h.label; name.append(node("span", h.label, "name"), node("span", sub, "sub"));
+      const rate = node("span", h.rate || "", "rate");
+      if (h.rate) rate.title = `${h.rate} events in the last minute`;
+      button.append(swatch, name, rate);
       button.addEventListener("click", () => { $("harness-filter").value = $("harness-filter").value === h.key ? "" : h.key; render(); });
       return button;
     }));
     if (!list.length) host.append(node("p", "No harnesses yet. Start the demo or configure a source profile.", "empty"));
     else if (!shown.length) host.append(node("p", state.past ? "Nothing running at this moment." : "Nothing running right now.", "empty"));
     const idle = list.length - shown.length;
-    if (idle) host.append(node("p", `${idle} idle harness${idle === 1 ? "" : "es"} · pick one in the harness filter`, "harness-idle muted"));
+    if (idle) host.append(node("p", `+ ${idle} idle, in the harness filter`, "harness-idle"));
     if (focused) [...host.children].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
   function chartData() {
@@ -352,7 +359,7 @@
     const host = $("flux"); host.replaceChildren();
     const data = chartData(); const count = data.buckets || 60; const bucket = data.bucket_seconds || 10; const scale = 60 / bucket;
     const windowText = ZOOMS[state.zoom][0];
-    $("flux-note").textContent = `height = ${bucket <= 60 ? "events/min" : `events per ${span(bucket)}`} · dots = latest events`;
+    $("flux-note").textContent = bucket <= 60 ? "events/min" : `events per ${span(bucket)}`;
     const byHarness = list.map((h) => {
       const series = new Array(count).fill(0);
       h.runs.forEach((run) => (data.runs?.[run.run_id] || []).forEach((v, i) => { series[i] += v; }));
@@ -375,23 +382,6 @@
       col.addEventListener("click", () => travel(i, data));
       host.append(col);
     });
-    // Deterministic spray per absolute bucket so dots stay put as time advances.
-    const endBucket = Math.floor((time(data.end) || liveNow()) / 1000 / bucket);
-    const noise = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); };
-    for (let i = Math.max(0, count - 12); i < count; i++) {
-      const top = byHarness.reduce((best, h) => h.series[i] > (best?.series[i] || 0) ? h : best, null);
-      const dots = Math.min(15, Math.ceil(totals[i] / 2));
-      for (let j = 0; j < dots; j++) {
-        const seed = (endBucket - (count - 1 - i)) * 31 + j;
-        const dot = node("span", null, "dot"); const size = 1.5 + noise(seed + .3) * 3;
-        dot.style.left = `${(i + noise(seed)) / count * 100}%`;
-        dot.style.bottom = `max(0px, calc(${totals[i] * unit}% + ${(noise(seed + .7) - .3) * 36}px))`;
-        dot.style.width = dot.style.height = `${size}px`;
-        dot.style.background = noise(seed + .9) > .3 && top ? state.colors.get(top.key) : "#e6e9ef";
-        dot.style.opacity = String(.4 + noise(seed + .5) * .6);
-        host.append(dot);
-      }
-    }
     if (state.past) {
       const start = (time(data.end) || liveNow()) - count * bucket * 1000;
       const x = (state.past.at - start) / (count * bucket * 1000);
@@ -409,7 +399,6 @@
     return { needs: 0, running: 1, waiting: 2, rest: 3, idle: 3, unknown: 4, quiet: 5, failed: 6, done: 7 }[key] ?? 8;
   }
   function sortValue(run) {
-    if (state.sort === "harness") return harnessOf(run).label.toLowerCase();
     if (state.sort === "agent") return nameOf(run).toLowerCase();
     if (state.sort === "doing") return doingOf(run, statusOf(run)).text.toLowerCase();
     if (state.sort === "rate") return rateOf(run.run_id);
@@ -430,7 +419,8 @@
   }
   function seenText(value) {
     const seen = time(value);
-    return seen !== null && serverNow() - seen < 2000 ? "now" : age(value);
+    // Anything within the minute reads "now", so live rows stop ticking every second.
+    return seen !== null && serverNow() - seen < 60000 ? "now" : age(value);
   }
   function updateSeen() { [...$("runs").querySelectorAll("[data-seen]")].forEach((el) => { el.textContent = seenText(el.dataset.seen); }); }
   function renderTable(force = false) {
@@ -479,7 +469,7 @@
     const openPath = new Set();
     for (let r = byId.get(byId.get(state.selected)?.parent_run_id); r && !openPath.has(r.run_id); r = byId.get(r.parent_run_id)) openPath.add(r.run_id);
     let cap = MAX_ROWS, cut = false;
-    const renderRun = (run, prefix, pad, orphan) => {
+    const renderRun = (run, depth, orphan) => {
       if (visited.has(run.run_id) || !visible.has(run.run_id)) return;
       if (state.order.length >= cap) { cut = true; return; }
       visited.add(run.run_id);
@@ -494,15 +484,12 @@
       const folded = (choice ?? settled) && !openPath.has(run.run_id);
       const kids = (folded ? [] : choice === false ? all : inView).sort(compare);
       kids.forEach((c) => { if (!visible.has(c.run_id)) { visible.add(c.run_id); revealed.add(c.run_id); } });
-      host.append(row(run, prefix, !direct.has(run.run_id) && !revealed.has(run.run_id), orphan, maxRate, all.length, kids.length));
+      host.append(row(run, depth, !direct.has(run.run_id) && !revealed.has(run.run_id), orphan, maxRate, all.length, kids.length));
       if (state.selected === run.run_id) host.append(expansion(run, byId));
-      kids.forEach((child, i) => {
-        const last = i === kids.length - 1;
-        renderRun(child, `${pad}${last ? "└─ " : "├─ "}`, `${pad}${last ? "   " : "│  "}`, false);
-      });
+      kids.forEach((child) => renderRun(child, depth + 1, false));
     };
     const roots = runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare);
-    const renderRoot = (r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id));
+    const renderRoot = (r) => renderRun(r, r.parent_run_id ? 1 : 0, Boolean(r.parent_run_id));
     // Open idle sessions with nothing busy below them gather under one line at the bottom, folded unless one is opened.
     // While a row is open, sessions listed above that line stay there, so the open row never jumps.
     const openIdle = roots.filter((r) => visible.has(r.run_id) && statusOf(r).key === "idle" && r.live === true
@@ -528,25 +515,29 @@
     button.addEventListener("click", () => toggleFold(OPEN_IDLE, !folded));
     return button;
   }
-  function row(run, prefix, context, orphan, maxRate, kids = 0, shown = 0) {
+  function row(run, depth, context, orphan, maxRate, kids = 0, shown = 0) {
     const status = statusOf(run);
     const open = state.selected === run.run_id;
-    const depth = Math.round(prefix.length / 3);
     const button = node("button", null, `row run-row ${status.key}${depth ? " sub" : ""}${open ? " selected" : ""}${context ? " context" : ""}`);
     // Subagents shift right as a block, so they never read as top-level processes.
     if (depth) button.style.setProperty("--depth", String(depth));
     button.type = "button"; button.dataset.focusKey = `select:${run.run_id}`; button.dataset.runId = run.run_id;
     button.setAttribute("aria-current", String(open));
     button.setAttribute("aria-expanded", String(open));
-    const statusCell = node("span", `${open ? "▾" : "▸"} ${status.glyph} ${status.text}`, `cell status g-${status.key}`);
+    const statusCell = node("span", null, `cell status g-${status.key}`);
+    statusCell.append(node("span", status.glyph, "glyph"), ` ${status.text}`);
     if (run.inferred) statusCell.title = "Inferred from the transcript";
     const agent = node("span", null, "cell agent");
+    const harness = harnessOf(run);
+    // The harness lives in tooltips, the accessible name and the opened panel; rows carry status colour only.
+    const where = run.app ? `${harness.label} · ${run.app}` : harness.label;
+    agent.title = where;
     // Renaming happens in the opened session; a click on the row only opens it.
     const name = node("span", nameOf(run), "agent-name");
-    if (titleNote(run)) name.title = titleNote(run);
-    agent.append(node("span", prefix, "tree"), name);
+    name.title = titleNote(run) ? `${where} · ${titleNote(run)}` : where;
+    agent.append(name, node("span", where, "sr-only"));
     if (run.local_name) {
-      const mark = node("span", "●", "renamed-mark"); mark.title = "Renamed by you in Spiritboard";
+      const mark = node("span", "✎", "renamed-mark"); mark.title = "Renamed by you in Spiritboard";
       mark.setAttribute("role", "img"); mark.setAttribute("aria-label", "renamed by you");
       agent.append(mark);
     }
@@ -562,25 +553,21 @@
       button.dataset.folds = String(shown === kids);
     }
     // Where the session runs, when it is an app rather than a terminal (Claude desktop).
-    if (run.app) agent.append(node("span", run.app, "note"));
-    const harness = harnessOf(run);
-    const harnessCell = node("span", null, "cell harness-cell");
-    const swatch = node("span", null, "swatch"); swatch.style.background = state.colors.get(harness.key);
-    const where = run.app ? `${harness.label} · ${run.app}` : harness.label;
-    harnessCell.title = where; harnessCell.setAttribute("aria-label", where);
-    harnessCell.append(swatch);
+    if (run.app) agent.append(node("span", run.app, "note app-note"));
     const doing = doingOf(run, status);
     const doingCell = node("span", null, `cell doing ${doing.cls}`);
-    if (doing.mark) doingCell.append(node("span", `${doing.mark} `, "mark"));
     doingCell.append(doing.text);
     if (doing.ai) doingCell.title = `${run.ai_summary?.origin === "claude-recap" ? "Claude recap" : "AI summary"}${run.ai_summary?.stale ? " · goal changed, refresh due" : ""}`;
     const rate = rateOf(run.run_id);
     const rateCell = node("span", null, "rate-cell");
-    const bar = node("span", null, "bar"); bar.style.width = `${Math.round(rate / maxRate * 56)}px`; bar.style.background = state.colors.get(harness.key);
-    rateCell.append(node("span", rate, "num"), bar);
+    // A zero rate is left blank, so only busy agents carry a number.
+    if (rate) {
+      const bar = node("span", null, "bar"); bar.style.width = `${Math.max(2, Math.round(rate / maxRate * 48))}px`;
+      rateCell.append(node("span", rate, "num"), bar);
+    }
     const last = node("span", seenText(run.last_seen), "cell seen");
     last.dataset.seen = run.last_seen || "";
-    button.append(harnessCell, statusCell, agent, doingCell, rateCell, last);
+    button.append(statusCell, agent, doingCell, rateCell, last);
     button.addEventListener("click", () => selectRun(state.selected === run.run_id ? null : run.run_id));
     return button;
   }
@@ -679,10 +666,14 @@
   }
   function renderHiddenNote(runs, direct) {
     const note = $("hidden-note");
-    if (state.view === "all") { note.textContent = `${direct.size} of ${runs.length} agents in window`; return; }
-    const finished = runs.filter((r) => terminal.has(r.state)).length;
-    const older = runs.filter((r) => !terminal.has(r.state) && !inView(r)).length;
-    note.textContent = state.view === "active" ? `${finished} finished · ${older} older hidden · e to show` : `${direct.size} waiting`;
+    // In the active view the note opens everything it hides; elsewhere it only counts.
+    // aria-disabled rather than disabled, so the focus stays on it after the click.
+    note.setAttribute("aria-disabled", String(state.view !== "active"));
+    note.title = state.view === "active" ? "Show all (e)" : "";
+    const hidden = state.view === "active" ? runs.filter((r) => !inView(r)).length : 0;
+    note.textContent = state.view === "all" ? `${direct.size} of ${runs.length} agents in window`
+      : state.view === "waiting" ? `${direct.size} waiting` : hidden ? `${hidden} finished or older · show all` : "";
+    note.hidden = !note.textContent;
   }
   function renderViews() {
     [...$("views").children].forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === state.view)));
@@ -695,11 +686,13 @@
     events.forEach((event) => {
       const payload = event.payload || {};
       // Only display safe selected labels, never raw arguments, results, paths or headers.
-      const detail = payload.text || payload.summary || payload.detail || payload.reason || payload.task || payload.label || payload.name || payload.state || payload.outcome || "";
+      const named = payload.text || payload.summary || payload.detail || payload.reason || payload.task || payload.label || payload.name || "";
+      const detail = named || payload.state || payload.outcome || "";
       const key = `${event.type}\u0000${detail}`;
       const last = groups[groups.length - 1];
       if (last && last.key === key) { last.count += 1; last.stamp = event.received_at || event.occurred_at; }
-      else groups.push({ key, type: event.type, detail, count: 1, stamp: event.received_at || event.occurred_at, late: event.applied === false });
+      // A bare state or outcome, or no detail at all, needs the event type to make sense.
+      else groups.push({ key, type: event.type, detail, plain: !named, count: 1, stamp: event.received_at || event.occurred_at, late: event.applied === false });
     });
     return groups;
   }
@@ -713,7 +706,7 @@
     const head = node("div", null, "detail-head");
     const title = node("div", null, "detail-title");
     const heading = node("h3"); heading.append(nameControl(run));
-    title.append(heading, node("span", `${status.glyph} ${status.text}`, `pill g-${status.key}`));
+    title.append(heading);
     if (run.local_name) {
       const renamed = node("span", `Renamed by you in Spiritboard · automatic title: ${autoNameOf(run)}`, "was renamed-note");
       if (!state.past) {
@@ -731,9 +724,9 @@
       actions.append(rest);
     }
     const links = node("div", null, "detail-links");
-    const history = node("button", state.historyOpen ? "hide history" : "history ▸", "link"); history.type = "button"; history.dataset.focusKey = "history";
+    const history = node("button", state.historyOpen ? "Hide history" : "History", "link"); history.type = "button"; history.dataset.focusKey = "history";
     history.addEventListener("click", () => { state.historyOpen = !state.historyOpen; if (state.historyOpen && !state.events.length) loadEvents(true); else renderTable(); });
-    const close = node("button", "esc close", "link"); close.type = "button"; close.addEventListener("click", () => selectRun(null));
+    const close = node("button", "Close", "link"); close.type = "button"; close.title = "Esc"; close.addEventListener("click", () => selectRun(null));
     links.append(history, close);
     head.append(title, actions, links);
     const meta = node("p", null, "detail-meta"); meta.setAttribute("aria-label", "Session");
@@ -742,27 +735,19 @@
     fact("", swatch, harness.label);
     if (run.app) fact("in", run.app);
     if (run.project) fact("project", run.project);
-    fact(terminal.has(run.state) || status.key === "closed" ? "ran for" : "running for", age(run.started_at, time(run.ended_at) || serverNow()));
+    if (run.started_at && (terminal.has(run.state) || status.key === "closed")) fact("ran for", age(run.started_at, time(run.ended_at) || serverNow()));
+    else if (run.started_at) fact("started", ago(run.started_at));
     const seen = node("span", seenText(run.last_seen)); seen.dataset.seen = run.last_seen || "";
     fact("last seen", seen);
     main.append(head, meta);
-    if (status.key === "rest") {
-      const rest = node("p", "☾ at rest · you checked this turn", "rest-line");
-      rest.append(node("span", " · stirs again when the agent does anything", "rest-where"));
-      main.append(rest);
-    } else if (status.turn) {
-      const turn = node("p", `finished its turn ${age(run.last_seen)} ago · waiting for your next direction`, "needs-line");
-      turn.append(node("span", ` · continue it in ${harness.label}`, "needs-where"));
-      main.append(turn);
-    } else if (run.archived) {
-      main.append(node("p", `■ archived in ${run.app || "its app"} · last active ${age(run.last_seen)} ago`, "closed-line"));
-    } else if (status.key === "closed") {
-      main.append(node("p", `■ closed ${age(run.last_seen)} ago · no running process owns this session any more`, "closed-line"));
-    } else if (status.key === "needs") {
-      const needs = node("p", `◐ waiting on you for ${age(run.last_seen)}${run.activity ? ` · ${run.activity}` : ""}`, "needs-line");
-      needs.append(node("span", ` · answer it in “${parent ? nameOf(parent) : nameOf(run)}”`, "needs-where"));
-      main.append(needs);
-    }
+    // One status line under the title: what state it is in and where to act.
+    const line = (cls, glyph, text, where) => { const p = node("p", null, `state-line ${cls}`); p.append(node("span", glyph, "glyph"), ` ${text}`); if (where) p.append(node("span", ` · ${where}`, "where")); main.append(p); };
+    if (status.key === "rest") line("g-rest", "☾", "At rest · you checked this turn", "back when the agent acts again");
+    else if (status.turn) line("g-needs", "◐", `Your turn · finished ${ago(run.last_seen)}`);
+    else if (run.archived) line("g-closed", "■", `Archived in ${run.app || "its app"} · last active ${ago(run.last_seen)}`);
+    else if (status.key === "closed") line("g-closed", "■", `Closed ${ago(run.last_seen)}`, "no running process owns this session");
+    else if (status.key === "needs") line("g-needs", "◐", `Needs you · asked ${ago(run.last_seen)}`, parent ? `answer in “${nameOf(parent)}”` : "");
+    else if (status.key !== "running") line(`g-${status.key}`, status.glyph, status.text[0].toUpperCase() + status.text.slice(1));
     // A subagent's goal is the task its parent gave it, unless a summary exists.
     const goal = run.ai_summary?.text || (run.parent_run_id ? run.task : "");
     if (goal) {
@@ -778,7 +763,7 @@
       item.append(node("dt", title, "label"), dd);
       fields.append(item);
     };
-    field("now", terminal.has(run.state) ? run.summary || label(run.state) : run.activity || "no activity reported");
+    field("latest", terminal.has(run.state) ? run.summary || label(run.state) : run.activity || "no activity reported");
     if (!run.parent_run_id) field("you asked", run.task || (run.inferred ? "text hidden · set include_text for this profile" : ""), run.task ? "quote" : "");
     if (run.parent_run_id) {
       if (parent) {
@@ -856,22 +841,24 @@
   function historyList(run) {
     const box = node("div", null, "history");
     const operations = run.operations || [];
+    // Recent tools read as one line; running ones in the running colour, errors in red.
     if (operations.length) {
-      const ops = node("ul", null, "ops");
+      const ops = node("p", null, "ops");
+      ops.append(node("span", "tools", "t"));
       operations.slice(-10).forEach((op) => {
         const outcome = op.pending ? "running" : op.outcome || "unknown";
-        const item = node("li");
-        item.append(node("span", label(op.kind || "tool"), "t"), node("span", outcome, op.pending ? "pending" : outcome === "error" ? "bad" : "ok"), node("span", `${op.label || op.operation_id || "operation"}${op.detail ? ` · ${op.detail}` : ""}`));
-        ops.append(item);
+        ops.append(node("span", `${op.label || op.operation_id || "operation"}${op.pending || outcome === "error" ? ` ${outcome}` : ""}`, op.pending ? "op-running" : outcome === "error" ? "bad" : ""));
       });
       box.append(ops);
     }
     const timeline = node("ol", null, "timeline"); timeline.id = "timeline";
     compressEvents(state.events).reverse().forEach((group) => {
       const item = node("li"); const stamp = time(group.stamp);
-      item.append(node("span", stamp ? new Date(stamp).toLocaleTimeString() : "unknown time", "t"),
-        node("span", `${label(group.type || "event")}${group.count > 1 ? ` ×${group.count}` : ""}`),
-        node("span", `${group.detail}${group.late ? " · late, not applied" : ""}`));
+      const type = label(group.type || "event");
+      item.title = `${type} · ${stamp ? new Date(stamp).toLocaleTimeString() : "unknown time"}`;
+      const text = group.plain ? [type.replaceAll(".", " "), group.detail].filter(Boolean).join(" · ") : group.detail;
+      item.append(node("span", stamp ? ago(stamp) : "", "t"),
+        node("span", `${text}${group.count > 1 ? ` ×${group.count}` : ""}${group.late ? " · late, not applied" : ""}`));
       timeline.append(item);
     });
     box.append(timeline);
@@ -923,8 +910,8 @@
       const response = await fetch("/api/snapshot", { cache: "no-store" });
       if (!response.ok) throw new Error(`Snapshot unavailable (HTTP ${response.status}).`);
       applySnapshot(await response.json());
-      if (!state.live) setConnection("snapshot loaded · reconnecting live stream", false);
-    } catch (error) { showError(error.message || "Cannot reach the local collector."); setConnection("disconnected · retrying", false); }
+      if (!state.live) setConnection("snapshot loaded · reconnecting live stream", "connecting");
+    } catch (error) { showError(error.message || "Cannot reach the local collector."); setConnection("disconnected · retrying", "down"); }
     finally { state.fetching = false; $("refresh").disabled = false; }
   }
   function setView(view) { state.view = view; renderViews(); if (state.snapshot) renderTable(); }
@@ -992,6 +979,7 @@
   $("window-filter").addEventListener("change", () => { if (state.snapshot) renderTable(); });
   $("search").addEventListener("input", () => { if (state.snapshot) renderTable(); });
   $("refresh").addEventListener("click", refresh);
+  $("hidden-note").addEventListener("click", () => { if (state.view === "active") setView("all"); });
   // On narrow screens the header actions and the shortcut list fold behind a button each.
   const fold = (button, host, open) => { button.setAttribute("aria-expanded", String(open)); host.classList.toggle("open", open); };
   const foldMenu = (open) => fold($("more"), $("top-actions"), open);
@@ -1017,10 +1005,10 @@
   renderViews();
   refresh();
   const stream = new EventSource("/api/events?after=0");
-  stream.onopen = () => { state.live = true; setConnection("live", true); };
-  stream.onerror = () => { state.live = false; setConnection("live stream disconnected · retrying", false); };
+  stream.onopen = () => { state.live = true; setConnection("live", "connected"); };
+  stream.onerror = () => { state.live = false; setConnection("live stream disconnected · retrying", "down"); };
   ["snapshot", "reset"].forEach((name) => stream.addEventListener(name, (event) => {
-    try { applySnapshot(JSON.parse(event.data), name === "reset"); state.live = true; setConnection(name === "reset" ? "live · history reset" : "live", true); }
+    try { applySnapshot(JSON.parse(event.data), name === "reset"); state.live = true; setConnection(name === "reset" ? "live · history reset" : "live", "connected"); }
     catch (_) { showError("Received an invalid update. Refresh to recover."); }
   }));
   setInterval(() => { if (!state.live || Date.now() - state.lastSnapshotAt > 5000) refresh(); }, 2000);
