@@ -418,6 +418,20 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  rows().find(r => r.dataset.runId === 'gone').listeners.click(); await tick();
  assert.equal(ids.runs.children.at(-1), group());
  rows().find(r => r.dataset.runId === 'gone').listeners.click(); await tick();
+ // A session that turns open · idle while it is open keeps its place until it closes.
+ rows().find(r => r.dataset.runId === 'pending').listeners.click(); await tick();
+ const pendingAt = rows().findIndex(r => r.dataset.runId === 'pending');
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, {...pending, last_seen:hours}]})}); await tick();
+ assert.equal(rows().findIndex(r => r.dataset.runId === 'pending'), pendingAt);
+ assert.ok(rows()[pendingAt].textContent.includes('open · idle'));
+ docListeners.keydown({key:'Escape', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
+ assert.equal(group().textContent, '▸ 2 open · idle');
+ // An open idle session whose subagent needs you stays in the list instead of folding away.
+ const asking = run('asking', 'open', 'Asking', {state:'waiting_user'});
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, asking, pending]})}); await tick();
+ assert.ok(rows().some(r => r.dataset.runId === 'asking'));
+ assert.equal(group(), undefined);
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, gone, open, helper, pending]})}); await tick();
  group().listeners.click(); await tick();
  assert.equal(group().textContent, '▾ 1 open · idle');
  const openRow = rows().find(r => r.dataset.runId === 'open');
@@ -456,6 +470,12 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  assert.ok(sortedIds.indexOf('open') > sortedIds.indexOf('sdk-run'));
  headers.agent.listeners.click(); headers.agent.listeners.click();
  assert.equal(headers.agent.attrs['aria-pressed'], 'false');
+ // The idle group keeps its own row budget, so a long history never hides it.
+ const many = Array.from({length: 300}, (_, i) => run(`closed-${i}`, null, `Closed ${i}`, {state:'idle', live:false}));
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, ...many, gone, open, helper]})}); await tick();
+ const capNote = ids.runs.children.findIndex(x => x.className === 'empty' && x.textContent.startsWith('Showing the first 300'));
+ assert.ok(capNote > -1 && capNote < ids.runs.children.indexOf(group()));
+ assert.ok(rows().some(r => r.dataset.runId === 'open'));
  // A parent shown only as context never folds away the subagent that matched.
  const longAgo = new Date(Date.now() - 13 * 3600000).toISOString();
  const elder = run('elder', null, 'Elder', {state:'idle', health:'stale', last_seen:longAgo});

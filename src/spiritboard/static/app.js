@@ -12,7 +12,7 @@
   const REST_KEY = "spiritboard.rested";
   const WIDTH_KEY = "spiritboard.columns";
   const KIND_NAMES = { codex: "Codex", claude: "Claude", opencode: "opencode", pi: "Pi", dsh: "DeepSeek Harness", grokbot: "Grok Bot" };
-  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested(), editing: null, draft: "", folds: new Map() };
+  const state = { snapshot: null, selected: null, view: "active", sort: null, descending: false, order: [], frozen: new Map(), split: 0, colors: new Map(), events: [], nextCursor: 0, more: false, eventBusy: false, request: 0, fetching: false, live: false, lastSnapshotAt: 0, fingerprint: null, historyOpen: false, tableKey: "", target: null, targetNote: "", targetFallback: false, latest: null, past: null, pastRequest: 0, zoom: 600, chart: null, chartAt: 0, rested: loadRested(), editing: null, draft: "", folds: new Map() };
   // Chart windows in seconds: heading, then the left and middle axis labels.
   const ZOOMS = { 600: ["last 10 minutes", "-10m", "-5m"], 3600: ["last hour", "-1h", "-30m"], 86400: ["last 24 hours", "-24h", "-12h"],
     604800: ["last 7 days", "-7d", "-3.5d"], 2592000: ["last 30 days", "-30d", "-15d"] };
@@ -457,7 +457,7 @@
     const live = (a, b) => rank(a).rank - rank(b).rank || rank(b).seen - rank(a).seen || a.run_id.localeCompare(b.run_id);
     // While a run is open, keep the order from before it opened so rows don't jump; unseen runs go after.
     const frozen = (run) => state.frozen.get(run.run_id) ?? Infinity;
-    // Column sorts order within tiers: busy or needing you, then resting, then history; open idle sessions follow.
+    // Column sorts order within tiers: busy or needing you, then at rest, then history; open idle sessions follow.
     const tier = (run) => { const r = rank(run).rank; return r < 3 ? 0 : r === 3 ? 1 : 2; };
     const sorted = (a, b) => {
       if (state.sort !== "status" && tier(a) !== tier(b)) return tier(a) - tier(b);
@@ -476,8 +476,10 @@
     const revealed = new Set();
     const openPath = new Set();
     for (let r = byId.get(byId.get(state.selected)?.parent_run_id); r && !openPath.has(r.run_id); r = byId.get(r.parent_run_id)) openPath.add(r.run_id);
+    let cap = MAX_ROWS, cut = false;
     const renderRun = (run, prefix, pad, orphan) => {
-      if (visited.has(run.run_id) || !visible.has(run.run_id) || state.order.length >= MAX_ROWS) return;
+      if (visited.has(run.run_id) || !visible.has(run.run_id)) return;
+      if (state.order.length >= cap) { cut = true; return; }
       visited.add(run.run_id);
       state.order.push(run.run_id);
       const all = children.get(run.run_id) || [];
@@ -499,16 +501,21 @@
     };
     const roots = runs.filter((r) => !r.parent_run_id || !byId.has(r.parent_run_id)).sort(compare);
     const renderRoot = (r) => renderRun(r, r.parent_run_id ? "?─ " : "", r.parent_run_id ? "   " : "", Boolean(r.parent_run_id));
-    // Open idle sessions gather under one line at the bottom, folded unless one of them is opened.
-    const resting = roots.filter((r) => visible.has(r.run_id) && statusOf(r).key === "idle" && r.live === true);
-    const groupFolded = (state.folds.get(OPEN_IDLE) ?? true) && !resting.some((r) => r.run_id === state.selected || openPath.has(r.run_id));
-    roots.filter((r) => !resting.includes(r)).forEach(renderRoot);
-    if (resting.length) {
-      host.append(groupRow(resting.length, groupFolded));
-      if (!groupFolded) resting.forEach(renderRoot);
+    // Open idle sessions with nothing busy below them gather under one line at the bottom, folded unless one is opened.
+    // While a row is open, sessions listed above that line stay there, so the open row never jumps.
+    const openIdle = roots.filter((r) => visible.has(r.run_id) && statusOf(r).key === "idle" && r.live === true
+      && rank(r).rank >= 3 && !(state.selected && frozen(r) < state.split));
+    const groupFolded = (state.folds.get(OPEN_IDLE) ?? true) && !openIdle.some((r) => r.run_id === state.selected || openPath.has(r.run_id));
+    roots.filter((r) => !openIdle.includes(r)).forEach(renderRoot);
+    const split = state.order.length;
+    if (cut) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
+    if (openIdle.length) {
+      // The group has its own row budget, so a long history never hides it.
+      cap = split + MAX_ROWS;
+      host.append(groupRow(openIdle.length, groupFolded));
+      if (!groupFolded) openIdle.forEach(renderRoot);
     }
-    if (!state.selected) state.frozen = new Map(state.order.map((id, i) => [id, i]));
-    if (visited.size < visible.size && state.order.length >= MAX_ROWS) host.append(node("p", `Showing the first ${MAX_ROWS} agents. Narrow the view or search to see more.`, "empty"));
+    if (!state.selected) { state.frozen = new Map(state.order.map((id, i) => [id, i])); state.split = split; }
     if (focused) [...host.querySelectorAll("[data-focus-key]")].find((el) => el.dataset.focusKey === focused)?.focus({ preventScroll: true });
   }
   function groupRow(count, folded) {
