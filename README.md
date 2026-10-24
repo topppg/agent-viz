@@ -54,12 +54,17 @@ model. Add `--no-open` to either command to print the URL without launching a br
 AI summaries are optional and stay off unless you enable them.
 
 <details>
-<summary>Watch a 10-second tour: attention filters, subagents and task search</summary>
+<summary>Watch a 10-second tour: 48 agents across eight profiles</summary>
 
-![A synthetic Spiritboard demo filtering agents that need attention, opening a subagent's details, and searching tasks](https://raw.githubusercontent.com/topppg/spiritboard/820e9a80d6f03ad10729e23fc24a5cd91910c93e/docs/media/demo.gif)
+![48 synthetic agents across eight profiles, with nested subagents, approval details and profile filtering](https://raw.githubusercontent.com/topppg/spiritboard/c55f56471a321b8823b8d239ab5de7bd6c355255/docs/media/demo.gif)
 
-Invented SDK sessions only: no real profiles, tools, credentials or model calls.
-This is an interaction demo, not a performance measurement.
+[Watch or download the MP4 video](https://raw.githubusercontent.com/topppg/spiritboard/c55f56471a321b8823b8d239ab5de7bd6c355255/docs/media/demo.mp4)
+
+48 invented agents across eight simulated profiles: two Codex profiles, two Claude
+profiles, opencode, Pi, DeepSeek and an SDK pipeline, including nested subagents.
+Harness labels, accounts, tasks and activity are simulated through validated local
+events. No real harnesses, credentials or model calls are involved. This is an
+interaction demo, not a performance measurement.
 
 </details>
 
@@ -171,7 +176,7 @@ the dashboard and synthetic demo work without one.
 ### Measured local baseline
 
 Spiritboard 0.1.0, Apple M4 Pro, Python 3.13.11; seven fresh collector launches
-with synthetic demo data and native discovery disabled, measured October 21, 2026:
+with the built-in five-run demo and native discovery disabled, measured October 21, 2026:
 
 | Collector-only metric | Median across seven launches |
 | --- | ---: |
