@@ -652,6 +652,13 @@ const editor = () => flatten(ids.runs).find(x => x.className === 'name-edit');
  docListeners.keydown({key:'L', target:{tagName:'BODY'}, preventDefault(){}}); await tick();
  if (expanded() !== 'root') { rootRow().listeners.click(); await tick(); }
  assert.ok(nameButton(headingOf()));
+ // Every harness the chart draws gets a row, even when nothing of it runs now.
+ const deep = run('deep', null, 'Deep', {session_id:'dsh-home:observed', source:'dsh', account:'home', state:'idle', live:false});
+ const earlier = [...new Array(30).fill(0), 4, ...new Array(29).fill(0)];
+ stream.listeners.snapshot({data:JSON.stringify({...snapshot, runs:[...snapshot.runs, deep], activity:{...snapshot.activity, runs:{...snapshot.activity.runs, deep:earlier}}})}); await tick();
+ assert.ok(ids.harnesses.children.some(x => x.tagName === 'button' && x.textContent.includes('DeepSeek Harness')));
+ stream.listeners.snapshot({data:JSON.stringify(snapshot)}); await tick();
+ assert.ok(!ids.harnesses.children.some(x => x.tagName === 'button' && x.textContent.includes('DeepSeek Harness')));
  // Direct API usage has no dollar receipt; never call it free or ChatGPT plan usage.
  for (const provider of ['openai', 'anthropic']) {
    stream.listeners.snapshot({data:JSON.stringify({...snapshot,ai:{enabled:true,status:'ready',provider,api_calls:1,subscription_calls:0,known_cost_usd:0,actual_cost_usd:null,unknown_cost_calls:1}})});

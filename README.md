@@ -112,8 +112,8 @@ New harnesses plug in as one module each (see [the source guide](https://github.
 - **Every harness at once.** Each storage profile (personal and work accounts,
   the default CLI folders, the desktop apps) is a harness with its own colour,
   live events per minute, and a 10-minute activity chart stacked by harness. The
-  harness list shows only harnesses with something running; idle ones stay
-  available in the harness filter.
+  harness list shows the harnesses with something running or drawn in the chart;
+  idle ones stay available in the harness filter.
 - **Where to put your attention.** Every session has one status:
 
   | Status | Meaning |

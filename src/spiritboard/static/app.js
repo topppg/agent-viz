@@ -262,8 +262,9 @@
     const active = list.filter((h) => h.rate > 0).length;
     const focused = document.activeElement?.dataset?.focusKey;
     const host = $("harnesses");
-    // Only harnesses with something running (or the one filtered on); idle ones stay in the filter.
-    const running = (h) => h.rate > 0 || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs" || s.key === "idle");
+    // Harnesses with something running or drawn in the chart (or the one filtered on); idle ones stay in the filter.
+    const drawn = (h) => h.runs.some((run) => (chartData().runs?.[run.run_id] || []).some(Boolean));
+    const running = (h) => h.rate > 0 || drawn(h) || activeStatuses(h.runs).some((s) => BUSY.has(s.key) || s.key === "needs" || s.key === "idle");
     const shown = list.filter((h) => running(h) || $("harness-filter").value === h.key);
     host.replaceChildren(...shown.map((h) => {
       const button = node("button", null, `harness${$("harness-filter").value === h.key ? " is-selected" : ""}`);
